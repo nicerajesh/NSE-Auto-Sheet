@@ -2,82 +2,152 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import requests
-import zipfile
-import io
 from datetime import datetime, timedelta
 import os
 import json
+import time
 
+# =========================================================
 # 1. Credentials Setup
+# =========================================================
 creds_json = os.environ.get('GCP_CREDENTIALS')
+if not creds_json:
+    print("CRITICAL: GCP_CREDENTIALS secret missing!")
+    exit(1)
+
 creds_dict = json.loads(creds_json)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 
-# अपनी गूगल शीट की ID यहाँ डालें (URL के बीच का हिस्सा)
-spreadsheet_id = "1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM" 
-worksheet = client.open_by_key(spreadsheet_id).worksheet("Top 250 Stocks")
+# ⚠️ अपनी गूगल शीट की ID यहाँ डालें (URL के बीच का हिस्सा)
+spreadsheet_id = "1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM"
 
-# 2. NSE UDiFF Data Fetcher
-def fetch_bhavcopy_for_date(date_obj):
-    date_str = date_obj.strftime("%Y%m%d")
-    url = f"https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{date_str}_F_0000.csv.zip"
-    
+try:
+    ws_volume = client.open_by_key(spreadsheet_id).worksheet("Top 250 Stocks")
+    ws_turnover = client.open_by_key(spreadsheet_id).worksheet("Top 250 Turnover")
+except Exception as e:
+    print(f"Sheet Connection Error: {e}")
+    exit(1)
+
+# =========================================================
+# 2. NSE "Full Bhavcopy + Deliverable Data" fetcher
+#    इस एक फाइल में Volume, Turnover और Delivery% तीनों मिलते हैं
+# =========================================================
+def get_session():
+    """NSE कभी-कभी बिना cookie के block कर देता है, इसलिए पहले होमपेज खोलकर cookie ले लेते हैं"""
+    session = requests.Session()
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
     }
-    
+    session.headers.update(headers)
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-                csv_filename = z.namelist()[0]
-                with z.open(csv_filename) as f:
-                    df = pd.read_csv(f)
-                    
-                    sym_col = 'TckrSymb' if 'TckrSymb' in df.columns else 'SYMBOL'
-                    close_col = 'ClsPric' if 'ClsPric' in df.columns else 'CLOSE'
-                    series_col = 'SctySrs' if 'SctySrs' in df.columns else 'SERIES'
-                    
-                    vol_col = 'TtlTradgVol'
-                    for c in ['TtlTradgVol', 'TtlTrdQty', 'TotTrdQty', 'TOTTRDQTY']:
-                        if c in df.columns:
-                            vol_col = c
-                            break
-                    
-                    # सिर्फ EQ सीरीज और ETFs (LIQUID/BEES) को बाहर करना
-                    if series_col in df.columns:
-                        df = df[df[series_col].astype(str).str.strip() == 'EQ']
-                    filter_keywords = 'BEES|ETF|GOLD|LIQUID|CASE|SILVER|LIQ'
-                    df = df[~df[sym_col].astype(str).str.contains(filter_keywords, case=False, na=False)]
-                    
-                    df_top = df.sort_values(by=vol_col, ascending=False).head(250)
-                    return df_top[[sym_col, vol_col, close_col]].values.tolist()
-        return None
-    except:
+        session.get("https://www.nseindia.com", timeout=10)
+    except Exception:
+        pass
+    return session
+
+
+def fetch_full_bhavdata(session, date_obj):
+    date_str = date_obj.strftime("%d%m%Y")
+    url = f"https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{date_str}.csv"
+    print(f"--- तारीख {date_obj.strftime('%d-%m-%Y')} चेक कर रहे हैं: {url}")
+
+    try:
+        response = session.get(url, timeout=20)
+        if response.status_code != 200 or len(response.content) < 500:
+            print(f"   NSE ने {response.status_code} दिया / फाइल खाली है।")
+            return None
+
+        from io import StringIO
+        df = pd.read_csv(StringIO(response.text))
+
+        # NSE की फाइल में column names के आगे-पीछे स्पेस होते हैं, उन्हें साफ करना
+        df.columns = [c.strip() for c in df.columns]
+        for col in ['SYMBOL', 'SERIES']:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+
+        required = ['SYMBOL', 'SERIES', 'CLOSE_PRICE', 'TTL_TRD_QNTY', 'TURNOVER_LACS', 'DELIV_QTY', 'DELIV_PER']
+        if not all(c in df.columns for c in required):
+            print(f"   ज़रूरी कॉलम नहीं मिले। मिले कॉलम: {list(df.columns)}")
+            return None
+
+        # सिर्फ EQ सीरीज (असली इक्विटी शेयर, डेरिवेटिव/बॉन्ड नहीं)
+        df = df[df['SERIES'] == 'EQ']
+
+        # ETF / Gold / Silver / Liquid फंड्स हटाना — ये "स्टॉक" नहीं हैं
+        filter_keywords = 'BEES|ETF|GOLD|LIQUID|CASE|SILVER|LIQ'
+        df = df[~df['SYMBOL'].str.contains(filter_keywords, case=False, na=False)]
+
+        # numeric conversion (DELIV_PER अक्सर '-' होता है जब delivery data उपलब्ध नहीं)
+        for c in ['CLOSE_PRICE', 'TTL_TRD_QNTY', 'TURNOVER_LACS', 'DELIV_QTY', 'DELIV_PER']:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+        df['DELIV_PER'] = df['DELIV_PER'].fillna(0)
+        df = df.dropna(subset=['CLOSE_PRICE', 'TTL_TRD_QNTY', 'TURNOVER_LACS'])
+
+        # बहुत छोटे/illiquid शेयर हटाना (₹1 लाख से कम टर्नओवर वाले दिन में मायने नहीं रखते)
+        df = df[df['TURNOVER_LACS'] > 1]
+
+        cols_out = ['SYMBOL', 'TTL_TRD_QNTY', 'CLOSE_PRICE', 'TURNOVER_LACS', 'DELIV_QTY', 'DELIV_PER']
+
+        # लिस्ट A: Volume के आधार पर टॉप 250 (Delivery% साथ में)
+        df_vol = df.sort_values(by='TTL_TRD_QNTY', ascending=False).head(250)
+        data_vol = df_vol[cols_out].values.tolist()
+
+        # लिस्ट B: Turnover के आधार पर टॉप 250 (Delivery% साथ में)
+        df_turnover = df.sort_values(by='TURNOVER_LACS', ascending=False).head(250)
+        data_turnover = df_turnover[cols_out].values.tolist()
+
+        return data_vol, data_turnover
+
+    except Exception as e:
+        print(f"   Error: {e}")
         return None
 
-# 3. Execution Logic
+
+# =========================================================
+# 3. Execution Logic — पिछले 10 दिन तक चेक करना (छुट्टियों के लिए बफर)
+# =========================================================
+session = get_session()
 date = datetime.now()
-data_to_insert = None
+data_vol_to_insert = None
+data_turnover_to_insert = None
 fetched_date_str = ""
 
-for i in range(5): 
+for i in range(10):
     test_date = date - timedelta(days=i)
-    if test_date.weekday() >= 5: continue
-        
-    data_to_insert = fetch_bhavcopy_for_date(test_date)
-    if data_to_insert:
+    if test_date.weekday() >= 5:  # शनि/रवि छोड़ें
+        continue
+
+    result = fetch_full_bhavdata(session, test_date)
+    if result:
+        data_vol_to_insert, data_turnover_to_insert = result
         fetched_date_str = test_date.strftime('%d-%b-%Y')
         break
+    time.sleep(1)  # NSE सर्वर पर एक साथ बहुत सारे रिक्वेस्ट न जाएं
 
-# 4. Update Sheet
-if data_to_insert:
-    worksheet.batch_clear(['A2:C251'])
-    worksheet.update('A2', data_to_insert)
-    ist_now = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%d-%b %H:%M')
-    status_msg = f"Data Date: {fetched_date_str} | Last Update: {ist_now} (IST)"
-    worksheet.update('K2, [[status_msg]])
-    print("SUCCESS: Sheet Updated!")
+# =========================================================
+# 4. Google Sheet अपडेट — अब कॉलम D में Turnover, E में Delivery Qty, F में Delivery%
+# =========================================================
+if data_vol_to_insert and data_turnover_to_insert:
+    try:
+        ws_volume.batch_clear(['A2:F251'])
+        ws_volume.update('A2', data_vol_to_insert)
+
+        ws_turnover.batch_clear(['A2:F251'])
+        ws_turnover.update('A2', data_turnover_to_insert)
+
+        ist_now = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%d-%b %H:%M')
+        status_msg = f"Data Date: {fetched_date_str} | Last Update: {ist_now} (IST)"
+        ws_volume.update('N2', [[status_msg]])
+        ws_turnover.update('N2', [[status_msg]])
+
+        print(f"SUCCESS: दोनों शीट्स {fetched_date_str} के डेटा से अपडेट हो गई हैं (Volume + Turnover + Delivery% सहित)!")
+    except Exception as e:
+        print(f"Google Sheet अपडेट करने में एरर: {e}")
+        exit(1)
+else:
+    print("FAILED: पिछले 10 दिनों में से किसी भी दिन की फाइल नहीं मिली।")
+    exit(1)
