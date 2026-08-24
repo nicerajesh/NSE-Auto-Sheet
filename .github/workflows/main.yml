@@ -2,14 +2,13 @@ name: Update NSE Stocks to Google Sheet
 
 on:
   schedule:
-    # 14:45 UTC = 8:15 PM IST
     - cron: '45 14 * * 1-5'
   workflow_dispatch:
 
 jobs:
   update-sheet:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 35
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -17,14 +16,31 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+          cache: pip
 
       - name: Install Libraries
         run: |
           python -m pip install --upgrade pip
-          pip install gspread oauth2client pandas requests numpy
+          pip install -r requirements.txt
 
-      - name: Run Python Script
+      - name: Unit Tests
+        run: python test_system.py
+
+      - name: Run V5 Early Hunter + D1
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: e6652e85-b927-4f11-b790-45fb6ee818f2
+          HISTORY_DAYS: 180
+          MIN_SCORE: 68
         run: python update_sheet.py
+
+      - name: Upload research artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nse-early-hunter-v5
+          path: output/*.csv
+          if-no-files-found: error
+          retention-days: 30
