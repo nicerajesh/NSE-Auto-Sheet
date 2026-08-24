@@ -10,10 +10,10 @@ class IndicatorConfig:
 
 @dataclass(frozen=True)
 class StrategyConfig:
-    min_history:int=120
+    min_history:int=200
     min_score:int=72
-    buy_score:int=80
-    strong_score:int=88
+    buy_score:int=82
+    strong_score:int=90
     max_entry_extension_pct:float=3.0
     max_stop_pct:float=6.5
     min_stop_pct:float=2.0
@@ -26,23 +26,32 @@ class StrategyConfig:
     require_higher_low_for_buy:bool=True
     require_rs_improving:bool=True
     require_not_extended:bool=True
-    min_quality_score:int=80
+    min_quality_score:int=82
     max_buy_score:int=100
     min_resistance_distance_pct:float=3.0
     max_52w_high_distance_pct:float=-12.0
     min_base_days:int=5
+    max_fall_20d_pct:float=-28.0
+    max_fall_50d_pct:float=-38.0
+    min_recovery_5d_pct:float=-2.0
+    min_rs_spread_pct:float=-1.0
+    min_regime_score:int=0
 
 @dataclass(frozen=True)
 class BacktestConfig:
     horizon:int=30
-    warmup:int=120
-    min_score:int=75
-    buy_score:int=80
+    warmup:int=252
+    min_score:int=82
+    buy_score:int=82
     min_gap_between_signals:int=10
     commission_bps:float=10.0
     slippage_bps:float=5.0
     walk_forward_train_days:int=180
-    walk_forward_test_days:int=30
+    walk_forward_test_days:int=60
+    min_oos_trades:int=100
+    min_quality_trades:int=100
+    min_quality_profit_factor:float=1.25
+    min_quality_win_rate:float=45.0
 
 IND=IndicatorConfig()
 STRAT=StrategyConfig()
