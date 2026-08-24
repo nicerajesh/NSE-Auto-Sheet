@@ -28,20 +28,34 @@ except gspread.WorksheetNotFound: wh=book.add_worksheet(title=HUNTER_SHEET,rows=
 def sess():
     s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0 Chrome/151 Safari/537.36','Accept-Language':'en-US,en;q=0.9','Referer':'https://www.nseindia.com/'})
     try:s.get('https://www.nseindia.com',timeout=15)
-    except:pass
+    except Exception:pass
     return s
+
+def normalize_headers(df):
+    rename={}
+    for c in df.columns:
+        clean=str(c).replace('\ufeff','').strip().upper().replace(' ','_')
+        rename[c]=clean
+    return df.rename(columns=rename)
 
 def fetch(s,d):
     url=f"https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{d:%d%m%Y}.csv"
     try:
         r=s.get(url,timeout=25)
         if r.status_code!=200 or len(r.content)<500:return None
-        df=pd.read_csv(StringIO(r.text)); df.columns=[str(c).strip() for c in df.columns]
+        df=pd.read_csv(StringIO(r.text),encoding='utf-8-sig'); df=normalize_headers(df)
+        aliases={'OPEN':'OPEN_PRICE','HIGH':'HIGH_PRICE','LOW':'LOW_PRICE','CLOSE':'CLOSE_PRICE','VOLUME':'TTL_TRD_QNTY','DELIVERY_PCT':'DELIV_PER','DELIVERY_PERCENT':'DELIV_PER','DELIVERY_QUANTITY':'DELIV_QTY'}
+        for old,new in aliases.items():
+            if old in df.columns and new not in df.columns: df=df.rename(columns={old:new})
         need=['SYMBOL','SERIES','OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS','DELIV_QTY','DELIV_PER']
-        if not all(c in df.columns for c in need):return None
-        df=df[df.SERIES.astype(str).str.strip().eq('EQ')].copy(); df=df[~df.SYMBOL.astype(str).str.contains('BEES|ETF|GOLD|LIQUID|SILVER|CASE',case=False,regex=True,na=False)]
+        missing=[c for c in need if c not in df.columns]
+        if missing:
+            print(f"Skip {d:%Y-%m-%d}: missing={missing}; columns={list(df.columns)[:30]}"); return None
+        df=df[df.SERIES.astype(str).str.strip().eq('EQ')].copy()
+        df=df[~df.SYMBOL.astype(str).str.contains('BEES|ETF|GOLD|LIQUID|SILVER|CASE',case=False,regex=True,na=False)]
         for c in need[2:]:df[c]=pd.to_numeric(df[c],errors='coerce')
-        df=df.dropna(subset=['OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS']); df=df[df.TURNOVER_LACS>=MIN_TURNOVER_LACS].copy(); df['DATE']=pd.Timestamp(d)
+        df=df.dropna(subset=['SYMBOL','OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS'])
+        df['SYMBOL']=df['SYMBOL'].astype(str).str.strip().str.upper(); df=df[df.TURNOVER_LACS>=MIN_TURNOVER_LACS].copy(); df['DATE']=pd.Timestamp(d)
         return df
     except Exception as e: print('Fetch',d,e); return None
 
@@ -53,7 +67,9 @@ while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+80:
         time.sleep(.20)
     d-=timedelta(days=1); attempts+=1
 if not frames:raise RuntimeError('No NSE bhavcopy data found')
-hist=pd.concat(frames,ignore_index=True).sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True)
+hist=pd.concat(frames,ignore_index=True); hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns]
+if 'SYMBOL' not in hist.columns: raise RuntimeError(f'NSE history has no SYMBOL column; columns={list(hist.columns)}')
+hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True)
 hist=add_indicators_all(hist)
 latest_date=hist.DATE.max(); latest=hist[hist.DATE.eq(latest_date)].copy()
 med=hist.groupby('DATE')['RET_20D'].transform('median'); hist['RS_VS_UNIVERSE']=hist['RET_20D']-med; hist['RS_RANK']=hist.groupby('DATE')['RET_20D'].rank(pct=True)*100
@@ -82,7 +98,6 @@ buy=hunter[hunter.ACTION.isin(['BUY','BUY ON TRIGGER'])].copy() if not hunter.em
 
 latest.to_csv(OUT/'latest_market.csv',index=False); hist[hist.DATE.eq(latest_date)].to_csv(OUT/'indicators.csv',index=False); hunter.to_csv(OUT/'early_hunter.csv',index=False); buy.to_csv(OUT/'buy_candidates.csv',index=False)
 
-# D1 is the persistent free database. It auto-creates/verifies its tables.
 sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'))
 
 def ensure(ws,n):
