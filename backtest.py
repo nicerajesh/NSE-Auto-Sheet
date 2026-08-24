@@ -15,30 +15,40 @@ def outcome(g, entry_i, entry, stop, t1, t2, t3, horizon=30):
     exit_reason = 'TIME'
     max_high = entry
     min_low = entry
+    active_stop = float(stop)
+
     for j, row in f.iterrows():
         lo = float(row.LOW_PRICE)
         hi = float(row.HIGH_PRICE)
         max_high = max(max_high, hi)
         min_low = min(min_low, lo)
-        # Conservative daily-bar ordering: if both stop and target are touched,
-        # stop wins because intraday ordering is unknown.
-        if lo <= stop:
+
+        # Conservative daily-bar assumption: stop wins when stop and target
+        # are both touched on the same bar because intraday order is unknown.
+        if lo <= active_stop:
             stop_hit = True
-            exit_price = stop
+            exit_price = active_stop
             exit_idx = j
-            exit_reason = 'STOP'
+            exit_reason = 'STOP' if not hit1 else ('BREAKEVEN' if not hit2 else 'LOCKED_T1')
             break
+
         if not hit1 and hi >= t1:
             hit1 = True
+            # Protect capital after first target.
+            active_stop = max(active_stop, entry)
+
         if not hit2 and hi >= t2:
             hit2 = True
+            # Lock T1 after second target.
+            active_stop = max(active_stop, t1)
+
         if not hit3 and hi >= t3:
             hit3 = True
-        if hit3:
             exit_price = t3
             exit_idx = j
             exit_reason = 'T3'
             break
+
     if exit_idx is None:
         exit_idx = f.index[-1]
         exit_price = float(f.iloc[-1].CLOSE_PRICE)
@@ -76,13 +86,7 @@ def _horizon_rows(trades, hist, horizons=(5, 10, 15, 20, 30)):
             entry = float(r['ENTRY'])
             vals.append((px - entry) / entry * 100)
         s = pd.Series(vals, dtype='float64')
-        rows.append({
-            'HORIZON_DAYS': h,
-            'TRADES': int(s.size),
-            'WIN_RATE': round(float((s > 0).mean() * 100), 2) if len(s) else 0,
-            'AVG_RETURN': round(float(s.mean()), 2) if len(s) else 0,
-            'MEDIAN_RETURN': round(float(s.median()), 2) if len(s) else 0,
-        })
+        rows.append({'HORIZON_DAYS': h,'TRADES': int(s.size),'WIN_RATE': round(float((s > 0).mean() * 100), 2) if len(s) else 0,'AVG_RETURN': round(float(s.mean()), 2) if len(s) else 0,'MEDIAN_RETURN': round(float(s.median()), 2) if len(s) else 0})
     return pd.DataFrame(rows)
 
 
@@ -101,9 +105,6 @@ def run_backtest(hist, min_score=None, horizon=None):
             sig = analyze_stock(g.iloc[:i + 1], threshold)
             if not sig or sig['ACTION'] not in ('BUY', 'BUY ON TRIGGER'):
                 continue
-
-            # BUY uses the signal-day close. BUY ON TRIGGER must actually wait
-            # for the stated trigger; the old version incorrectly entered at CMP.
             if sig['ACTION'] == 'BUY ON TRIGGER':
                 trigger = float(sig['ENTRY_TRIGGER'])
                 trigger_i = None
@@ -118,75 +119,20 @@ def run_backtest(hist, min_score=None, horizon=None):
             else:
                 entry_i = i
                 entry = float(sig['CMP'])
-
-            stop = float(sig['STOP_LOSS'])
-            t1 = float(sig['TARGET_1'])
-            t2 = float(sig['TARGET_2'])
-            t3 = float(sig['TARGET_3'])
-            # A triggered trade needs enough bars remaining after the trigger.
+            stop = float(sig['STOP_LOSS']); t1 = float(sig['TARGET_1']); t2 = float(sig['TARGET_2']); t3 = float(sig['TARGET_3'])
             if entry_i + 1 >= len(g):
                 continue
-            o = outcome(g, entry_i, entry, stop, t1, t2, t3,
-                        min(horizon, len(g) - entry_i - 1))
+            o = outcome(g, entry_i, entry, stop, t1, t2, t3, min(horizon, len(g) - entry_i - 1))
             if o:
-                rows.append({
-                    'SYMBOL': sym,
-                    'SIGNAL_DATE': g.iloc[i].DATE,
-                    'SCORE': sig['HUNTER_SCORE'],
-                    'STAGE': sig['STAGE'],
-                    'ACTION': sig['ACTION'],
-                    'STRUCTURE': sig['STRUCTURE'],
-                    'ENTRY': entry,
-                    'ENTRY_INDEX': entry_i,
-                    'STOP': stop, 'T1': t1, 'T2': t2, 'T3': t3,
-                    **o,
-                })
+                rows.append({'SYMBOL': sym,'SIGNAL_DATE': g.iloc[i].DATE,'SCORE': sig['HUNTER_SCORE'],'STAGE': sig['STAGE'],'ACTION': sig['ACTION'],'STRUCTURE': sig['STRUCTURE'],'ENTRY': entry,'ENTRY_INDEX': entry_i,'STOP': stop,'T1': t1,'T2': t2,'T3': t3,**o})
                 last = entry_i
 
     trades = pd.DataFrame(rows)
     if trades.empty:
         return trades, {'trades': 0}, pd.DataFrame()
-
-    pos = trades[trades.RETURN_PCT > 0]
-    neg = trades[trades.RETURN_PCT < 0]
-    stats = {
-        'trades': len(trades),
-        'win_rate_pct': round((trades.RETURN_PCT > 0).mean() * 100, 2),
-        'median_return_pct': round(trades.RETURN_PCT.median(), 2),
-        'avg_return_pct': round(trades.RETURN_PCT.mean(), 2),
-        'stop_rate_pct': round(trades.STOP_HIT.mean() * 100, 2),
-        't1_hit_pct': round(trades.HIT_T1.mean() * 100, 2),
-        't2_hit_pct': round(trades.HIT_T2.mean() * 100, 2),
-        't3_hit_pct': round(trades.HIT_T3.mean() * 100, 2),
-        'profit_factor': round(pos.RETURN_PCT.sum() / max(1e-9, -neg.RETURN_PCT.sum()), 2),
-        'avg_hold_days': round(trades.HOLD_DAYS.mean(), 1),
-        'expectancy_pct': round(trades.RETURN_PCT.mean(), 2),
-        'avg_mfe_pct': round(trades.MFE_PCT.mean(), 2),
-        'avg_mae_pct': round(trades.MAE_PCT.mean(), 2),
-        'median_mfe_pct': round(trades.MFE_PCT.median(), 2),
-        'median_mae_pct': round(trades.MAE_PCT.median(), 2),
-        'avg_mfe_r': round(trades.MFE_R.mean(), 2),
-        'avg_mae_r': round(trades.MAE_R.mean(), 2),
-    }
-
-    buckets = pd.cut(
-        trades.SCORE, [0, 67, 74, 81, 89, 100],
-        labels=['<68', '68-74', '75-81', '82-89', '90+']
-    )
-    cal = trades.assign(SCORE_BUCKET=buckets).groupby(
-        'SCORE_BUCKET', observed=False
-    ).agg(
-        TRADES=('RETURN_PCT', 'size'),
-        WIN_RATE=('RETURN_PCT', lambda s: round((s > 0).mean() * 100, 2)),
-        AVG_RETURN=('RETURN_PCT', 'mean'),
-        MEDIAN_RETURN=('RETURN_PCT', 'median'),
-        AVG_MFE=('MFE_PCT', 'mean'),
-        AVG_MAE=('MAE_PCT', 'mean'),
-    ).reset_index()
-
+    pos = trades[trades.RETURN_PCT > 0]; neg = trades[trades.RETURN_PCT < 0]
+    stats = {'trades': len(trades),'win_rate_pct': round((trades.RETURN_PCT > 0).mean() * 100, 2),'median_return_pct': round(trades.RETURN_PCT.median(), 2),'avg_return_pct': round(trades.RETURN_PCT.mean(), 2),'stop_rate_pct': round(trades.STOP_HIT.mean() * 100, 2),'t1_hit_pct': round(trades.HIT_T1.mean() * 100, 2),'t2_hit_pct': round(trades.HIT_T2.mean() * 100, 2),'t3_hit_pct': round(trades.HIT_T3.mean() * 100, 2),'profit_factor': round(pos.RETURN_PCT.sum() / max(1e-9, -neg.RETURN_PCT.sum()), 2),'avg_hold_days': round(trades.HOLD_DAYS.mean(), 1),'expectancy_pct': round(trades.RETURN_PCT.mean(), 2),'avg_mfe_pct': round(trades.MFE_PCT.mean(), 2),'avg_mae_pct': round(trades.MAE_PCT.mean(), 2),'median_mfe_pct': round(trades.MFE_PCT.median(), 2),'median_mae_pct': round(trades.MAE_PCT.median(), 2),'avg_mfe_r': round(trades.MFE_R.mean(), 2),'avg_mae_r': round(trades.MAE_R.mean(), 2)}
+    buckets = pd.cut(trades.SCORE, [0,67,74,81,89,100], labels=['<68','68-74','75-81','82-89','90+'])
+    cal = trades.assign(SCORE_BUCKET=buckets).groupby('SCORE_BUCKET', observed=False).agg(TRADES=('RETURN_PCT','size'),WIN_RATE=('RETURN_PCT',lambda s: round((s > 0).mean() * 100, 2)),AVG_RETURN=('RETURN_PCT','mean'),MEDIAN_RETURN=('RETURN_PCT','median'),AVG_MFE=('MFE_PCT','mean'),AVG_MAE=('MAE_PCT','mean')).reset_index()
     horizon_df = _horizon_rows(trades, hist)
-    return trades, stats, pd.concat(
-        [cal.assign(ANALYSIS='SCORE_BUCKET'),
-         horizon_df.assign(ANALYSIS='HORIZON')],
-        ignore_index=True,
-    )
+    return trades, stats, pd.concat([cal.assign(ANALYSIS='SCORE_BUCKET'),horizon_df.assign(ANALYSIS='HORIZON')], ignore_index=True)
