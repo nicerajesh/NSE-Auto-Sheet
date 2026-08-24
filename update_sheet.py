@@ -11,10 +11,11 @@ from backtest import run_backtest
 from trade_manager import update_ledger
 from quality_gate import evaluate
 from d1_database import sync_latest
+from config import STRAT, BT
 
 SPREADSHEET_ID=os.getenv('SPREADSHEET_ID','1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM')
 STOCKS_SHEET='Top 500 Stocks'; HUNTER_SHEET='Early Hunter'
-HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','180')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('MIN_SCORE','82'))
+HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','180')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('WATCH_MIN_SCORE','72'))
 OUT=Path('output'); OUT.mkdir(exist_ok=True)
 creds_json=os.getenv('GCP_CREDENTIALS')
 if not creds_json: raise RuntimeError('GCP_CREDENTIALS secret missing')
@@ -83,16 +84,12 @@ if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')
 hist=pd.concat(frames,ignore_index=True);hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns]
 if 'SYMBOL' not in hist.columns:raise RuntimeError(f'NSE history has no SYMBOL column; columns={list(hist.columns)}')
 hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True)
-original_symbols=hist.SYMBOL.astype(str).str.strip().str.upper().reset_index(drop=True);hist=add_indicators_all(hist)
-if 'SYMBOL' not in hist.columns:
-    if len(hist)!=len(original_symbols):raise RuntimeError(f'Indicator output lost SYMBOL and row count changed: input={len(original_symbols)} output={len(hist)}')
-    hist['SYMBOL']=original_symbols.to_numpy()
-hist.SYMBOL=hist.SYMBOL.astype(str).str.strip().str.upper();latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()
+hist=add_indicators_all(hist);hist.SYMBOL=hist.SYMBOL.astype(str).str.strip().str.upper();latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()
 med=hist.groupby('DATE')['RET_20D'].transform('median');hist['RS_VS_UNIVERSE']=hist.RET_20D-med;hist['RS_RANK']=hist.groupby('DATE').RET_20D.rank(pct=True)*100
 hunter=scan_all(hist,MIN_SCORE);hunter=pd.DataFrame() if hunter is None else hunter
 if not hunter.empty:
     rs=hist[hist.DATE.eq(latest_date)][['SYMBOL','RS_VS_UNIVERSE','RS_RANK']];hunter=hunter.merge(rs,on='SYMBOL',how='left')
-trades,stats,cal=run_backtest(hist,MIN_SCORE,30);stats=stats or {};cal=cal if cal is not None else pd.DataFrame()
+trades,stats,cal=run_backtest(hist,MIN_SCORE,BT.horizon);stats=stats or {};cal=cal if cal is not None else pd.DataFrame()
 trades.to_csv(OUT/'backtest_trades.csv',index=False);pd.DataFrame([stats]).to_csv(OUT/'backtest_summary.csv',index=False);cal.to_csv(OUT/'score_calibration.csv',index=False)
 ledger=update_ledger(pd.DataFrame(),{str(r['SYMBOL']):r.to_dict() for _,r in hunter.iterrows()} if not hunter.empty else {});ledger.to_csv(OUT/'trade_ledger.csv',index=False)
 if not hunter.empty and not ledger.empty:
@@ -108,8 +105,8 @@ def ensure(ws,n):
 ensure(ws_stocks,30);ensure(ws_hunter,max(100,len(hunter.columns) if not hunter.empty else 20))
 view=latest.copy()
 def bull(r):
-    e50,e200=r.get('EMA50'),r.get('EMA200')
     try:
+        e50,e200=r.get('EMA50'),r.get('EMA200')
         if pd.notna(e50) and pd.notna(e200):return 'In Bull Run' if float(r.CLOSE_PRICE)>float(e50)>float(e200) else ('In Bear Run' if float(r.CLOSE_PRICE)<float(e50)<float(e200) else 'Unconfirmed')
     except:pass
     return 'Unconfirmed'
@@ -126,19 +123,20 @@ rows=[headers]+[[r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'
 ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED')
 if not hunter.empty:hrows=[hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist()
 else:hrows=[['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]
-hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',latest_date.strftime('%d-%b-%Y')],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
+hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',latest_date.strftime('%d-%b-%Y')],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',STRAT.buy_score],['WATCH SCORE GATE',MIN_SCORE],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
 if not cal.empty:hrows += [[''],['SCORE/HORIZON CALIBRATION']]+[cal.columns.tolist()]+cal.astype(object).where(pd.notna(cal),'').values.tolist()
 ws_hunter.update('A1',hrows,value_input_option='USER_ENTERED')
-# Prevent Google Sheets from rendering candidate counts / scores as dates.
+# Explicitly format all summary numeric values as numbers, never dates.
 try:
-    ws_hunter.format('A1:A20',{'numberFormat':{'type':'TEXT','pattern':'@'}})
+    ws_hunter.format('A1:A25',{'numberFormat':{'type':'TEXT','pattern':'@'}})
+    ws_hunter.format('B1:B25',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
     ws_stocks.format('K2:K501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
     ws_stocks.format('B2:B501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
 except Exception as e:print('Sheet format warning:',e)
 for ws in (ws_stocks,ws_hunter):
     try:ws.freeze(rows=1)
     except Exception:pass
-status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | BUY {len(buy)} | BT {stats.get("trades",0)} | Win {stats.get("win_rate_pct",0)}% | PF {stats.get("profit_factor",0)} | Gate {gate_reason}'
+status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | BUY {len(buy)} | WATCH gate {MIN_SCORE} | BUY gate {STRAT.buy_score} | BT {stats.get("trades",0)} | Win {stats.get("win_rate_pct",0)}% | PF {stats.get("profit_factor",0)} | Gate {gate_reason}'
 ws_stocks.update('T1',[['STATUS']]);ws_stocks.update('T2',[[status]])
 print(status)
 if not buy.empty:print(buy[['SYMBOL','ACTION','STAGE','HUNTER_SCORE','CMP','BUY_ZONE_LOW','BUY_ZONE_HIGH','ENTRY_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3']].head(30).to_string(index=False))
