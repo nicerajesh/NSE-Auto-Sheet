@@ -39,6 +39,7 @@ def analyze_stock(g,min_score=None):
     rsi=x.get('RSI14',np.nan);adx=x.get('ADX14',np.nan);vol=x.get('VOL_RATIO',np.nan);deliv=x.get('DELIV_PER',np.nan);d10=x.get('DELIV_AVG10',np.nan);atrp=x.get('ATR_PCT',np.nan);atravg=x.get('ATR_PCT_AVG30',np.nan);mh3=x.get('MACD_HIST_SLOPE',np.nan);ema20=x.get('EMA20',np.nan);ema50=x.get('EMA50',np.nan);ema100=x.get('EMA100',np.nan);ema200=x.get('EMA200',np.nan);slope20=x.get('EMA20_SLOPE_5',np.nan);slope50=x.get('EMA50_SLOPE_5',np.nan);ret5=x.get('RET_5D',np.nan);ret20=x.get('RET_20D',np.nan);close_loc=x.get('CLOSE_LOCATION',np.nan);lower_wick=x.get('LOWER_WICK',np.nan)
     no_lower_low=cur>=float(c[-6:-1].min())*.997; low_dist=(cur/low-1)*100; bottom_hold=low_dist<=14 and no_lower_low
     exhaustion=finite(vol) and vol<=1.35 and (not finite(atravg) or atrp<=atravg*1.12); delivery_build=finite(deliv) and finite(d10) and deliv>=max(STRAT.delivery_floor,d10); rsi_recovery=finite(rsi) and 42<=rsi<=65; momentum_turn=finite(mh3) and mh3>0; ema_turn=finite(slope20) and slope20>-0.15 and (not finite(slope50) or slope50>-0.20); alignment=finite(ema20) and finite(ema50) and ema20>=ema50*.985; not_extended=(not finite(ret5) or ret5<=STRAT.max_entry_extension_pct) and (not finite(ret20) or ret20<=20); candle_demand=(finite(close_loc) and close_loc>=.60) or (finite(lower_wick) and lower_wick>=.35); volume_ok=finite(vol) and .65<=vol<=2.8
+    rs_improving=(not STRAT.require_rs_improving) or (finite(ret5) and finite(ret20) and ret5>=ret20-2.0)
     score=0;reasons=[]
     def add(ok,pts,msg):
         nonlocal score
@@ -47,6 +48,7 @@ def analyze_stock(g,min_score=None):
     if not no_lower_low:score-=18;reasons.append('Lower-low risk')
     add(exhaustion,8,'Selling exhaustion');add(hh_idx is not None,14,'First HH');add(hl_idx is not None,24,'Higher Low');add(second_hh,12,'Second HH');add(delivery_build,7,'Delivery stable/improving');add(momentum_turn,5,'Momentum turning');add(rsi_recovery,4,'RSI recovery');add(ema_turn,5,'EMA slope improving');add(alignment,3,'EMA20/50 stabilised');add(candle_demand,3,'Demand candle');add(volume_ok,2,'Healthy liquidity');add(not_extended,4,'Not extended');add(finite(atrp) and finite(atravg) and atrp<atravg*.95,3,'ATR compression')
     if finite(adx) and adx>=18:add(True,2,'Trend strength building')
+    if not rs_improving:score-=5;reasons.append('Relative strength not improving')
     if res_dist<STRAT.min_resistance_distance_pct:score-=8;reasons.append('Resistance too close')
     if not not_extended:score-=15;reasons.append('Extended')
     if finite(atrp) and atrp>STRAT.max_atr_pct:score-=8;reasons.append('ATR too high')
@@ -54,12 +56,8 @@ def analyze_stock(g,min_score=None):
     stage='EARLY TREND' if second_hh else 'HIGHER-LOW HUNTER' if hl_idx is not None else 'FIRST REVERSAL' if hh_idx is not None else 'BOTTOM FORMING' if bottom_hold else 'WATCH'
     atr=float(x.get('ATR14',cur*.03)) if finite(x.get('ATR14',np.nan)) else cur*.03
     anchor=hl if finite(hl) else low
-    # Avoid unrealistically tiny risk. Tiny stops made transaction costs dominate and
-    # were one reason target hits did not translate into positive net returns.
     raw_stop=anchor-1.15*atr
-    stop=min(raw_stop,cur*(1-STRAT.min_stop_pct/100))
-    stop=max(stop,cur*(1-STRAT.max_stop_pct/100))
-    risk=cur-stop
+    stop=min(raw_stop,cur*(1-STRAT.min_stop_pct/100));stop=max(stop,cur*(1-STRAT.max_stop_pct/100));risk=cur-stop
     if risk<=0:stop=cur*(1-STRAT.min_stop_pct/100);risk=cur-stop
     setup_high=hh2 if finite(hh2) and hh2>cur else hh if finite(hh) and hh>cur else resistance
     trigger=max(cur*1.003,setup_high*1.003)
@@ -74,15 +72,13 @@ def analyze_stock(g,min_score=None):
     high52=x.get('HIGH_52W',np.nan)
     if finite(high52) and high52>cur and high52<t3:t3=high52*.995
     rr1=(t1-cur)/risk;rr2=(t2-cur)/risk;rr3=(t3-cur)/risk;threshold=STRAT.min_score if min_score is None else min_score
-    # v7 live gate: only the historically strongest score band is eligible for BUY.
-    # 90+ is deliberately not promoted because the latest calibration did not show
-    # superior returns for that bucket.
-    eligible_score=threshold<=score<=STRAT.max_buy_score
+    eligible_score=score>=threshold
     confirmed_hl=hl_idx is not None
     risk_ok=finite(risk) and risk/cur*100>=STRAT.min_stop_pct
-    if second_hh and score>=STRAT.strong_score and eligible_score and not_extended and risk_ok:action='BUY'
-    elif confirmed_hl and eligible_score and cur<=zone_high and res_dist>=STRAT.min_resistance_distance_pct and rr1>=STRAT.min_rr1 and risk_ok:action='BUY'
-    elif hh_idx is not None and eligible_score and res_dist>=STRAT.min_resistance_distance_pct and risk_ok:action='BUY ON TRIGGER'
+    buy_ok=eligible_score and rs_improving and res_dist>=STRAT.min_resistance_distance_pct and risk_ok
+    if second_hh and buy_ok and score>=STRAT.strong_score and not_extended:action='BUY'
+    elif confirmed_hl and buy_ok and cur<=zone_high and rr1>=STRAT.min_rr1:action='BUY'
+    elif hh_idx is not None and buy_ok:action='BUY ON TRIGGER'
     else:action='WATCH'
     structure='LOW → HH → HL → HH' if second_hh else 'LOW → HH → HL' if hl_idx is not None else 'LOW → HH' if hh_idx is not None else 'LOW HOLD' if bottom_hold else 'UNCONFIRMED'
     def rv(v,d=2):return round(v,d) if finite(v) else ''
