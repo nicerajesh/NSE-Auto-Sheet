@@ -21,6 +21,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Verify Code Version
+        run: |
+          echo "=== NSE EARLY HUNTER BUILD ==="
+          git rev-parse HEAD
+          echo "D1 module:" 
+          grep -n "def batch\|/raw\|range(0,len(items)" d1_database.py
+          echo "==============================="
       - name: Unit Tests
         run: python test_system.py
       - name: Run Early Hunter V5 + D1
