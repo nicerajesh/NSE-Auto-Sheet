@@ -70,7 +70,15 @@ if not frames:raise RuntimeError('No NSE bhavcopy data found')
 hist=pd.concat(frames,ignore_index=True); hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns]
 if 'SYMBOL' not in hist.columns: raise RuntimeError(f'NSE history has no SYMBOL column; columns={list(hist.columns)}')
 hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True)
+# Keep the original keys so downstream processing can never lose stock identity.
+original_symbols=hist['SYMBOL'].astype(str).str.strip().str.upper().reset_index(drop=True)
 hist=add_indicators_all(hist)
+if 'SYMBOL' not in hist.columns:
+    if len(hist) != len(original_symbols):
+        raise RuntimeError(f'Indicator output lost SYMBOL and row count changed: input={len(original_symbols)} output={len(hist)}')
+    hist['SYMBOL']=original_symbols.to_numpy()
+hist['SYMBOL']=hist['SYMBOL'].astype(str).str.strip().str.upper()
+if 'SYMBOL' not in hist.columns: raise RuntimeError(f'Historical indicator data has no SYMBOL; columns={list(hist.columns)}')
 latest_date=hist.DATE.max(); latest=hist[hist.DATE.eq(latest_date)].copy()
 med=hist.groupby('DATE')['RET_20D'].transform('median'); hist['RS_VS_UNIVERSE']=hist['RET_20D']-med; hist['RS_RANK']=hist.groupby('DATE')['RET_20D'].rank(pct=True)*100
 
