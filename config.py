@@ -29,7 +29,7 @@ class StrategyConfig:
     min_quality_score:int=78
     max_buy_score:int=100
     min_resistance_distance_pct:float=2.5
-    max_52w_high_distance_pct:-float=12.0
+    max_52w_high_distance_pct:float=-12.0
     min_base_days:int=4
     max_fall_20d_pct:float=-22.0
     max_fall_50d_pct:float=-35.0
