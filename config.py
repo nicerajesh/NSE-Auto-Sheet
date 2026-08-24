@@ -10,8 +10,8 @@ class IndicatorConfig:
 
 @dataclass(frozen=True)
 class StrategyConfig:
-    # v7: quality-first swing setup. The backtest showed 82-89 was the
-    # strongest score band; 68-81 was negative and 90+ was not better.
+    # Quality-first Early Hunter. Score is a minimum gate, not an upper band:
+    # capping 90+ based on one historical sample was overfitting.
     min_history:int=120
     min_score:int=82
     strong_score:int=88
@@ -28,7 +28,7 @@ class StrategyConfig:
     require_rs_improving:bool=True
     require_not_extended:bool=True
     min_quality_score:int=82
-    max_buy_score:int=89
+    max_buy_score:int=100
     min_resistance_distance_pct:float=3.0
 
 @dataclass(frozen=True)
