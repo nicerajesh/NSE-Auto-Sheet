@@ -13,8 +13,7 @@ def analyze_stock(g,min_score=None):
     c=pd.to_numeric(w.CLOSE_PRICE,errors='coerce').to_numpy(dtype=float); n=len(c); cur=float(c[-1]); x=w.iloc[-1]
     if not finite(cur) or cur<=0:return None
 
-    # Causal swing/base detection: find a meaningful low, then a prior-range reclaim,
-    # followed by a higher-low. No future bars are used.
+    # Causal reversal structure: FALL -> LOW HOLD -> HH -> HL -> HH.
     lookback=min(70,n-1); start=max(0,n-lookback); seg=c[start:]
     low_idx=start+int(np.nanargmin(seg)); low=float(c[low_idx])
     prior_start=max(0,low_idx-25); prior=c[prior_start:low_idx]
@@ -24,25 +23,24 @@ def analyze_stock(g,min_score=None):
         for i in range(low_idx+1,n):
             if c[i]>prior_high*1.003:
                 hh_idx=i;hh=float(c[i]);break
-    # Pullback after first HH: must hold clearly above the structural low.
+
     hl_idx=None;hl=np.nan;base_days=0
     if hh_idx is not None and hh_idx+2<n:
         post=c[hh_idx+1:]
-        j=hh_idx+1+int(np.nanargmin(post))
-        candidate=float(c[j])
+        j=hh_idx+1+int(np.nanargmin(post)); candidate=float(c[j])
         if candidate>low*1.01 and candidate<=hh*0.995:
             hl_idx=j;hl=c[j];base_days=n-j-1
+
     second_hh=False;hh2=np.nan
     if hl_idx is not None and hl_idx+1<n:
         post=c[hl_idx+1:];j=hl_idx+1+int(np.nanargmax(post))
         if c[j]>hh*1.003:second_hh=True;hh2=float(c[j])
 
-    # Causal indicators calculated only from the current row.
     get=lambda k: x.get(k,np.nan)
     rsi=get('RSI14');adx=get('ADX14');vol=get('VOL_RATIO');deliv=get('DELIV_PER');d10=get('DELIV_AVG10');atrp=get('ATR_PCT');atravg=get('ATR_PCT_AVG30')
     mh3=get('MACD_HIST_SLOPE');macdh=get('MACD_HIST');ema20=get('EMA20');ema50=get('EMA50');ema100=get('EMA100');ema200=get('EMA200')
     slope20=get('EMA20_SLOPE_5');slope50=get('EMA50_SLOPE_5');ret5=get('RET_5D');ret20=get('RET_20D');ret50=get('RET_50D');close_loc=get('CLOSE_LOCATION');lower_wick=get('LOWER_WICK')
-    high52=get('HIGH_52W');prior20=get('PRIOR_HIGH20');prior55=get('PRIOR_HIGH55');low20=get('PRIOR_LOW20')
+    high52=get('HIGH_52W');prior20=get('PRIOR_HIGH20');prior55=get('PRIOR_HIGH55')
 
     no_lower_low=cur>=float(np.nanmin(c[-7:-1]))*.998 if n>=7 else True
     low_dist=(cur/low-1)*100 if low>0 else 999
@@ -61,6 +59,8 @@ def analyze_stock(g,min_score=None):
     resistance=max([v for v in [prior20,prior55,hh] if finite(v) and v>cur*1.005] or [cur*1.05])
     res_dist=(resistance/cur-1)*100
 
+    # A breakout should have participation; weak-volume highs remain WATCH/trigger setups.
+    breakout_volume=finite(vol) and vol>=STRAT.volume_breakout_ratio
     score=0;reasons=[]
     def add(ok,pts,msg):
         nonlocal score
@@ -82,26 +82,29 @@ def analyze_stock(g,min_score=None):
     add(not_extended,5,'Not extended')
     add(finite(atrp) and finite(atravg) and atrp<atravg*.97,3,'ATR compression')
     if finite(adx) and adx>=18:add(True,2,'Trend strength building')
+    if breakout_volume:add(True,4,'Breakout volume')
     if not rs_improving:score-=6;reasons.append('Relative strength weak')
     if res_dist<STRAT.min_resistance_distance_pct:score-=8;reasons.append('Resistance too close')
     if not not_extended:score-=12;reasons.append('Extended')
     if finite(atrp) and atrp>STRAT.max_atr_pct:score-=8;reasons.append('ATR too high')
     score=max(0,min(100,int(round(score))))
 
-    stage='PRE-BREAKOUT' if second_hh else 'HIGHER-LOW HUNTER' if hl_idx is not None else 'FIRST REVERSAL' if hh_idx is not None else 'BOTTOM FORMING' if bottom_hold else 'WATCH'
+    stage='CONFIRMED BREAKOUT' if second_hh and breakout_volume else 'PRE-BREAKOUT' if hl_idx is not None else 'FIRST REVERSAL' if hh_idx is not None else 'BOTTOM FORMING' if bottom_hold else 'WATCH'
     atr=float(get('ATR14')) if finite(get('ATR14')) else cur*.03
     anchor=float(hl if finite(hl) else low)
-    raw_stop=anchor-1.15*atr
-    stop=min(raw_stop,cur*(1-STRAT.min_stop_pct/100));stop=max(stop,cur*(1-STRAT.max_stop_pct/100));risk=cur-stop
+    raw_stop=anchor-1.0*atr
+    stop=max(raw_stop,cur*(1-STRAT.max_stop_pct/100))
+    stop=min(stop,cur*(1-STRAT.min_stop_pct/100));risk=cur-stop
     if risk<=0:stop=cur*(1-STRAT.min_stop_pct/100);risk=cur-stop
+
     setup_high=hh2 if finite(hh2) and hh2>cur else hh if finite(hh) and hh>cur else resistance
-    trigger=max(cur*1.003,setup_high*1.003)
+    trigger=max(cur*1.002,setup_high*1.002)
     if trigger>resistance*1.01:trigger=resistance*1.003
-    zone_low=max(anchor*.997,cur*.985);zone_high=min(cur*1.025,trigger)
+    zone_low=max(anchor*.997,cur*.985);zone_high=min(cur*1.02,trigger)
     t1=cur+risk*STRAT.min_rr1;t2=cur+risk*STRAT.min_rr2;t3=cur+risk*STRAT.min_rr3
     if resistance>cur and resistance<t1*1.03:t1=max(cur+risk*STRAT.min_rr1,resistance*.995)
-    if t2<=t1:t2=t1+risk*.5
-    if t3<=t2:t3=t2+risk*.5
+    if t2<=t1:t2=t1+risk*.6
+    if t3<=t2:t3=t2+risk*.7
     if finite(high52) and high52>cur and high52<t3:t3=high52*.995
     rr1=(t1-cur)/risk;rr2=(t2-cur)/risk;rr3=(t3-cur)/risk
 
@@ -112,7 +115,7 @@ def analyze_stock(g,min_score=None):
     structural_buy=(hl_idx is not None and base_days>=STRAT.min_base_days)
     momentum_ok=rsi_recovery and momentum_turn and ema_turn and rs_improving
     location_ok=res_dist>=STRAT.min_resistance_distance_pct and not_extended and low_dist<=16
-    if eligible and structural_buy and momentum_ok and location_ok and risk_ok and second_hh and score>=STRAT.strong_score:
+    if eligible and structural_buy and momentum_ok and location_ok and risk_ok and second_hh and breakout_volume and score>=STRAT.strong_score:
         action='BUY'
     elif eligible and structural_buy and momentum_ok and location_ok and risk_ok:
         action='BUY ON TRIGGER'
@@ -125,8 +128,7 @@ def analyze_stock(g,min_score=None):
     return {'SYMBOL':str(x.SYMBOL),'DATE':pd.Timestamp(x.DATE).strftime('%d-%b-%Y'),'CMP':rv(cur),'ACTION':action,'STAGE':stage,'HUNTER_SCORE':score,'STRUCTURE':structure,'RECENT_LOW':rv(low),'LOW_DISTANCE_PCT':rv(low_dist),'FIRST_HH':rv(hh),'HIGHER_LOW':rv(hl),'SECOND_HH':rv(hh2),'BUY_ZONE_LOW':rv(zone_low),'BUY_ZONE_HIGH':rv(zone_high),'ENTRY_TRIGGER':rv(trigger),'STOP_LOSS':rv(stop),'TARGET_1':rv(t1),'TARGET_2':rv(t2),'TARGET_3':rv(t3),'RR_T1':rv(rr1),'RR_T2':rv(rr2),'RR_T3':rv(rr3),'RESISTANCE':rv(resistance),'RESISTANCE_DISTANCE_PCT':rv(res_dist),'EMA20':rv(ema20),'EMA50':rv(ema50),'EMA100':rv(ema100),'EMA200':rv(ema200),'RSI14':rv(rsi),'MACD':rv(get('MACD'),4),'MACD_SIGNAL':rv(get('MACD_SIGNAL'),4),'MACD_HIST':rv(macdh,4),'ADX14':rv(adx),'ATR_PCT':rv(atrp),'ATR_COMPRESSION':'YES' if finite(atrp) and finite(atravg) and atrp<atravg*.97 else 'NO','VOLUME_RATIO':rv(vol),'DELIVERY_PCT':rv(deliv),'DELIVERY_AVG10':rv(d10),'RET_5D_PCT':rv(ret5),'RET_20D_PCT':rv(ret20),'DIST_52W_HIGH_PCT':rv(from_52),'DIST_EMA200_PCT':rv(get('DIST_EMA200_PCT')),'REASONS':', '.join(reasons)}
 
 def scan_all(hist,min_score=None):
-    threshold=STRAT.min_score if min_score is None else min_score
-    rows=[]
+    threshold=STRAT.min_score if min_score is None else min_score;rows=[]
     for sym,g in hist.groupby('SYMBOL'):
         try:
             r=analyze_stock(g,threshold)
