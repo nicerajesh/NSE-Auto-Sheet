@@ -12,23 +12,23 @@ class IndicatorConfig:
 class StrategyConfig:
     min_history:int=120
     min_score:int=72
-    buy_score:int=82
+    buy_score:int=80
     strong_score:int=88
-    max_entry_extension_pct:float=3.5
-    max_stop_pct:float=8.0
-    min_stop_pct:float=2.5
-    min_rr1:float=1.8
-    min_rr2:float=2.5
-    min_rr3:float=3.5
-    volume_breakout_ratio:float=1.35
-    delivery_floor:float=35.0
-    max_atr_pct:float=6.0
+    max_entry_extension_pct:float=3.0
+    max_stop_pct:float=6.5
+    min_stop_pct:float=2.0
+    min_rr1:float=1.25
+    min_rr2:float=2.0
+    min_rr3:float=3.0
+    volume_breakout_ratio:float=1.20
+    delivery_floor:float=30.0
+    max_atr_pct:float=5.5
     require_higher_low_for_buy:bool=True
     require_rs_improving:bool=True
     require_not_extended:bool=True
-    min_quality_score:int=82
+    min_quality_score:int=80
     max_buy_score:int=100
-    min_resistance_distance_pct:float=4.0
+    min_resistance_distance_pct:float=3.0
     max_52w_high_distance_pct:float=-12.0
     min_base_days:int=5
 
@@ -36,8 +36,8 @@ class StrategyConfig:
 class BacktestConfig:
     horizon:int=30
     warmup:int=120
-    min_score:int=72
-    buy_score:int=82
+    min_score:int=75
+    buy_score:int=80
     min_gap_between_signals:int=10
     commission_bps:float=10.0
     slippage_bps:float=5.0
