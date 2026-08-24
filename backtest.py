@@ -16,24 +16,50 @@ def outcome(g, entry_i, entry, stop, t1, t2, t3, horizon=30):
     f=g.iloc[entry_i:entry_i+horizon]
     if f.empty:return None
     active_stop=float(stop); rem=1.0; realised=0.0
-    stop_hit=hit1=hit2=hit3=False;exit_idx=None;exit_reason='TIME';max_high=entry;min_low=entry
+    hit1=hit2=hit3=False; stop_hit=False; exit_idx=None; exit_reason='TIME'; max_high=entry; min_low=entry
     for j,row in f.iterrows():
-        lo=float(row.LOW_PRICE);hi=float(row.HIGH_PRICE);max_high=max(max_high,hi);min_low=min(min_low,lo)
-        # Daily OHLC cannot establish intraday ordering; use conservative stop-first.
+        op=float(row.OPEN_PRICE);lo=float(row.LOW_PRICE);hi=float(row.HIGH_PRICE);cl=float(row.CLOSE_PRICE)
+        max_high=max(max_high,hi);min_low=min(min_low,lo)
+
+        # Model overnight gaps realistically: if the market opens beyond a stop/target,
+        # the fill is at the open, not magically at the requested level.
+        if op<=active_stop:
+            realised += rem*(op-entry)/entry*100
+            stop_hit=True;rem=0.0;exit_idx=j;exit_reason='GAP_STOP' if not hit1 else 'LOCKED_GAP_STOP';break
+        if not hit1 and op>=t1:
+            realised += .40*(op-entry)/entry*100;rem-=.40;hit1=True;active_stop=max(active_stop,entry)
+        elif not hit1 and hi>=t1:
+            realised += .40*(t1-entry)/entry*100;rem-=.40;hit1=True;active_stop=max(active_stop,entry)
+
+        # Daily OHLC cannot establish intraday ordering. After the first target,
+        # keep the conservative stop-first assumption for the remaining position.
         if lo<=active_stop:
             realised += rem*(active_stop-entry)/entry*100
-            stop_hit=True;rem=0.0;exit_idx=j;exit_reason='STOP' if not hit1 else ('BREAKEVEN' if not hit2 else 'LOCKED_T1');break
-        if not hit1 and hi>=t1:
-            realised += .40*(t1-entry)/entry*100;rem-=.40;hit1=True;active_stop=max(active_stop,entry)
-        if not hit2 and hi>=t2:
+            stop_hit=True;rem=0.0;exit_idx=j;exit_reason='STOP' if not hit2 else 'LOCKED_T2';break
+
+        if not hit2 and op>=t2:
+            realised += .30*(op-entry)/entry*100;rem-=.30;hit2=True;active_stop=max(active_stop,t1)
+        elif not hit2 and hi>=t2:
             realised += .30*(t2-entry)/entry*100;rem-=.30;hit2=True;active_stop=max(active_stop,t1)
+
+        if lo<=active_stop:
+            realised += rem*(active_stop-entry)/entry*100
+            stop_hit=True;rem=0.0;exit_idx=j;exit_reason='STOP' if not hit3 else 'LOCKED_T3';break
+
+        if not hit3 and op>=t3:
+            realised += rem*(op-entry)/entry*100;rem=0.0;hit3=True;exit_idx=j;exit_reason='T3_GAP';break
         if not hit3 and hi>=t3:
-            realised += rem*(t3-entry)/entry*100;rem=0;hit3=True;exit_idx=j;exit_reason='T3';break
+            realised += rem*(t3-entry)/entry*100;rem=0.0;hit3=True;exit_idx=j;exit_reason='T3';break
+
     if exit_idx is None:
         exit_idx=f.index[-1];realised += rem*(float(f.iloc[-1].CLOSE_PRICE)-entry)/entry*100
+
+    # Enforce nested target semantics: reaching T3 necessarily means T1 and T2 were reached.
+    if hit3: hit2=True;hit1=True
+    if hit2: hit1=True
     cost=(BT.commission_bps+BT.slippage_bps)*2/100
     risk=max(1e-9,entry-stop)
-    return {'HIT_T1':hit1,'HIT_T2':hit2,'HIT_T3':hit3,'STOP_HIT':stop_hit,'RETURN_PCT':realised-cost,'GROSS_RETURN_PCT':realised,'HOLD_DAYS':int(exit_idx-entry_i+1),'EXIT_REASON':exit_reason,'MFE_PCT':(max_high-entry)/entry*100,'MAE_PCT':(min_low-entry)/entry*100,'MFE_R':(max_high-entry)/risk,'MAE_R':(min_low-entry)/risk}
+    return {'HIT_T1':hit1,'HIT_T2':hit2,'HIT_T3':hit3,'STOP_HIT':stop_hit,'RETURN_PCT':realised-cost,'GROSS_RETURN_PCT':realised,'HOLD_DAYS':int(exit_idx-entry_i+1),'MFE_PCT':(max_high-entry)/entry*100,'MAE_PCT':(min_low-entry)/entry*100,'MFE_R':(max_high-entry)/risk,'MAE_R':(min_low-entry)/risk}
 
 
 def _horizon_rows(trades,hist,horizons=(5,10,15,20,30)):
@@ -68,12 +94,11 @@ def run_backtest(hist,min_score=None,horizon=None):
                         entry_i=j;entry=trigger;break
                 if entry_i is None:continue
             else:
-                # Signal uses the completed candle. The earliest executable fill is next day's open.
                 entry_i=i+1
                 if entry_i>=len(g):continue
                 entry=float(g.iloc[entry_i].OPEN_PRICE)
             entry,stop,t1,t2,t3=_rebase_levels(signal_close,entry,float(sig['STOP_LOSS']),float(sig['TARGET_1']),float(sig['TARGET_2']),float(sig['TARGET_3']))
-            if entry<=0 or stop>=entry or t1<=entry:continue
+            if entry<=0 or stop>=entry or t1<=entry or not (t1<t2<t3):continue
             available=min(horizon,len(g)-entry_i)
             o=outcome(g,entry_i,entry,stop,t1,t2,t3,available)
             if o:
