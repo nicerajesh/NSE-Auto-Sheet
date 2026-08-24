@@ -14,7 +14,7 @@ from d1_database import sync_latest
 
 SPREADSHEET_ID=os.getenv('SPREADSHEET_ID','1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM')
 STOCKS_SHEET='Top 500 Stocks'; HUNTER_SHEET='Early Hunter'
-HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','180')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('MIN_SCORE','72'))
+HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','180')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('MIN_SCORE','82'))
 OUT=Path('output'); OUT.mkdir(exist_ok=True)
 creds_json=os.getenv('GCP_CREDENTIALS')
 if not creds_json: raise RuntimeError('GCP_CREDENTIALS secret missing')
@@ -98,8 +98,6 @@ ledger=update_ledger(pd.DataFrame(),{str(r['SYMBOL']):r.to_dict() for _,r in hun
 if not hunter.empty and not ledger.empty:
     pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last');hunter=hunter.merge(pos,on='SYMBOL',how='left')
 gate_ok,gate_reason=evaluate(stats,cal)
-# IMPORTANT: backtest quality never silently converts a valid live setup into WATCH.
-# It is exposed as a separate QUALITY_GATE status. The strategy itself decides BUY/WAIT.
 if not hunter.empty:hunter['QUALITY_GATE']='PASS' if gate_ok else gate_reason
 buy=hunter[hunter.ACTION.isin(['BUY','BUY ON TRIGGER'])].copy() if not hunter.empty else pd.DataFrame()
 latest.to_csv(OUT/'latest_market.csv',index=False);hist[hist.DATE.eq(latest_date)].to_csv(OUT/'indicators.csv',index=False);hunter.to_csv(OUT/'early_hunter.csv',index=False);buy.to_csv(OUT/'buy_candidates.csv',index=False)
@@ -108,9 +106,9 @@ sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'))
 def ensure(ws,n):
     if ws.col_count<n:ws.add_cols(n-ws.col_count)
 ensure(ws_stocks,30);ensure(ws_hunter,max(100,len(hunter.columns) if not hunter.empty else 20))
-view=latest.copy();
+view=latest.copy()
 def bull(r):
-    e50,e200=r.get('EMA50'),r.get('EMA200');
+    e50,e200=r.get('EMA50'),r.get('EMA200')
     try:
         if pd.notna(e50) and pd.notna(e200):return 'In Bull Run' if float(r.CLOSE_PRICE)>float(e50)>float(e200) else ('In Bear Run' if float(r.CLOSE_PRICE)<float(e50)<float(e200) else 'Unconfirmed')
     except:pass
@@ -119,7 +117,7 @@ view['Bull Run']=view.apply(bull,axis=1);hmap=hunter.set_index('SYMBOL').to_dict
 def drow(sym):
     r=hmap.get(sym)
     if not r:return ('NO BUY','No Early Hunter setup')
-    a=str(r.get('ACTION','WATCH'));return (a,str(r.get('REASONS','Setup requires confirmation')))
+    return (str(r.get('ACTION','WATCH')),str(r.get('REASONS','Setup requires confirmation')))
 view[['Decision','Decision Reason']]=view.SYMBOL.map(drow).apply(pd.Series)
 for outcol,hcol in [('Hunter Score','HUNTER_SCORE'),('Stage','STAGE'),('Entry Trigger','ENTRY_TRIGGER'),('Stop Loss','STOP_LOSS'),('Target 1','TARGET_1'),('Target 2','TARGET_2'),('Target 3','TARGET_3')]:view[outcol]=view.SYMBOL.map(lambda x:hmap.get(x,{}).get(hcol,''))
 view=view.sort_values(['Decision','Hunter Score'],ascending=[True,False],na_position='last').head(500)
@@ -128,9 +126,15 @@ rows=[headers]+[[r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'
 ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED')
 if not hunter.empty:hrows=[hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist()
 else:hrows=[['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]
-hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',latest_date.strftime('%d-%b-%Y')],['QUALITY GATE',gate_reason],['BUY CANDIDATES',len(buy)],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
+hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',latest_date.strftime('%d-%b-%Y')],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
 if not cal.empty:hrows += [[''],['SCORE/HORIZON CALIBRATION']]+[cal.columns.tolist()]+cal.astype(object).where(pd.notna(cal),'').values.tolist()
 ws_hunter.update('A1',hrows,value_input_option='USER_ENTERED')
+# Prevent Google Sheets from rendering candidate counts / scores as dates.
+try:
+    ws_hunter.format('A1:A20',{'numberFormat':{'type':'TEXT','pattern':'@'}})
+    ws_stocks.format('K2:K501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
+    ws_stocks.format('B2:B501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
+except Exception as e:print('Sheet format warning:',e)
 for ws in (ws_stocks,ws_hunter):
     try:ws.freeze(rows=1)
     except Exception:pass
