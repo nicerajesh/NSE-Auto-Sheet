@@ -31,8 +31,8 @@ class StrategyConfig:
     min_resistance_distance_pct:float=3.0
     max_52w_high_distance_pct:float=-12.0
     min_base_days:int=5
-    max_fall_20d_pct=-28.0
-    max_fall_50d_pct=-38.0
+    max_fall_20d_pct:float=-28.0
+    max_fall_50d_pct:float=-38.0
     min_recovery_5d_pct:float=-2.0
     min_rs_spread_pct:float=-1.0
     min_regime_score:int=0
