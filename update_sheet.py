@@ -15,8 +15,6 @@ from config import STRAT, BT
 
 SPREADSHEET_ID=os.getenv('SPREADSHEET_ID','1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM')
 STOCKS_SHEET='Top 500 Stocks'; HUNTER_SHEET='Early Hunter'
-# 180 days left only ~30 days after warmup+horizon, which caused tiny 14-trade backtests.
-# Use ~2 years of trading history so the backtest has a meaningful out-of-sample signal window.
 HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','420')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('WATCH_MIN_SCORE','72'))
 OUT=Path('output'); OUT.mkdir(exist_ok=True)
 creds_json=os.getenv('GCP_CREDENTIALS')
@@ -84,21 +82,22 @@ while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+120:
     d-=timedelta(days=1);attempts+=1
 if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')
 hist=pd.concat(frames,ignore_index=True);hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns]
-if 'SYMBOL' not in hist.columns:raise RuntimeError(f'NSE history has no SYMBOL column; columns={list(hist.columns)}')
 hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True)
-hist=add_indicators_all(hist);hist.SYMBOL=hist.SYMBOL.astype(str).str.strip().str.upper();latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()
+hist=add_indicators_all(hist);latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()
 med=hist.groupby('DATE')['RET_20D'].transform('median');hist['RS_VS_UNIVERSE']=hist.RET_20D-med;hist['RS_RANK']=hist.groupby('DATE').RET_20D.rank(pct=True)*100
 hunter=scan_all(hist,MIN_SCORE);hunter=pd.DataFrame() if hunter is None else hunter
 if not hunter.empty:
     rs=hist[hist.DATE.eq(latest_date)][['SYMBOL','RS_VS_UNIVERSE','RS_RANK']];hunter=hunter.merge(rs,on='SYMBOL',how='left')
 trades,stats,cal=run_backtest(hist,MIN_SCORE,BT.horizon);stats=stats or {};cal=cal if cal is not None else pd.DataFrame()
+if int(stats.get('trades',0))==0:
+    print('BACKTEST DIAGNOSTIC: zero trades. This is a strategy-signal scarcity result, not a Google Sheet/D1 failure.')
+    print(f'BACKTEST INPUT: {len(hist)} rows, {hist.SYMBOL.nunique()} symbols, {len(frames)} sessions, threshold={MIN_SCORE}, warmup={BT.warmup}, horizon={BT.horizon}')
 trades.to_csv(OUT/'backtest_trades.csv',index=False);pd.DataFrame([stats]).to_csv(OUT/'backtest_summary.csv',index=False);cal.to_csv(OUT/'score_calibration.csv',index=False)
 ledger=update_ledger(pd.DataFrame(),{str(r['SYMBOL']):r.to_dict() for _,r in hunter.iterrows()} if not hunter.empty else {});ledger.to_csv(OUT/'trade_ledger.csv',index=False)
 if not hunter.empty and not ledger.empty:
     pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last');hunter=hunter.merge(pos,on='SYMBOL',how='left')
 gate_ok,gate_reason=evaluate(stats,cal)
 if not hunter.empty:hunter['QUALITY_GATE']='PASS' if gate_ok else gate_reason
-# Safety: a failed quality gate must never produce live BUY candidates.
 buy=hunter[hunter.ACTION.isin(['BUY','BUY ON TRIGGER'])].copy() if (gate_ok and not hunter.empty) else pd.DataFrame(columns=hunter.columns if not hunter.empty else [])
 latest.to_csv(OUT/'latest_market.csv',index=False);hist[hist.DATE.eq(latest_date)].to_csv(OUT/'indicators.csv',index=False);hunter.to_csv(OUT/'early_hunter.csv',index=False);buy.to_csv(OUT/'buy_candidates.csv',index=False)
 sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'))
@@ -128,12 +127,15 @@ rows=[headers]+[[r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'
 ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED')
 if not hunter.empty:hrows=[hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist()
 else:hrows=[['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]
-hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',latest_date.strftime('%d-%b-%Y')],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',STRAT.buy_score],['WATCH SCORE GATE',MIN_SCORE],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
+# Keep report labels and date as literal text; do not let Sheets convert the date to serial 46258.
+report_date=latest_date.strftime('%d-%b-%Y')
+hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',"'"+report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',STRAT.buy_score],['WATCH SCORE GATE',MIN_SCORE],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
 if not cal.empty:hrows += [[''],['SCORE/HORIZON CALIBRATION']]+[cal.columns.tolist()]+cal.astype(object).where(pd.notna(cal),'').values.tolist()
 ws_hunter.update('A1',hrows,value_input_option='USER_ENTERED')
 try:
-    ws_hunter.format('A1:A25',{'numberFormat':{'type':'TEXT','pattern':'@'}})
-    ws_hunter.format('B1:B25',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
+    # B is mixed text/numeric, so only format the actual numeric backtest values.
+    ws_hunter.format('B1:B3',{'numberFormat':{'type':'TEXT','pattern':'@'}})
+    ws_hunter.format('B4:B8',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
     ws_stocks.format('K2:K501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
     ws_stocks.format('B2:B501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
 except Exception as e:print('Sheet format warning:',e)
