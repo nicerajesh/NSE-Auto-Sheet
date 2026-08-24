@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, time
+import json, os, time, re
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -16,7 +16,6 @@ SPREADSHEET_ID=os.getenv('SPREADSHEET_ID','1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3
 STOCKS_SHEET='Top 500 Stocks'; HUNTER_SHEET='Early Hunter'
 HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','180')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('MIN_SCORE','68'))
 OUT=Path('output'); OUT.mkdir(exist_ok=True)
-
 creds_json=os.getenv('GCP_CREDENTIALS')
 if not creds_json: raise RuntimeError('GCP_CREDENTIALS secret missing')
 creds=ServiceAccountCredentials.from_json_keyfile_dict(json.loads(creds_json),['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive'])
@@ -26,34 +25,48 @@ def get_or_create(title,rows=3000,cols=100):
     try:return book.worksheet(title)
     except gspread.WorksheetNotFound:return book.add_worksheet(title=title,rows=rows,cols=cols)
 ws_stocks=get_or_create(STOCKS_SHEET,1000,20); ws_hunter=get_or_create(HUNTER_SHEET,3000,100)
-
-# Remove obsolete output tabs created by earlier versions. The analysis is NOT turnover-driven.
 for old_name in ('Top 250 Stocks','Top 250 Turnover','Top 500 Turnover','Turnover'):
     try:
         old=book.worksheet(old_name)
-        if old.id not in (ws_stocks.id,ws_hunter.id): book.del_worksheet(old)
-    except gspread.WorksheetNotFound: pass
+        if old.id not in (ws_stocks.id,ws_hunter.id):book.del_worksheet(old)
+    except gspread.WorksheetNotFound:pass
 
 def sess():
-    s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/151 Safari/537.36','Accept-Language':'en-US,en;q=0.9','Referer':'https://www.nseindia.com/'})
+    s=requests.Session();s.headers.update({'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/151 Safari/537.36','Accept-Language':'en-US,en;q=0.9','Referer':'https://www.nseindia.com/','Accept':'application/json,text/plain,*/*'})
     try:s.get('https://www.nseindia.com',timeout=20)
     except Exception:pass
     return s
 
-def normalize_headers(df):
-    return df.rename(columns={c:str(c).replace('\ufeff','').strip().upper().replace(' ','_') for c in df.columns})
-
 def fetch_nifty500_symbols(s):
-    url='https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20500'
-    r=s.get(url,timeout=30,headers={'Accept':'application/json, text/plain, */*','X-Requested-With':'XMLHttpRequest'})
-    r.raise_for_status(); obj=r.json(); data=obj.get('data',[])
-    symbols=[]
-    for row in data:
-        sym=str(row.get('symbol','')).strip().upper()
-        if sym and sym not in symbols and sym not in {'NIFTY 500','NIFTY500'}:symbols.append(sym)
-    if len(symbols)<450: raise RuntimeError(f'NSE NIFTY 500 universe response looks incomplete: {len(symbols)} symbols')
-    print(f'NIFTY 500 universe loaded: {len(symbols)} symbols')
-    return set(symbols)
+    # NSE's equity-stockIndices endpoint can return 404. Use official NSE Indices constituent data first.
+    urls=['https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv','https://www.niftyindices.com/IndexConstituent/ind_nifty500list.xlsx']
+    h={'User-Agent':s.headers.get('User-Agent'),'Referer':'https://www.niftyindices.com/','Accept':'text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*'}
+    for url in urls:
+        try:
+            r=s.get(url,headers=h,timeout=30)
+            if not r.ok or len(r.content)<1000:continue
+            if url.endswith('.csv'):df=pd.read_csv(StringIO(r.content.decode('utf-8-sig',errors='replace')))
+            else:df=pd.read_excel(StringIO(r.content))
+            cols={str(c).strip().upper().replace(' ','_'):c for c in df.columns}
+            col=cols.get('SYMBOL') or cols.get('SYMBOLS') or cols.get('SECURITY')
+            if not col:continue
+            syms=df[col].astype(str).str.strip().str.upper()
+            syms=[x for x in syms if re.fullmatch(r'[A-Z0-9&.-]+',x) and not any(k in x for k in ('ETF','BEES','GOLD','SILVER','LIQUID'))]
+            if len(syms)>=450:
+                print(f'NIFTY 500 universe loaded from official NSE Indices: {len(syms)} symbols')
+                return set(syms)
+        except Exception as e:print('Nifty500 official source failed:',e)
+    # Secondary NSE API fallback.
+    for endpoint in ['https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20500','https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20500&csv=true']:
+        try:
+            r=s.get(endpoint,timeout=30,headers={'Accept':'application/json, text/plain, */*','X-Requested-With':'XMLHttpRequest'});r.raise_for_status();obj=r.json();data=obj.get('data',[])
+            syms={str(x.get('symbol','')).strip().upper() for x in data};syms={x for x in syms if x and x not in {'NIFTY 500','NIFTY500'} and not any(k in x for k in ('ETF','BEES','GOLD','SILVER','LIQUID'))}
+            if len(syms)>=450:
+                print(f'NIFTY 500 universe loaded from NSE API: {len(syms)} symbols');return syms
+        except Exception as e:print('NSE Nifty500 API failed:',e)
+    raise RuntimeError('Unable to obtain the NIFTY 500 constituent list from official NSE/NSE Indices sources. No turnover fallback is used.')
+
+def normalize_headers(df):return df.rename(columns={c:str(c).replace('\ufeff','').strip().upper().replace(' ','_') for c in df.columns})
 
 def fetch_bhav(s,d):
     url=f"https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{d:%d%m%Y}.csv"
@@ -68,15 +81,14 @@ def fetch_bhav(s,d):
         missing=[c for c in need if c not in df.columns]
         if missing:print(f'Skip {d:%Y-%m-%d}: missing={missing}');return None
         df=df[df.SERIES.astype(str).str.strip().eq('EQ')].copy()
-        # Keep only cash-equity stocks. ETFs, gold/silver/liquid products and similar instruments are excluded.
         df=df[~df.SYMBOL.astype(str).str.contains(r'BEES|ETF|GOLD|LIQUID|SILVER|CASE',case=False,regex=True,na=False)]
         for c in need[2:]:df[c]=pd.to_numeric(df[c],errors='coerce')
         df=df.dropna(subset=['SYMBOL','OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS'])
-        df['SYMBOL']=df['SYMBOL'].astype(str).str.strip().str.upper(); df=df[df.TURNOVER_LACS>=MIN_TURNOVER_LACS].copy(); df['DATE']=pd.Timestamp(d)
+        df['SYMBOL']=df['SYMBOL'].astype(str).str.strip().str.upper();df=df[df.TURNOVER_LACS>=MIN_TURNOVER_LACS].copy();df['DATE']=pd.Timestamp(d)
         return df
     except Exception as e:print('Fetch',d,e);return None
 
-s=sess(); universe=fetch_nifty500_symbols(s); frames=[]; d=datetime.now(); attempts=0
+s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0
 while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+80:
     if d.weekday()<5:
         x=fetch_bhav(s,d)
@@ -86,7 +98,7 @@ while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+80:
         time.sleep(.20)
     d-=timedelta(days=1);attempts+=1
 if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')
-hist=pd.concat(frames,ignore_index=True); hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns]
+hist=pd.concat(frames,ignore_index=True);hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns]
 if 'SYMBOL' not in hist.columns:raise RuntimeError(f'NSE history has no SYMBOL column; columns={list(hist.columns)}')
 hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True)
 original_symbols=hist['SYMBOL'].astype(str).str.strip().str.upper().reset_index(drop=True)
@@ -95,8 +107,8 @@ if 'SYMBOL' not in hist.columns:
     if len(hist)!=len(original_symbols):raise RuntimeError(f'Indicator output lost SYMBOL and row count changed: input={len(original_symbols)} output={len(hist)}')
     hist['SYMBOL']=original_symbols.to_numpy()
 hist['SYMBOL']=hist['SYMBOL'].astype(str).str.strip().str.upper()
-latest_date=hist.DATE.max(); latest=hist[hist.DATE.eq(latest_date)].copy()
-med=hist.groupby('DATE')['RET_20D'].transform('median'); hist['RS_VS_UNIVERSE']=hist['RET_20D']-med; hist['RS_RANK']=hist.groupby('DATE')['RET_20D'].rank(pct=True)*100
+latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()
+med=hist.groupby('DATE')['RET_20D'].transform('median');hist['RS_VS_UNIVERSE']=hist['RET_20D']-med;hist['RS_RANK']=hist.groupby('DATE')['RET_20D'].rank(pct=True)*100
 hunter=scan_all(hist,MIN_SCORE)
 if hunter.empty:hunter=pd.DataFrame()
 if not hunter.empty:
@@ -120,11 +132,8 @@ sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'))
 def ensure(ws,n):
     if ws.col_count<n:ws.add_cols(n-ws.col_count)
 ensure(ws_stocks,15);ensure(ws_hunter,max(100,len(hunter.columns) if not hunter.empty else 20))
-# Full refresh: remove all previous content and write headers + fresh current data.
-# This sheet is informational; BUY decisions come from Early Hunter, not turnover ranking.
 view=latest.copy();view['Bull Run']=view.apply(lambda r:'In Bull Run' if pd.notna(r.get('EMA50')) and pd.notna(r.get('EMA200')) and float(r.CLOSE_PRICE)>float(r.EMA50)>float(r.EMA200) else ('In Bear Run' if pd.notna(r.get('EMA50')) and pd.notna(r.get('EMA200')) and float(r.CLOSE_PRICE)<float(r.EMA50)<float(r.EMA200) else 'Unconfirmed'),axis=1)
-view['Output']='';view['CAR']=''
-view=view.sort_values('TTL_TRD_QNTY',ascending=False).head(500)
+view['Output']='';view['CAR']='';view=view.sort_values('TTL_TRD_QNTY',ascending=False).head(500)
 headers=['NSE Code','Volume','Close Price','CMP','50 DMA','100 DMA','200 DMA','Bull Run','Output','CAR']
 rows=[headers]+[[r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'EMA50',''),getattr(r,'EMA100',''),getattr(r,'EMA200',''),r['Bull Run'],'',''] for _,r in view.iterrows()]
 ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED')
