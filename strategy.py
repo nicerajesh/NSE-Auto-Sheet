@@ -30,7 +30,6 @@ def analyze_stock(g,min_score=None):
     if hl_idx is not None and len(c[hl_idx+1:]):
         post=c[hl_idx+1:];j=int(np.argmax(post))+hl_idx+1
         if c[j]>hh*1.003:second_hh=True;hh2=float(c[j])
-    # Resistance must be a genuine prior swing/high and MUST be above current price.
     prior_window=c[:-1][-40:]
     resistance=float(np.percentile(prior_window,95)) if len(prior_window) else cur
     if finite(x.get('PRIOR_HIGH20',np.nan)) and float(x.PRIOR_HIGH20)>cur*1.005:resistance=float(x.PRIOR_HIGH20)
@@ -44,26 +43,30 @@ def analyze_stock(g,min_score=None):
     def add(ok,pts,msg):
         nonlocal score
         if bool(ok):score+=pts;reasons.append(msg)
-    add(bottom_hold,12,'Low holding');
+    add(bottom_hold,12,'Low holding')
     if not no_lower_low:score-=18;reasons.append('Lower-low risk')
     add(exhaustion,8,'Selling exhaustion');add(hh_idx is not None,14,'First HH');add(hl_idx is not None,24,'Higher Low');add(second_hh,12,'Second HH');add(delivery_build,7,'Delivery stable/improving');add(momentum_turn,5,'Momentum turning');add(rsi_recovery,4,'RSI recovery');add(ema_turn,5,'EMA slope improving');add(alignment,3,'EMA20/50 stabilised');add(candle_demand,3,'Demand candle');add(volume_ok,2,'Healthy liquidity');add(not_extended,4,'Not extended');add(finite(atrp) and finite(atravg) and atrp<atravg*.95,3,'ATR compression')
     if finite(adx) and adx>=18:add(True,2,'Trend strength building')
-    if res_dist<2.0:score-=8;reasons.append('Resistance too close')
+    if res_dist<STRAT.min_resistance_distance_pct:score-=8;reasons.append('Resistance too close')
     if not not_extended:score-=15;reasons.append('Extended')
     if finite(atrp) and atrp>STRAT.max_atr_pct:score-=8;reasons.append('ATR too high')
-    score=max(0,min(100,int(round(score)))); stage='EARLY TREND' if second_hh else 'HIGHER-LOW HUNTER' if hl_idx is not None else 'FIRST REVERSAL' if hh_idx is not None else 'BOTTOM FORMING' if bottom_hold else 'WATCH'
+    score=max(0,min(100,int(round(score))))
+    stage='EARLY TREND' if second_hh else 'HIGHER-LOW HUNTER' if hl_idx is not None else 'FIRST REVERSAL' if hh_idx is not None else 'BOTTOM FORMING' if bottom_hold else 'WATCH'
     atr=float(x.get('ATR14',cur*.03)) if finite(x.get('ATR14',np.nan)) else cur*.03
-    # Structural stop: below higher-low / recent low, never above entry.
-    anchor=hl if finite(hl) else low; stop=anchor-1.15*atr; stop=min(stop,cur*(1-0.01)); stop=max(stop,cur*(1-STRAT.max_stop_pct/100)); risk=cur-stop
-    if risk<=0:stop=cur*(1-STRAT.max_stop_pct/100);risk=cur-stop
-    # Entry trigger is a break of the actual setup high, not an arbitrary resistance value.
+    anchor=hl if finite(hl) else low
+    # Avoid unrealistically tiny risk. Tiny stops made transaction costs dominate and
+    # were one reason target hits did not translate into positive net returns.
+    raw_stop=anchor-1.15*atr
+    stop=min(raw_stop,cur*(1-STRAT.min_stop_pct/100))
+    stop=max(stop,cur*(1-STRAT.max_stop_pct/100))
+    risk=cur-stop
+    if risk<=0:stop=cur*(1-STRAT.min_stop_pct/100);risk=cur-stop
     setup_high=hh2 if finite(hh2) and hh2>cur else hh if finite(hh) and hh>cur else resistance
     trigger=max(cur*1.003,setup_high*1.003)
     if trigger>resistance*1.01:trigger=resistance*1.003
     zone_low=max(anchor*.997,cur*.985);zone_high=min(cur*1.02,trigger)
-    # Targets are risk multiples first; resistance can cap a target, never create absurd upside.
-    raw_t1=cur+risk*STRAT.min_rr1; raw_t2=cur+risk*STRAT.min_rr2; raw_t3=cur+risk*STRAT.min_rr3
-    t1=raw_t1; t2=raw_t2; t3=raw_t3
+    raw_t1=cur+risk*STRAT.min_rr1;raw_t2=cur+risk*STRAT.min_rr2;raw_t3=cur+risk*STRAT.min_rr3
+    t1=raw_t1;t2=raw_t2;t3=raw_t3
     if resistance>cur and resistance<raw_t1*1.02:t1=resistance*.995
     if t1<=cur+risk*1.2:t1=cur+risk*STRAT.min_rr1
     if t2<=t1:t2=max(raw_t2,t1+risk*.5)
@@ -71,10 +74,15 @@ def analyze_stock(g,min_score=None):
     high52=x.get('HIGH_52W',np.nan)
     if finite(high52) and high52>cur and high52<t3:t3=high52*.995
     rr1=(t1-cur)/risk;rr2=(t2-cur)/risk;rr3=(t3-cur)/risk;threshold=STRAT.min_score if min_score is None else min_score
-    # BUY requires confirmed structure. First reversal is only a trigger candidate; bottom forming is never BUY.
-    if second_hh and score>=STRAT.strong_score and not_extended:action='BUY'
-    elif hl_idx is not None and score>=threshold and cur<=zone_high and res_dist>=2.0 and rr1>=STRAT.min_rr1:action='BUY'
-    elif hh_idx is not None and score>=threshold and res_dist>=2.0:action='BUY ON TRIGGER'
+    # v7 live gate: only the historically strongest score band is eligible for BUY.
+    # 90+ is deliberately not promoted because the latest calibration did not show
+    # superior returns for that bucket.
+    eligible_score=threshold<=score<=STRAT.max_buy_score
+    confirmed_hl=hl_idx is not None
+    risk_ok=finite(risk) and risk/cur*100>=STRAT.min_stop_pct
+    if second_hh and score>=STRAT.strong_score and eligible_score and not_extended and risk_ok:action='BUY'
+    elif confirmed_hl and eligible_score and cur<=zone_high and res_dist>=STRAT.min_resistance_distance_pct and rr1>=STRAT.min_rr1 and risk_ok:action='BUY'
+    elif hh_idx is not None and eligible_score and res_dist>=STRAT.min_resistance_distance_pct and risk_ok:action='BUY ON TRIGGER'
     else:action='WATCH'
     structure='LOW → HH → HL → HH' if second_hh else 'LOW → HH → HL' if hl_idx is not None else 'LOW → HH' if hh_idx is not None else 'LOW HOLD' if bottom_hold else 'UNCONFIRMED'
     def rv(v,d=2):return round(v,d) if finite(v) else ''
