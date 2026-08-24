@@ -15,7 +15,9 @@ from config import STRAT, BT
 
 SPREADSHEET_ID=os.getenv('SPREADSHEET_ID','1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM')
 STOCKS_SHEET='Top 500 Stocks'; HUNTER_SHEET='Early Hunter'
-HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','180')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('WATCH_MIN_SCORE','72'))
+# 180 days left only ~30 days after warmup+horizon, which caused tiny 14-trade backtests.
+# Use ~2 years of trading history so the backtest has a meaningful out-of-sample signal window.
+HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','420')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('WATCH_MIN_SCORE','72'))
 OUT=Path('output'); OUT.mkdir(exist_ok=True)
 creds_json=os.getenv('GCP_CREDENTIALS')
 if not creds_json: raise RuntimeError('GCP_CREDENTIALS secret missing')
@@ -72,7 +74,7 @@ def fetch_bhav(s,d):
     except Exception as e:print('Fetch',d,e);return None
 
 s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0
-while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+80:
+while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+120:
     if d.weekday()<5:
         x=fetch_bhav(s,d)
         if x is not None and not x.empty:
@@ -96,7 +98,8 @@ if not hunter.empty and not ledger.empty:
     pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last');hunter=hunter.merge(pos,on='SYMBOL',how='left')
 gate_ok,gate_reason=evaluate(stats,cal)
 if not hunter.empty:hunter['QUALITY_GATE']='PASS' if gate_ok else gate_reason
-buy=hunter[hunter.ACTION.isin(['BUY','BUY ON TRIGGER'])].copy() if not hunter.empty else pd.DataFrame()
+# Safety: a failed quality gate must never produce live BUY candidates.
+buy=hunter[hunter.ACTION.isin(['BUY','BUY ON TRIGGER'])].copy() if (gate_ok and not hunter.empty) else pd.DataFrame(columns=hunter.columns if not hunter.empty else [])
 latest.to_csv(OUT/'latest_market.csv',index=False);hist[hist.DATE.eq(latest_date)].to_csv(OUT/'indicators.csv',index=False);hunter.to_csv(OUT/'early_hunter.csv',index=False);buy.to_csv(OUT/'buy_candidates.csv',index=False)
 sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'))
 
@@ -114,7 +117,9 @@ view['Bull Run']=view.apply(bull,axis=1);hmap=hunter.set_index('SYMBOL').to_dict
 def drow(sym):
     r=hmap.get(sym)
     if not r:return ('NO BUY','No Early Hunter setup')
-    return (str(r.get('ACTION','WATCH')),str(r.get('REASONS','Setup requires confirmation')))
+    action=str(r.get('ACTION','WATCH'))
+    if not gate_ok and action in ('BUY','BUY ON TRIGGER'):return ('NO BUY',f'Quality gate blocked: {gate_reason}')
+    return (action,str(r.get('REASONS','Setup requires confirmation')))
 view[['Decision','Decision Reason']]=view.SYMBOL.map(drow).apply(pd.Series)
 for outcol,hcol in [('Hunter Score','HUNTER_SCORE'),('Stage','STAGE'),('Entry Trigger','ENTRY_TRIGGER'),('Stop Loss','STOP_LOSS'),('Target 1','TARGET_1'),('Target 2','TARGET_2'),('Target 3','TARGET_3')]:view[outcol]=view.SYMBOL.map(lambda x:hmap.get(x,{}).get(hcol,''))
 view=view.sort_values(['Decision','Hunter Score'],ascending=[True,False],na_position='last').head(500)
@@ -126,7 +131,6 @@ else:hrows=[['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]
 hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',latest_date.strftime('%d-%b-%Y')],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',STRAT.buy_score],['WATCH SCORE GATE',MIN_SCORE],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
 if not cal.empty:hrows += [[''],['SCORE/HORIZON CALIBRATION']]+[cal.columns.tolist()]+cal.astype(object).where(pd.notna(cal),'').values.tolist()
 ws_hunter.update('A1',hrows,value_input_option='USER_ENTERED')
-# Explicitly format all summary numeric values as numbers, never dates.
 try:
     ws_hunter.format('A1:A25',{'numberFormat':{'type':'TEXT','pattern':'@'}})
     ws_hunter.format('B1:B25',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
@@ -136,7 +140,7 @@ except Exception as e:print('Sheet format warning:',e)
 for ws in (ws_stocks,ws_hunter):
     try:ws.freeze(rows=1)
     except Exception:pass
-status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | BUY {len(buy)} | WATCH gate {MIN_SCORE} | BUY gate {STRAT.buy_score} | BT {stats.get("trades",0)} | Win {stats.get("win_rate_pct",0)}% | PF {stats.get("profit_factor",0)} | Gate {gate_reason}'
+status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | BUY {len(buy)} | WATCH gate {MIN_SCORE} | BUY gate {STRAT.buy_score} | BT {stats.get("trades",0)} | Win {stats.get("win_rate_pct",0)}% | PF {stats.get("profit_factor",0)} | Gate {gate_reason} | History {len(frames)} days'
 ws_stocks.update('T1',[['STATUS']]);ws_stocks.update('T2',[[status]])
 print(status)
 if not buy.empty:print(buy[['SYMBOL','ACTION','STAGE','HUNTER_SCORE','CMP','BUY_ZONE_LOW','BUY_ZONE_HIGH','ENTRY_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3']].head(30).to_string(index=False))
