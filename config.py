@@ -33,9 +33,13 @@ class StrategyConfig:
     min_base_days:int=5
     max_fall_20d_pct:float=-28.0
     max_fall_50d_pct:float=-38.0
-    min_recovery_5d_pct:float=-2.0
+    min_recovery_5d_pct:-2.0
     min_rs_spread_pct:float=-1.0
     min_regime_score:int=0
+    min_buy_quality_score:int=88
+    require_volume_confirmation:bool=True
+    require_positive_momentum:bool=True
+    require_positive_expectancy:bool=True
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -52,6 +56,8 @@ class BacktestConfig:
     min_quality_trades:int=100
     min_quality_profit_factor:float=1.25
     min_quality_win_rate:float=45.0
+    target_win_rate:float=70.0
+    strong_target_win_rate:float=75.0
 
 IND=IndicatorConfig()
 STRAT=StrategyConfig()
