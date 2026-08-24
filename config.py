@@ -10,13 +10,12 @@ class IndicatorConfig:
 
 @dataclass(frozen=True)
 class StrategyConfig:
-    # Quality-first Early Hunter. Score is a minimum gate, not an upper band:
-    # capping 90+ based on one historical sample was overfitting.
     min_history:int=120
-    min_score:int=82
+    min_score:int=72
+    buy_score:int=82
     strong_score:int=88
-    max_entry_extension_pct:float=2.5
-    max_stop_pct:float=7.0
+    max_entry_extension_pct:float=3.5
+    max_stop_pct:float=8.0
     min_stop_pct:float=2.5
     min_rr1:float=1.8
     min_rr2:float=2.5
@@ -29,16 +28,21 @@ class StrategyConfig:
     require_not_extended:bool=True
     min_quality_score:int=82
     max_buy_score:int=100
-    min_resistance_distance_pct:float=3.0
+    min_resistance_distance_pct:float=4.0
+    max_52w_high_distance_pct:float=-12.0
+    min_base_days:int=5
 
 @dataclass(frozen=True)
 class BacktestConfig:
     horizon:int=30
     warmup:int=120
-    min_score:int=82
+    min_score:int=72
+    buy_score:int=82
     min_gap_between_signals:int=10
     commission_bps:float=10.0
     slippage_bps:float=5.0
+    walk_forward_train_days:int=180
+    walk_forward_test_days:int=30
 
 IND=IndicatorConfig()
 STRAT=StrategyConfig()
