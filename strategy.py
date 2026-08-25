@@ -15,7 +15,9 @@ def _f(v,default=np.nan):
         x=float(v); return x if np.isfinite(x) else default
     except Exception:return default
 
-def _pct(a,b):return (a/b-1)*100 if np.isfinite(a) and np.isfinite(b) and b!=0 else np.nan
+def _pct(a,b):
+    a,b=_f(a),_f(b)
+    return (a/b-1)*100 if np.isfinite(a) and np.isfinite(b) and b!=0 else np.nan
 
 def _num(g,c):
     return pd.to_numeric(g[c],errors='coerce').astype(float) if c in g.columns else pd.Series(np.nan,index=g.index)
@@ -70,7 +72,6 @@ def _row_features(g,i,market):
     breakout=np.isfinite(prior20) and close>prior20*1.002 and bullish and np.isfinite(loc) and loc>=.60 and (not np.isfinite(vol) or vol>=1.15)
     failed=np.isfinite(prior20) and prev_close>prior20 and close<prior20 and (not np.isfinite(vol) or vol>=1.15)
     extension=_pct(close,e20); ret5=_f(r.get('RET_5D')); not_extended=(not np.isfinite(extension) or extension<=4) and (not np.isfinite(ret5) or ret5<=8)
-    # 100-point score
     market_score=int(_f(market.get('score'),5)); trend_score=15 if trend else 11 if trend_ready else 4; accum_score=15 if accumulation else 7 if obv_rising or up_down else 0
     delivery_score=15 if delivery_good and delivery_improving else 11 if delivery_ok else 3; volume_score=10 if np.isfinite(vol) and vol>=1.2 else 7 if np.isfinite(vol) and vol>=.85 else 2
     compression_score=10 if compression else 5 if atr_compress or bb_compress else 0; resistance_score=15 if breakout else 14 if near and not far else 7 if np.isfinite(distance) and distance<=8 else 2; rs_score=5 if rs_strong else 3 if rs_positive else 0
@@ -102,8 +103,12 @@ def analyze_stock(g,min_score=None,market=None):
     g=g.sort_values('DATE').reset_index(drop=True)
     if len(g)<MIN_HISTORY:return None
     f=_row_features(g,len(g)-1,market or {'score':5,'regime':'NEUTRAL','breadth':np.nan}); threshold=BUY_SCORE if min_score is None else max(60,int(min_score)); action=f['action'] if f['score']>=threshold or f['action']=='SELL / EXIT' else 'WATCH'
-    def rv(x,d=2):return round(float(x),d) if np.isfinite(x) else ''
-    return {'SYMBOL':str(g.iloc[-1].SYMBOL),'DATE':pd.Timestamp(g.iloc[-1].DATE).strftime('%d-%b-%Y'),'CMP':rv(f['close']),'ACTION':action,'STAGE':'BREAKOUT CONFIRMED' if f['breakout'] else 'PRE-BREAKOUT' if f['near'] and f['compression'] else 'BASE FORMING' if f['compression'] else 'DEVELOPING','HUNTER_SCORE':f['score'],'APEX_SCORE':f['score'],'BREAKOUT_CONFIDENCE':f['score'],'ENTRY_TYPE':'MARKET' if action=='BUY NOW' else 'BREAKOUT TRIGGER' if action in ('BUY ON BREAKOUT','BREAKOUT IMMINENT') else '','MARKET_REGIME':(market or {}).get('regime','NEUTRAL'),'MARKET_BREADTH':rv((market or {}).get('breadth')),'TREND':'STRONG BULLISH' if f['trend'] else 'DEVELOPING' if f['trend_ready'] else 'WEAK','ACCUMULATION':'STRONG' if f['accumulation'] else 'DEVELOPING' if f['obv_rising'] else 'WEAK','DELIVERY':'IMPROVING' if f['delivery_improving'] else 'GOOD' if f['delivery_good'] else 'WEAK','DELIVERY_PCT':rv(f['deliv_pct']),'DELIVERY_VALUE':rv(f['close']*_f(g.iloc[-1].get('DELIV_QTY'))),'VOLUME_RATIO':rv(f['vol']),'ATR_PCT':rv(f['atr_pct']),'ATR_COMPRESSION':'YES' if f['atr_compress'] else 'NO','BB_WIDTH':'COMPRESSING' if f['bb_compress'] else 'NORMAL','BASE_COMPRESSION':'STRONG' if f['compression'] else 'PARTIAL' if (f['atr_compress'] or f['bb_compress']) else 'NO','RESISTANCE':rv(f['prior20']),'RESISTANCE_DISTANCE_PCT':rv(f['distance']),'BREAKOUT_TRIGGER':rv(f['trigger']),'ENTRY_ZONE':f"{rv(f['entry_low'])} - {rv(f['entry_high'])}",'STOP_LOSS':rv(f['stop']),'TARGET_1':rv(f['t1']),'TARGET_2':rv(f['t2']),'TARGET_3':rv(f['t3']),'R_R':rv(f['final_rr']),'RS_VS_UNIVERSE':rv(f['rs']),'RELATIVE_STRENGTH':'STRONG' if f['rs_strong'] else 'POSITIVE' if f['rs_positive'] else 'WEAK','RSI14':rv(f['rsi']),'ADX14':rv(_f(g.iloc[-1].get('ADX14'))),'EMA20':rv(f['e20']),'EMA50':rv(f['e50']),'EMA100':rv(f['e100']),'EMA200':rv(f['e200']),'BREAKOUT_STATUS':'CONFIRMED' if f['breakout'] else 'READY' if f['near'] else 'NOT READY','QUALITY_GATE':'SETUP ENGINE','REASONS':' | '.join(f['reasons']) if f['reasons'] else 'No strong setup on latest confirmed candle'}
+    def rv(x,d=2):
+        x=_f(x)
+        return round(x,d) if np.isfinite(x) else ''
+    deliv_qty=_f(g.iloc[-1].get('DELIV_QTY'))
+    delivery_value=f['close']*deliv_qty if np.isfinite(f['close']) and np.isfinite(deliv_qty) else np.nan
+    return {'SYMBOL':str(g.iloc[-1].SYMBOL),'DATE':pd.Timestamp(g.iloc[-1].DATE).strftime('%d-%b-%Y'),'CMP':rv(f['close']),'ACTION':action,'STAGE':'BREAKOUT CONFIRMED' if f['breakout'] else 'PRE-BREAKOUT' if f['near'] and f['compression'] else 'BASE FORMING' if f['compression'] else 'DEVELOPING','HUNTER_SCORE':f['score'],'APEX_SCORE':f['score'],'BREAKOUT_CONFIDENCE':f['score'],'ENTRY_TYPE':'MARKET' if action=='BUY NOW' else 'BREAKOUT TRIGGER' if action in ('BUY ON BREAKOUT','BREAKOUT IMMINENT') else '','MARKET_REGIME':(market or {}).get('regime','NEUTRAL'),'MARKET_BREADTH':rv((market or {}).get('breadth')),'TREND':'STRONG BULLISH' if f['trend'] else 'DEVELOPING' if f['trend_ready'] else 'WEAK','ACCUMULATION':'STRONG' if f['accumulation'] else 'DEVELOPING' if f['obv_rising'] else 'WEAK','DELIVERY':'IMPROVING' if f['delivery_improving'] else 'GOOD' if f['delivery_good'] else 'WEAK','DELIVERY_PCT':rv(f['deliv_pct']),'DELIVERY_VALUE':rv(delivery_value),'VOLUME_RATIO':rv(f['vol']),'ATR_PCT':rv(f['atr_pct']),'ATR_COMPRESSION':'YES' if f['atr_compress'] else 'NO','BB_WIDTH':'COMPRESSING' if f['bb_compress'] else 'NORMAL','BASE_COMPRESSION':'STRONG' if f['compression'] else 'PARTIAL' if (f['atr_compress'] or f['bb_compress']) else 'NO','RESISTANCE':rv(f['prior20']),'RESISTANCE_DISTANCE_PCT':rv(f['distance']),'BREAKOUT_TRIGGER':rv(f['trigger']),'ENTRY_ZONE':f"{rv(f['entry_low'])} - {rv(f['entry_high'])}",'STOP_LOSS':rv(f['stop']),'TARGET_1':rv(f['t1']),'TARGET_2':rv(f['t2']),'TARGET_3':rv(f['t3']),'R_R':rv(f['final_rr']),'RS_VS_UNIVERSE':rv(f['rs']),'RELATIVE_STRENGTH':'STRONG' if f['rs_strong'] else 'POSITIVE' if f['rs_positive'] else 'WEAK','RSI14':rv(f['rsi']),'ADX14':rv(_f(g.iloc[-1].get('ADX14'))),'EMA20':rv(f['e20']),'EMA50':rv(f['e50']),'EMA100':rv(f['e100']),'EMA200':rv(f['e200']),'BREAKOUT_STATUS':'CONFIRMED' if f['breakout'] else 'READY' if f['near'] else 'NOT READY','QUALITY_GATE':'SETUP ENGINE','REASONS':' | '.join(f['reasons']) if f['reasons'] else 'No strong setup on latest confirmed candle'}
 
 def scan_all(hist,min_score=None):
     h=hist.copy().sort_values(['SYMBOL','DATE']); market=_market_context(h); rows=[]
