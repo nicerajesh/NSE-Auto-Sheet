@@ -32,12 +32,22 @@ def query(sql,params=None,required=False):
     return _post(url,token,body,120)
 def load_open_trades(required=False):
     try:
-        data=query("SELECT symbol,signal_date,entry_date,entry_price,stop_loss,target1,target2,target3,exit_date,exit_price,exit_reason,status FROM trades WHERE status NOT IN ('EXIT','T3 HIT / EXIT') ORDER BY id",required=required)
+        data=query("SELECT id,symbol,signal_date,entry_date,entry_price,stop_loss,target1,target2,target3,exit_date,exit_price,exit_reason,status FROM trades WHERE status NOT IN ('EXIT','T3 HIT / EXIT') ORDER BY id",required=required)
         if not data:return []
         return data.get('result',[{}])[0].get('results',[]) or []
     except Exception:
         if required: raise
         return []
+def sync_ledger(ledger,required=False):
+    """Persist the local ledger state back to D1 so exits/statuses survive stateless Actions runs."""
+    if ledger is None or len(ledger)==0:return
+    items=[]
+    for _,r in ledger.iterrows():
+        sym=str(r.get('SYMBOL','')).strip()
+        if not sym:continue
+        status=str(r.get('STATUS','OPEN'))
+        items.append({'sql':"UPDATE trades SET exit_date=?,exit_price=?,exit_reason=?,status=? WHERE symbol=? AND status NOT IN ('EXIT','T3 HIT / EXIT')",'params':[str(r.get('EXIT_DATE','') or '') or None,_clean(r.get('EXIT_PRICE')),str(r.get('EXIT_REASON','') or '') or None,status,sym]})
+    for i in range(0,len(items),50):batch(items[i:i+50],required=required)
 def batch(items,required=False):
     cfg=_cfg()
     if not cfg:
