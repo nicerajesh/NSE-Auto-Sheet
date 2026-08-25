@@ -32,7 +32,7 @@ jobs:
         run: |
           echo '=== NSE EARLY HUNTER V9 — NEXT DAY PRE-BREAKOUT ==='
           echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py dashboard.py
           python - <<'PY'
           from config import STRAT, BT
           from strategy import ACTIONABLE
@@ -70,13 +70,18 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_ID: e6652e85-b927-4f11-b790-45fb6ee818f2
-          # The Python loader reserves HISTORY_DAYS + 120 calendar attempts.
-          # 480 requests gives enough calendar room to obtain ~420 trading sessions.
           HISTORY_DAYS: 480
           WATCH_MIN_SCORE: 72
           PYTHONUNBUFFERED: '1'
         run: |
           python update_sheet.py
+
+      - name: Build BUY Dashboard
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python dashboard.py
 
       - name: Verify Output
         run: |
@@ -97,10 +102,13 @@ jobs:
               try:
                   df = pd.read_csv(f)
                   print('\nFILE:', f, 'ROWS:', len(df))
-                  if 'NEXT_DAY_ACTION' in df.columns:
-                      print(df[df.NEXT_DAY_ACTION.ne('WATCH')][['SYMBOL','NEXT_DAY_ACTION','BUY_DATE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','BREAKOUT_PROBABILITY']].head(30).to_string(index=False))
-                  elif 'ACTION' in df.columns:
-                      print(df[df.ACTION.isin(['BUY ON BREAKOUT','BREAKOUT IMMINENT','BUY NOW'])].head(30).to_string(index=False))
+                  action_col = 'NEXT_DAY_ACTION' if 'NEXT_DAY_ACTION' in df.columns else 'ACTION' if 'ACTION' in df.columns else None
+                  if action_col:
+                      wanted = ['NEXT DAY PRE-BREAKOUT BUY','NEXT DAY BREAKOUT BUY','PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY','BUY ON BREAKOUT','BREAKOUT IMMINENT','BUY NOW']
+                      show = df[df[action_col].astype(str).isin(wanted)]
+                      if not show.empty:
+                          cols = [c for c in ['SYMBOL',action_col,'BUY_DATE','CMP','ENTRY_ZONE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','BREAKOUT_PROBABILITY'] if c in show.columns]
+                          print(show[cols].head(30).to_string(index=False))
               except Exception as e:
                   print('Summary warning:', e)
           PY
