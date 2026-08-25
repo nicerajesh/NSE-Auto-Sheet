@@ -28,7 +28,7 @@ jobs:
         run: |
           echo '=== NSE EARLY HUNTER — EVENT CALIBRATED FOUR-BUCKET ENGINE ==='
           echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py dashboard.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py test_system.py
           python - <<'PY'
           from config import STRAT, BT
           from strategy import ACTIONABLE
@@ -74,9 +74,10 @@ jobs:
           print('EVENT SAMPLES=',int(s.get('breakout_event_samples',0)))
           print('PRE-BREAKOUT EVENT RATE=',float(s.get('pre_breakout_event_rate_pct',0)))
           print('CALIBRATION ROWS=',len(c))
-          if 'ANALYSIS' in c.columns:
-              print(c.groupby('ANALYSIS').size().to_string())
+          if 'ANALYSIS' in c.columns: print(c.groupby('ANALYSIS').size().to_string())
           PY
+      - name: Finalize Quality Gate and Outputs
+        run: python finalize_outputs.py
       - name: Build Trading Dashboard
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
@@ -94,7 +95,7 @@ jobs:
           import pandas as pd
           df=pd.read_csv('output/buy_candidates.csv')
           if df.empty:
-              print('NO QUALIFIED BUY CANDIDATES — this is valid when the quality gate blocks the model.')
+              print('NO QUALIFIED BUY CANDIDATES — valid when quality gate blocks the model.')
           else:
               cols=[c for c in ['SYMBOL','ACTION','CATEGORY','CMP','ENTRY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_CONFIDENCE'] if c in df.columns]
               print(df[cols].head(50).to_string(index=False))
