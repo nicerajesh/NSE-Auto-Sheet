@@ -70,7 +70,14 @@ while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+120:
         time.sleep(.20)
     d-=timedelta(days=1);attempts+=1
 if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')
-hist=pd.concat(frames,ignore_index=True);hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns];hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True);hist=add_indicators_all(hist);latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy();med=hist.groupby('DATE')['RET_20D'].transform('median');hist['RS_VS_UNIVERSE']=hist.RET_20D-med;hist['RS_RANK']=hist.groupby('DATE').RET_20D.rank(pct=True)*100
+hist=pd.concat(frames,ignore_index=True);hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns];hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True);hist=add_indicators_all(hist)
+latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()
+# Relative strength must be computed BEFORE strategy.scan_all(). The strategy uses RS_VS_UNIVERSE as a hard gate.
+med=hist.groupby('DATE')['RET_20D'].transform('median');hist['RS_VS_UNIVERSE']=hist.RET_20D-med;hist['RS_RANK']=hist.groupby('DATE').RET_20D.rank(pct=True)*100
+# Sanity check: strategy should receive a populated RS series for the latest date.
+rs_latest=hist.loc[hist.DATE.eq(latest_date),'RS_VS_UNIVERSE'].dropna()
+if len(rs_latest)<max(50, int(len(latest)*0.25)):
+    print(f'WARNING: RS coverage is low on {latest_date:%Y-%m-%d}: {len(rs_latest)} valid values for {len(latest)} latest symbols')
 hunter=scan_all(hist,MIN_SCORE);hunter=pd.DataFrame() if hunter is None else hunter
 if not hunter.empty:
     rs=hist[hist.DATE.eq(latest_date)][['SYMBOL','RS_VS_UNIVERSE','RS_RANK']];hunter=hunter.merge(rs,on='SYMBOL',how='left')
