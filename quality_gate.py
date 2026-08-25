@@ -1,3 +1,4 @@
+import pandas as pd
 from config import BT
 
 
@@ -14,13 +15,12 @@ def evaluate(stats,calibration=None,min_trades=None):
     if win<BT.min_quality_win_rate:return False,'LOW_WIN_RATE'
     if calibration is None or calibration.empty:return False,'MISSING_CALIBRATION'
     q=calibration.copy()
-    event=q[q.get('ANALYSIS','').eq('BREAKOUT_EVENT')] if 'ANALYSIS' in q.columns else pd.DataFrame()
-    # Do not call a model predictive until it has a meaningful historical event sample.
+    event=q[q['ANALYSIS'].eq('BREAKOUT_EVENT')] if 'ANALYSIS' in q.columns else pd.DataFrame()
     if event.empty or int(event.TRADES.sum())<BT.probability_min_samples:return False,'INSUFFICIENT_BREAKOUT_EVENT_SAMPLES'
     pre=event[event.ACTION.astype(str).str.contains('PRE-BREAKOUT',na=False)].copy()
     if pre.empty or int(pre.TRADES.sum())<BT.probability_min_samples:return False,'INSUFFICIENT_PRE_BREAKOUT_SAMPLES'
     if float(pre.BREAKOUT_RATE.mul(pre.TRADES).sum()/max(1,pre.TRADES.sum())*100)<35:return False,'LOW_PRE_BREAKOUT_HIT_RATE'
-    trade_q=q[q.get('ANALYSIS','').eq('TRADE_SCORE')] if 'ANALYSIS' in q.columns else pd.DataFrame()
+    trade_q=q[q['ANALYSIS'].eq('TRADE_SCORE')] if 'ANALYSIS' in q.columns else pd.DataFrame()
     trade_q=trade_q[trade_q.TRADES>=5].copy()
     if not trade_q.empty and {'ACTION','SCORE_BUCKET','AVG_RETURN'}.issubset(trade_q.columns):
         core=trade_q[trade_q.SCORE_BUCKET.astype(str).eq('82-89')]
