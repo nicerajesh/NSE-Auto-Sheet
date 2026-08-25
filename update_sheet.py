@@ -77,33 +77,25 @@ if not hunter.empty:
 trades,stats,cal=run_backtest(hist,MIN_SCORE,BT.horizon);stats=stats or {};cal=cal if cal is not None else pd.DataFrame()
 if int(stats.get('trades',0))==0:print(f'BACKTEST DIAGNOSTIC: zero trades | rows={len(hist)} symbols={hist.SYMBOL.nunique()} sessions={len(frames)} threshold={MIN_SCORE} warmup={BT.warmup} horizon={BT.horizon}')
 trades.to_csv(OUT/'backtest_trades.csv',index=False);pd.DataFrame([stats]).to_csv(OUT/'backtest_summary.csv',index=False);cal.to_csv(OUT/'score_calibration.csv',index=False)
-# Evaluate the historical gate BEFORE creating or persisting any new trade.
 gate_ok,gate_reason=evaluate(stats,cal)
-# D1 is the persistent ledger source. If unavailable, an empty ledger is used safely; D1 sync remains non-blocking.
 old_rows=[]
 try: old_rows=load_open_trades(required=False) or []
 except Exception as e: print('D1 ledger load warning:',e)
 old=[]
 for r in old_rows:
     old.append({'SYMBOL':r.get('symbol',''),'ENTRY_DATE':r.get('entry_date',''),'ENTRY':r.get('entry_price',''),'STOP_LOSS':r.get('stop_loss',''),'TARGET_1':r.get('target1',''),'TARGET_2':r.get('target2',''),'TARGET_3':r.get('target3',''),'STATUS':r.get('status','OPEN'),'LAST_DATE':r.get('entry_date',''),'LAST_CLOSE':r.get('entry_price',''),'EXIT_DATE':r.get('exit_date',''),'EXIT_PRICE':r.get('exit_price',''),'EXIT_REASON':r.get('exit_reason','')})
-# Build current state for every NIFTY500 symbol, then overlay strategy fields where available.
 hmap=hunter.set_index('SYMBOL').to_dict('index') if not hunter.empty else {}
 current={}
 for r in latest.itertuples(index=False):
     sym=str(r.SYMBOL); current[sym]={'SYMBOL':sym,'DATE':latest_date.strftime('%Y-%m-%d'),'CMP':float(r.CLOSE_PRICE),'ACTION':'WATCH','STOP_LOSS':None,'TARGET_1':None,'TARGET_2':None,'TARGET_3':None}
-for sym,r in hmap.items():
-    current[str(sym)]={**current.get(str(sym),{'SYMBOL':str(sym),'DATE':latest_date.strftime('%Y-%m-%d')}),**r,'DATE':latest_date.strftime('%Y-%m-%d')}
+for sym,r in hmap.items():current[str(sym)]={**current.get(str(sym),{'SYMBOL':str(sym),'DATE':latest_date.strftime('%Y-%m-%d')}),**r,'DATE':latest_date.strftime('%Y-%m-%d')}
 ledger=update_ledger(pd.DataFrame(old),current,allow_new=gate_ok);ledger.to_csv(OUT/'trade_ledger.csv',index=False)
 if not hunter.empty:
     pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last');hunter=hunter.merge(pos,on='SYMBOL',how='left')
 buy=hunter[hunter.ACTION.isin(['BUY','BUY ON TRIGGER'])].copy() if not hunter.empty else pd.DataFrame(columns=hunter.columns if not hunter.empty else [])
 latest.to_csv(OUT/'latest_market.csv',index=False);hist[hist.DATE.eq(latest_date)].to_csv(OUT/'indicators.csv',index=False);hunter.to_csv(OUT/'early_hunter.csv',index=False);buy.to_csv(OUT/'buy_candidates.csv',index=False)
-# D1 failure must never prevent the primary Google Sheet delivery.
-try:
-    sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'),gate_ok=gate_ok)
-except Exception as e:
-    print('WARNING: D1 sync failed; continuing with Google Sheet update:',repr(e))
-
+try:sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'),gate_ok=gate_ok)
+except Exception as e:print('WARNING: D1 sync failed; continuing with Google Sheet update:',repr(e))
 def ensure(ws,n):
     if ws.col_count<n:ws.add_cols(n-ws.col_count)
 ensure(ws_stocks,30);ensure(ws_hunter,max(100,len(hunter.columns) if not hunter.empty else 20));view=latest.copy()
@@ -111,7 +103,7 @@ def bull(r):
     try:
         e50,e200=r.get('EMA50'),r.get('EMA200')
         if pd.notna(e50) and pd.notna(e200):return 'In Bull Run' if float(r.CLOSE_PRICE)>float(e50)>float(e200) else ('In Bear Run' if float(r.CLOSE_PRICE)<float(e50)<float(e200) else 'Unconfirmed')
-    except:pass
+    except Exception:pass
     return 'Unconfirmed'
 view['Bull Run']=view.apply(bull,axis=1)
 def drow(sym):
@@ -124,11 +116,22 @@ view[['Decision','Decision Reason']]=view.SYMBOL.map(drow).apply(pd.Series)
 for outcol,hcol in [('Hunter Score','HUNTER_SCORE'),('Stage','STAGE'),('Entry Trigger','ENTRY_TRIGGER'),('Stop Loss','STOP_LOSS'),('Target 1','TARGET_1'),('Target 2','TARGET_2'),('Target 3','TARGET_3')]:view[outcol]=view.SYMBOL.map(lambda x:hmap.get(x,{}).get(hcol,''))
 view=view.sort_values(['Decision','Hunter Score'],ascending=[True,False],na_position='last').head(500)
 headers=['NSE Code','Volume','Close Price','CMP','50 DMA','100 DMA','200 DMA','Bull Run','Decision','Decision Reason','Hunter Score','Stage','Entry Trigger','Stop Loss','Target 1','Target 2','Target 3','Quality Gate'];rows=[headers]+[[r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'EMA50',''),getattr(r,'EMA100',''),getattr(r,'EMA200',''),r['Bull Run'],r['Decision'],r['Decision Reason'],r['Hunter Score'],r['Stage'],r['Entry Trigger'],r['Stop Loss'],r['Target 1'],r['Target 2'],r['Target 3'],hmap.get(r.SYMBOL,{}).get('QUALITY_GATE',gate_reason)] for _,r in view.iterrows()]
-ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED');hrows=hunter.columns.tolist()+[] if False else ([hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist() if not hunter.empty else [['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]);report_date=latest_date.strftime('%d-%b-%Y');hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',"'"+report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',STRAT.buy_score],['WATCH SCORE GATE',MIN_SCORE],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
+ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED');hrows=( [hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist() if not hunter.empty else [['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]);report_date=latest_date.strftime('%d-%b-%Y');hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',STRAT.buy_score],['WATCH SCORE GATE',MIN_SCORE],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
 if not cal.empty:hrows += [[''],['SCORE/HORIZON CALIBRATION']]+[cal.columns.tolist()]+cal.astype(object).where(pd.notna(cal),'').values.tolist()
 ws_hunter.update('A1',hrows,value_input_option='USER_ENTERED')
+# Explicitly reset numeric cells so percentages never render as dates.
 try:
-    ws_hunter.format('B1:B3',{'numberFormat':{'type':'TEXT','pattern':'@'}});ws_hunter.format('B4:B8',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}});ws_stocks.format('K2:K501',{'numberFormat':{'type':'NUMBER','pattern':'0'}});ws_stocks.format('B2:B501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
+    ws_hunter.format('B1:B3',{'numberFormat':{'type':'TEXT','pattern':'@'}})
+    ws_hunter.format('B4:B8',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
+    ws_hunter.format('B10:B30',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
+    # Calibration is written after the summary; force every populated numeric column except text labels to NUMBER.
+    if not cal.empty:
+        header_row=next((i+1 for i,row in enumerate(hrows) if row and row[0]=='SCORE_BUCKET'),None)
+        if header_row:
+            end_row=header_row+len(cal)
+            for col in range(2,len(cal.columns)+1):
+                ws_hunter.format(f'{gspread.utils.rowcol_to_a1(header_row+1,col)}:{gspread.utils.rowcol_to_a1(end_row,col)}',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
+    ws_stocks.format('K2:K501',{'numberFormat':{'type':'NUMBER','pattern':'0'}});ws_stocks.format('B2:B501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
 except Exception as e:print('Sheet format warning:',e)
 for ws in (ws_stocks,ws_hunter):
     try:ws.freeze(rows=1)
