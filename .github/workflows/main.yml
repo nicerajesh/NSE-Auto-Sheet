@@ -8,7 +8,7 @@ on:
 jobs:
   update-sheet:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Checkout Repo (main)
         uses: actions/checkout@v4
@@ -29,17 +29,20 @@ jobs:
 
       - name: Verify Code Version
         run: |
-          echo "=== NSE EARLY HUNTER BUILD ==="
+          echo "=== NSE EARLY HUNTER V7 ==="
           echo "COMMIT=$(git rev-parse HEAD)"
-          echo "BRANCH=$(git branch --show-current || true)"
           python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py update_sheet.py
           echo "Python syntax check: PASS"
-          echo "==============================="
+          python - <<'PY'
+          from config import STRAT, BT
+          print(f"BUY_SCORE={STRAT.buy_score} MAX_STOP={STRAT.max_stop_pct} MIN_STOP={STRAT.min_stop_pct}")
+          print(f"HISTORY_DAYS=420 WARMUP={BT.warmup} HORIZON={BT.horizon}")
+          PY
 
       - name: Unit Tests
         run: python test_system.py
 
-      - name: Run Early Hunter V6 + D1
+      - name: Run Early Hunter V7 + D1
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -52,7 +55,7 @@ jobs:
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nse-early-hunter-v6
+          name: nse-early-hunter-v7
           path: output/*.csv
           if-no-files-found: error
           retention-days: 30
