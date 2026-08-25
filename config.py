@@ -12,7 +12,7 @@ class IndicatorConfig:
 class StrategyConfig:
     min_history:int=200
     min_score:int=82
-    buy_score:int=82
+    buy_score:int=90
     strong_score:int=90
     max_entry_extension_pct:float=4.0
     max_stop_pct:float=8.5
@@ -20,7 +20,7 @@ class StrategyConfig:
     min_rr1:float=1.25
     min_rr2:float=2.0
     min_rr3:float=3.0
-    volume_breakout_ratio:float=1.25
+    volume_breakout_ratio:float=1.50
     delivery_floor:float=30.0
     max_atr_pct:float=6.5
     require_higher_low_for_buy:bool=True
@@ -37,7 +37,7 @@ class StrategyConfig:
     min_rs_spread_pct:float=-1.0
     min_regime_score:int=0
     min_buy_quality_score:int=84
-    require_volume_confirmation:bool=False
+    require_volume_confirmation:bool=True
     require_positive_momentum:bool=True
     require_positive_expectancy:bool=False
     late_ret20_pct:float=15.0
@@ -49,7 +49,7 @@ class BacktestConfig:
     horizon:int=30
     warmup:int=252
     min_score:int=82
-    buy_score:int=82
+    buy_score:int=90
     min_gap_between_signals:int=10
     commission_bps:float=10.0
     slippage_bps:float=5.0
