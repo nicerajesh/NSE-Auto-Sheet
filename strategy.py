@@ -84,16 +84,17 @@ def analyze_stock(g,min_score=None):
     momentum_ok=rsi_recovery and momentum_turn and ema_turn and rs_improving
     location_ok=risk_room and not_extended and 4<=low_dist<=STRAT.late_low_distance_pct
     setup_ok=deep_fall or bottom_hold
-    # A high raw score is NOT allowed to become a BUY merely because many weak
-    # component checks happened to add up.  90+ is reserved for a confirmed
-    # second-HH breakout with volume and a structurally valid entry.
     confirmed_structure=second_hh and breakout_volume and structural_buy and momentum_ok and location_ok and risk_ok
     if score>=90 and not confirmed_structure:
         score=89
         reasons.append('High-score confirmation required')
     eligible=score>=buy_gate
     confirmed=eligible and score>=STRAT.strong_score and stage=='CONFIRMED BREAKOUT' and confirmed_structure
-    early=eligible and score<STRAT.strong_score and structural_buy and momentum_ok and location_ok and risk_ok and setup_ok
+    # Early entries are deliberately stricter than the raw score: we require
+    # actual demand/absorption and stable delivery so a high-volume sell-off
+    # is not mistaken for accumulation.
+    early_quality=demand and delivery_build and healthy_volume and exhaustion
+    early=eligible and score<STRAT.strong_score and structural_buy and momentum_ok and location_ok and risk_ok and setup_ok and early_quality
     action='BUY' if confirmed else 'BUY ON TRIGGER' if early else 'WATCH'
     structure='LOW → HH → HL → HH' if second_hh else 'LOW → HH → HL' if hl_idx is not None else 'LOW → HH' if hh_idx is not None else 'LOW HOLD' if bottom_hold else 'UNCONFIRMED'
     def rv(v,d=2):return round(float(v),d) if finite(v) else ''
