@@ -14,6 +14,11 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30):
     if f.empty:return None
     active_stop=float(stop);rem=1.0;realised=0.0
     hit1=hit2=hit3=False;initial_stop_hit=False;breakeven_exit=False;stop_hit=False;exit_idx=None;exit_reason='TIME';max_high=entry;min_low=entry
+    risk=max(1e-9,entry-float(stop))
+    # After T1, protect part of the original risk instead of moving the whole
+    # remainder immediately to exact breakeven. This reduces premature exits
+    # while still locking a small profit if the move reverses.
+    t1_protect_stop=entry + 0.25*risk
     for j,row in f.iterrows():
         op=float(row.OPEN_PRICE);lo=float(row.LOW_PRICE);hi=float(row.HIGH_PRICE);cl=float(row.CLOSE_PRICE)
         max_high=max(max_high,hi);min_low=min(min_low,lo)
@@ -23,14 +28,14 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30):
             else:breakeven_exit=True
             stop_hit=True;rem=0.0;exit_idx=j;exit_reason='GAP_STOP' if not hit1 else 'LOCKED_GAP_STOP';break
         if not hit1 and op>=t1:
-            realised += .40*(op-entry)/entry*100;rem-=.40;hit1=True;active_stop=max(active_stop,entry)
+            realised += .40*(op-entry)/entry*100;rem-=.40;hit1=True;active_stop=max(active_stop,t1_protect_stop)
         elif not hit1 and hi>=t1:
-            realised += .40*(t1-entry)/entry*100;rem-=.40;hit1=True;active_stop=max(active_stop,entry)
+            realised += .40*(t1-entry)/entry*100;rem-=.40;hit1=True;active_stop=max(active_stop,t1_protect_stop)
         if lo<=active_stop:
             realised += rem*(active_stop-entry)/entry*100
             if not hit1:initial_stop_hit=True
             else:breakeven_exit=True
-            stop_hit=True;rem=0.0;exit_idx=j;exit_reason='STOP' if not hit2 else 'LOCKED_T2';break
+            stop_hit=True;rem=0.0;exit_idx=j;exit_reason='STOP';break
         if not hit2 and op>=t2:
             realised += .30*(op-entry)/entry*100;rem-=.30;hit2=True;active_stop=max(active_stop,t1)
         elif not hit2 and hi>=t2:
@@ -39,7 +44,7 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30):
             realised += rem*(active_stop-entry)/entry*100
             if not hit1:initial_stop_hit=True
             else:breakeven_exit=True
-            stop_hit=True;rem=0.0;exit_idx=j;exit_reason='STOP' if not hit3 else 'LOCKED_T3';break
+            stop_hit=True;rem=0.0;exit_idx=j;exit_reason='STOP';break
         if not hit3 and op>=t3:
             realised += rem*(op-entry)/entry*100;rem=0.0;hit3=True;exit_idx=j;exit_reason='T3_GAP';break
         if not hit3 and hi>=t3:
@@ -49,7 +54,6 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30):
     if hit3:hit2=True;hit1=True
     if hit2:hit1=True
     cost=(BT.commission_bps+BT.slippage_bps)*2/100
-    risk=max(1e-9,entry-stop)
     return {'HIT_T1':hit1,'HIT_T2':hit2,'HIT_T3':hit3,'STOP_HIT':stop_hit,'INITIAL_STOP_HIT':initial_stop_hit,'BREAKEVEN_EXIT':breakeven_exit,'RETURN_PCT':realised-cost,'GROSS_RETURN_PCT':realised,'HOLD_DAYS':int(exit_idx-entry_i+1),'MFE_PCT':(max_high-entry)/entry*100,'MAE_PCT':(min_low-entry)/entry*100,'MFE_R':(max_high-entry)/risk,'MAE_R':(min_low-entry)/risk}
 
 def _horizon_rows(trades,hist,horizons=(5,10,15,20,30)):
