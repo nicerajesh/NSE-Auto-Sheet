@@ -11,7 +11,7 @@ class IndicatorConfig:
 @dataclass(frozen=True)
 class StrategyConfig:
     min_history:int=200
-    min_score:int=72
+    min_score:int=82
     buy_score:int=82
     strong_score:int=90
     max_entry_extension_pct:float=4.0
