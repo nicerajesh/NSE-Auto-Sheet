@@ -12,7 +12,8 @@ class IndicatorConfig:
 class StrategyConfig:
     min_history:int=200
     min_score:int=82
-    buy_score:int=90
+    # 82+ structurally valid setups can be BUY ON TRIGGER; 90+ is reserved for confirmed breakout.
+    buy_score:int=82
     strong_score:int=90
     max_entry_extension_pct:float=4.0
     max_stop_pct:float=8.5
@@ -29,7 +30,7 @@ class StrategyConfig:
     min_quality_score:int=82
     max_buy_score:int=100
     min_resistance_distance_pct:float=3.0
-    max_52w_high_distance_pct:float=-12.0
+    max_52w_high_distance_pct:-12.0
     min_base_days:int=4
     max_fall_20d_pct:float=-22.0
     max_fall_50d_pct:float=-35.0
@@ -49,7 +50,7 @@ class BacktestConfig:
     horizon:int=30
     warmup:int=252
     min_score:int=82
-    buy_score:int=90
+    buy_score:int=82
     min_gap_between_signals:int=10
     commission_bps:float=10.0
     slippage_bps:float=5.0
