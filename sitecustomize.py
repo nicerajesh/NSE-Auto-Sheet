@@ -2,6 +2,7 @@ from __future__ import annotations
 import math
 import pandas as pd
 
+_LIVE_LATEST_DATE=None
 try:
     import strategy as _s
     _orig_analyze = _s.analyze_stock
@@ -23,8 +24,8 @@ try:
             return {'score':5,'regime':'NEUTRAL','breadth':float('nan')}
 
     def _strict_probability(g, score, action):
-        if action not in ('PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'):
-            return min(69, max(0, int(round(float(score or 0)*0.69))))
+        if _LIVE_LATEST_DATE is None or pd.Timestamp(g.DATE.max()) != pd.Timestamp(_LIVE_LATEST_DATE): return None
+        if action not in ('PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'): return None
         if len(g) < 230: return None
         h=pd.to_numeric(g.HIGH_PRICE,errors='coerce').reset_index(drop=True)
         c=pd.to_numeric(g.CLOSE_PRICE,errors='coerce').reset_index(drop=True)
@@ -67,6 +68,8 @@ try:
 
     if _orig_scan:
         def scan_all(hist,min_score=None):
+            global _LIVE_LATEST_DATE
+            _LIVE_LATEST_DATE=pd.Timestamp(hist.DATE.max())
             m=_market(hist)
             try:
                 release_ok=False
@@ -88,6 +91,31 @@ try:
         _s.scan_all=scan_all
 except Exception as _e:
     print('sitecustomize strategy patch warning:',repr(_e))
+
+# 5) Backtest uses the same universe-level market regime as live scanning.
+try:
+    import backtest as _bt
+    _old_bt_run=_bt.run_backtest
+    def run_backtest(hist,min_score=None,horizon=None):
+        global _LIVE_LATEST_DATE
+        _LIVE_LATEST_DATE=None
+        dates=sorted(pd.to_datetime(hist.DATE).dropna().unique())
+        contexts={}
+        for d in dates:
+            x=hist[pd.to_datetime(hist.DATE).eq(d)]
+            contexts[d]=_market(x)
+        old=_bt.analyze_stock
+        def _parity_analyze(g,min_score=None,market=None):
+            d=pd.Timestamp(g.DATE.max())
+            return analyze_stock(g,min_score,contexts.get(d,_market(g)))
+        _bt.analyze_stock=_parity_analyze
+        try:
+            return _old_bt_run(hist,min_score,horizon)
+        finally:
+            _bt.analyze_stock=old
+    _bt.run_backtest=run_backtest
+except Exception as _e:
+    print('sitecustomize backtest parity patch warning:',repr(_e))
 
 try:
     import quality_gate as _q
