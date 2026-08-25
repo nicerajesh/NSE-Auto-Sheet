@@ -16,10 +16,12 @@ def synthetic():
 
 def main():
     df=synthetic();ind=add_indicators(df);sig=analyze_stock(ind,55)
-    assert sig and sig['STOP_LOSS']<sig['CMP']<sig['TARGET_1']<sig['TARGET_2']<sig['TARGET_3']
+    assert sig is not None
+    assert sig['STOP_LOSS']<sig['CMP']<sig['TARGET_1']<sig['TARGET_2']<sig['TARGET_3']
     assert 0<=sig['HUNTER_SCORE']<=100
-    assert sig['ACTION'] in ('BUY','BUY ON TRIGGER','WATCH')
+    assert sig['ACTION'] in ('BUY NOW','BUY ON BREAKOUT','BREAKOUT IMMINENT','WATCH','SELL / EXIT')
+    assert sig['STAGE'] in ('BREAKOUT CONFIRMED','PRE-BREAKOUT','BASE FORMING','DEVELOPING')
     assert len(ind)==len(df)
-    print('PASS strategy:',sig['STRUCTURE'],sig['ACTION'],sig['HUNTER_SCORE'])
+    print('PASS strategy:',sig['STAGE'],sig['ACTION'],sig['HUNTER_SCORE'])
 
 if __name__=='__main__':main()
