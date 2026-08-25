@@ -1,6 +1,7 @@
 import pandas as pd
 
 COLS=["SYMBOL","ENTRY_DATE","ENTRY","STOP_LOSS","TARGET_1","TARGET_2","TARGET_3","STATUS","LAST_DATE","LAST_CLOSE","EXIT_DATE","EXIT_PRICE","EXIT_REASON"]
+ACTIONABLE={"BUY NOW","BUY ON BREAKOUT","BREAKOUT IMMINENT"}
 
 def _num(v):
     try:
@@ -37,6 +38,7 @@ def update_ledger(old,current,allow_new=True):
         rows.append(d)
     if allow_new:
         for sym,c in current.items():
-            if str(c.get("ACTION")) not in ("BUY","BUY ON TRIGGER") or str(sym) in existing: continue
-            rows.append({"SYMBOL":sym,"ENTRY_DATE":c.get("DATE",""),"ENTRY":c.get("CMP"),"STOP_LOSS":c.get("STOP_LOSS"),"TARGET_1":c.get("TARGET_1"),"TARGET_2":c.get("TARGET_2"),"TARGET_3":c.get("TARGET_3"),"STATUS":"OPEN","LAST_DATE":c.get("DATE",""),"LAST_CLOSE":c.get("CMP"),"EXIT_DATE":"","EXIT_PRICE":"","EXIT_REASON":""})
+            if str(c.get("ACTION")) not in ACTIONABLE or str(sym) in existing: continue
+            action=str(c.get("ACTION")); entry=c.get("ENTRY_TRIGGER") if action in ("BUY ON BREAKOUT","BREAKOUT IMMINENT") else c.get("CMP")
+            rows.append({"SYMBOL":sym,"ENTRY_DATE":c.get("DATE",""),"ENTRY":entry,"STOP_LOSS":c.get("STOP_LOSS"),"TARGET_1":c.get("TARGET_1"),"TARGET_2":c.get("TARGET_2"),"TARGET_3":c.get("TARGET_3"),"STATUS":"OPEN","LAST_DATE":c.get("DATE",""),"LAST_CLOSE":c.get("CMP"),"EXIT_DATE":"","EXIT_PRICE":"","EXIT_REASON":""})
     return pd.DataFrame(rows,columns=COLS)
