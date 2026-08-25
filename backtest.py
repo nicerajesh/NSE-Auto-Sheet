@@ -15,10 +15,12 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30):
     active_stop=float(stop);rem=1.0;realised=0.0
     hit1=hit2=hit3=False;initial_stop_hit=False;breakeven_exit=False;stop_hit=False;exit_idx=None;exit_reason='TIME';max_high=entry;min_low=entry
     risk=max(1e-9,entry-float(stop))
-    # After T1, protect part of the original risk instead of moving the whole
-    # remainder immediately to exact breakeven. This reduces premature exits
-    # while still locking a small profit if the move reverses.
-    t1_protect_stop=entry + 0.25*risk
+    # Do not move the entire remainder to breakeven immediately after T1.
+    # T1 only de-risks the position slightly; T2 is the point where a
+    # meaningful profit lock is justified. This avoids turning normal pullbacks
+    # after a first target into a large population of zero/near-zero exits.
+    t1_protect_stop=entry + 0.05*risk
+    t2_protect_stop=entry + 1.00*risk
     for j,row in f.iterrows():
         op=float(row.OPEN_PRICE);lo=float(row.LOW_PRICE);hi=float(row.HIGH_PRICE);cl=float(row.CLOSE_PRICE)
         max_high=max(max_high,hi);min_low=min(min_low,lo)
@@ -37,9 +39,9 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30):
             else:breakeven_exit=True
             stop_hit=True;rem=0.0;exit_idx=j;exit_reason='STOP';break
         if not hit2 and op>=t2:
-            realised += .30*(op-entry)/entry*100;rem-=.30;hit2=True;active_stop=max(active_stop,t1)
+            realised += .30*(op-entry)/entry*100;rem-=.30;hit2=True;active_stop=max(active_stop,t2_protect_stop)
         elif not hit2 and hi>=t2:
-            realised += .30*(t2-entry)/entry*100;rem-=.30;hit2=True;active_stop=max(active_stop,t1)
+            realised += .30*(t2-entry)/entry*100;rem-=.30;hit2=True;active_stop=max(active_stop,t2_protect_stop)
         if lo<=active_stop:
             realised += rem*(active_stop-entry)/entry*100
             if not hit1:initial_stop_hit=True
