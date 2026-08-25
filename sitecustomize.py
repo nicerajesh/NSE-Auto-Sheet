@@ -86,8 +86,9 @@ try:
                     if release_ok and r and r.get('ACTION') in {'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}:
                         out.append(r)
                 return pd.DataFrame(out)
-            except Exception:
-                return _orig_scan(hist,min_score)
+            except Exception as e:
+                print('LIVE BUY SCAN FAIL-SAFE:',repr(e))
+                return pd.DataFrame()
         _s.scan_all=scan_all
 except Exception as _e:
     print('sitecustomize strategy patch warning:',repr(_e))
