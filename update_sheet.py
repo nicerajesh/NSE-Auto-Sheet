@@ -91,10 +91,8 @@ for r in latest.itertuples(index=False):
 for sym,r in hmap.items():current[str(sym)]={**current.get(str(sym),{'SYMBOL':str(sym),'DATE':latest_date.strftime('%Y-%m-%d')}),**r,'DATE':latest_date.strftime('%Y-%m-%d')}
 ledger=update_ledger(pd.DataFrame(old),current,allow_new=gate_ok);ledger.to_csv(OUT/'trade_ledger.csv',index=False)
 if not hunter.empty:
-    pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last')
-    pos=pos.rename(columns={'EXIT_PRICE':'EXIT_PRICE'})
+    pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last')
     hunter=hunter.merge(pos,on='SYMBOL',how='left')
-# Only the new BUY buckets are trade candidates. No legacy BUY labels are accepted.
 buy=hunter[hunter.ACTION.isin(BUY_ACTIONS)].copy() if not hunter.empty else pd.DataFrame(columns=hunter.columns if not hunter.empty else [])
 latest.to_csv(OUT/'latest_market.csv',index=False);hist[hist.DATE.eq(latest_date)].to_csv(OUT/'indicators.csv',index=False);hunter.to_csv(OUT/'early_hunter.csv',index=False);buy.to_csv(OUT/'buy_candidates.csv',index=False)
 try:sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'),gate_ok=gate_ok)
