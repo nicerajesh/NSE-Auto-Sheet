@@ -14,16 +14,12 @@ class StrategyConfig:
     min_score:int=72
     buy_score:int=82
     strong_score:int=90
-
-    # Risk / entry
     max_entry_extension_pct:float=4.0
     max_stop_pct:float=8.5
     min_stop_pct:float=2.0
     min_rr1:float=1.50
     min_rr2:float=2.50
     min_rr3:float=4.00
-
-    # Confirmation
     volume_breakout_ratio:float=1.20
     delivery_floor:float=30.0
     max_atr_pct:float=6.5
@@ -32,8 +28,6 @@ class StrategyConfig:
     require_not_extended:bool=True
     require_volume_confirmation:bool=True
     require_positive_momentum:bool=True
-
-    # PRE-BREAKOUT: deliberately strict. A candidate must be close to resistance.
     min_quality_score:int=82
     min_buy_quality_score:int=82
     max_buy_score:int=100
@@ -48,12 +42,17 @@ class StrategyConfig:
     min_rs_spread_pct:float=0.0
     min_regime_score:int=4
     min_adx:float=15.0
-
-    # Do not call a late/extended breakout a BUY.
     late_ret20_pct:float=15.0
     late_low_distance_pct:float=24.0
     max_breakout_extension_pct:float=6.0
     breakout_min_close_strength:float=0.65
+    # Advanced pre-breakout controls
+    min_volume_dryup_ratio:float=0.80
+    max_volume_dryup_ratio:float=1.05
+    require_volume_dryup:bool=True
+    min_base_tightening_pct:float=5.0
+    max_buy_zone_pct:float=1.5
+    max_gap_entry_pct:float=2.0
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -72,6 +71,9 @@ class BacktestConfig:
     min_quality_win_rate:float=45.0
     target_win_rate:float=65.0
     strong_target_win_rate:float=72.0
+    breakout_lookahead_days:int=20
+    probability_min_samples:int=20
+    probability_smoothing:int=5
 
 IND=IndicatorConfig()
 STRAT=StrategyConfig()
