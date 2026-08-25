@@ -30,6 +30,14 @@ def query(sql,params=None,required=False):
     token,account=cfg; url=f'{API}/accounts/{account}/d1/database/{DB_ID}/query'; body={'sql':sql}
     if params is not None:body['params']=_clean_params(params)
     return _post(url,token,body,120)
+def load_open_trades(required=False):
+    try:
+        data=query("SELECT symbol,signal_date,entry_date,entry_price,stop_loss,target1,target2,target3,exit_date,exit_price,exit_reason,status FROM trades WHERE status NOT IN ('EXIT','T3 HIT / EXIT') ORDER BY id",required=required)
+        if not data:return []
+        return data.get('result',[{}])[0].get('results',[]) or []
+    except Exception:
+        if required: raise
+        return []
 def batch(items,required=False):
     cfg=_cfg()
     if not cfg:
@@ -56,20 +64,20 @@ def _f(v):
         if v in ('',None):return None
         x=float(v);return x if math.isfinite(x) else None
     except Exception:return None
-def sync_latest(latest,hunter,stats,run_date):
+def sync_latest(latest,hunter,stats,run_date,gate_ok=False):
     if _cfg() is None:print('D1 disabled: Cloudflare secrets not configured');return
     setup();items=[]
     for r in latest.itertuples(index=False):
         items.append({'sql':'INSERT INTO bhavcopy(symbol,trade_date,open,high,low,close,volume,turnover_lacs,delivery_qty,delivery_pct) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol,trade_date) DO UPDATE SET open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,volume=excluded.volume,turnover_lacs=excluded.turnover_lacs,delivery_qty=excluded.delivery_qty,delivery_pct=excluded.delivery_pct','params':[str(r.SYMBOL),str(r.DATE)[:10],_f(r.OPEN_PRICE),_f(r.HIGH_PRICE),_f(r.LOW_PRICE),_f(r.CLOSE_PRICE),int(_f(r.TTL_TRD_QNTY) or 0),_f(r.TURNOVER_LACS),int(_f(r.DELIV_QTY) or 0),_f(r.DELIV_PER)]})
     for r in hunter.itertuples(index=False):
-        vals=lambda n:_f(getattr(r,n,''))
-        items.append({'sql':'INSERT INTO signals(symbol,signal_date,action,stage,score,structure,cmp,recent_low,first_hh,higher_low,second_hh,buy_zone_low,buy_zone_high,entry_trigger,stop_loss,target1,target2,target3,rr1,rr2,rr3,resistance,reasons) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol,signal_date) DO UPDATE SET action=excluded.action,stage=excluded.stage,score=excluded.score,structure=excluded.structure,cmp=excluded.cmp,recent_low=excluded.recent_low,first_hh=excluded.first_hh,higher_low=excluded.higher_low,second_hh=excluded.second_hh,buy_zone_low=excluded.buy_zone_low,buy_zone_high=excluded.buy_zone_high,entry_trigger=excluded.entry_trigger,stop_loss=excluded.stop_loss,target1=excluded.target1,target2=excluded.target2,target3=excluded.target3,rr1=excluded.rr1,rr2=excluded.rr2,rr3=excluded.rr3,resistance=excluded.resistance,reasons=excluded.reasons','params':[str(r.SYMBOL),str(run_date),str(r.ACTION),str(r.STAGE),int(_f(r.HUNTER_SCORE) or 0),str(r.STRUCTURE),vals('CMP'),vals('RECENT_LOW'),vals('FIRST_HH'),vals('HIGHER_LOW'),vals('SECOND_HH'),vals('BUY_ZONE_LOW'),vals('BUY_ZONE_HIGH'),vals('ENTRY_TRIGGER'),vals('STOP_LOSS'),vals('TARGET_1'),vals('TARGET_2'),vals('TARGET_3'),vals('RR_T1'),vals('RR_T2'),vals('RR_T3'),vals('RESISTANCE'),str(getattr(r,'REASONS',''))]})
-        items.append({'sql':'INSERT INTO daily_snapshots(symbol,snapshot_date,action,stage,score,cmp,entry_trigger,stop_loss,target1,target2,target3,structure) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol,snapshot_date) DO UPDATE SET action=excluded.action,stage=excluded.stage,score=excluded.score,cmp=excluded.cmp,entry_trigger=excluded.entry_trigger,stop_loss=excluded.stop_loss,target1=excluded.target1,target2=excluded.target2,target3=excluded.target3,structure=excluded.structure','params':[str(r.SYMBOL),str(run_date),str(r.ACTION),str(r.STAGE),int(_f(r.HUNTER_SCORE) or 0),vals('CMP'),vals('ENTRY_TRIGGER'),vals('STOP_LOSS'),vals('TARGET_1'),vals('TARGET_2'),vals('TARGET_3'),str(r.STRUCTURE)]})
-        if str(r.ACTION) in ('BUY','BUY ON TRIGGER'):
-            entry=vals('ENTRY_TRIGGER') if str(r.ACTION)=='BUY ON TRIGGER' else vals('CMP')
-            items.append({'sql':"INSERT INTO trades(symbol,signal_date,entry_date,entry_price,stop_loss,target1,target2,target3,status) SELECT ?,?,?,?,?,?,?,?,'OPEN' WHERE NOT EXISTS(SELECT 1 FROM trades WHERE symbol=? AND status='OPEN')",'params':[str(r.SYMBOL),str(run_date),str(run_date),entry,vals('STOP_LOSS'),vals('TARGET_1'),vals('TARGET_2'),vals('TARGET_3'),str(r.SYMBOL)]})
+        vals=lambda n:_f(getattr(r,n,'')); action=str(r.ACTION)
+        items.append({'sql':'INSERT INTO signals(symbol,signal_date,action,stage,score,structure,cmp,recent_low,first_hh,higher_low,second_hh,buy_zone_low,buy_zone_high,entry_trigger,stop_loss,target1,target2,target3,rr1,rr2,rr3,resistance,reasons) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol,signal_date) DO UPDATE SET action=excluded.action,stage=excluded.stage,score=excluded.score,structure=excluded.structure,cmp=excluded.cmp,recent_low=excluded.recent_low,first_hh=excluded.first_hh,higher_low=excluded.higher_low,second_hh=excluded.second_hh,buy_zone_low=excluded.buy_zone_low,buy_zone_high=excluded.buy_zone_high,entry_trigger=excluded.entry_trigger,stop_loss=excluded.stop_loss,target1=excluded.target1,target2=excluded.target2,target3=excluded.target3,rr1=excluded.rr1,rr2=excluded.rr2,rr3=excluded.rr3,resistance=excluded.resistance,reasons=excluded.reasons','params':[str(r.SYMBOL),str(run_date),action,str(r.STAGE),int(_f(r.HUNTER_SCORE) or 0),str(r.STRUCTURE),vals('CMP'),vals('RECENT_LOW'),vals('FIRST_HH'),vals('HIGHER_LOW'),vals('SECOND_HH'),vals('BUY_ZONE_LOW'),vals('BUY_ZONE_HIGH'),vals('ENTRY_TRIGGER'),vals('STOP_LOSS'),vals('TARGET_1'),vals('TARGET_2'),vals('TARGET_3'),vals('RR_T1'),vals('RR_T2'),vals('RR_T3'),vals('RESISTANCE'),str(getattr(r,'REASONS',''))]})
+        items.append({'sql':'INSERT INTO daily_snapshots(symbol,snapshot_date,action,stage,score,cmp,entry_trigger,stop_loss,target1,target2,target3,structure) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol,snapshot_date) DO UPDATE SET action=excluded.action,stage=excluded.stage,score=excluded.score,cmp=excluded.cmp,entry_trigger=excluded.entry_trigger,stop_loss=excluded.stop_loss,target1=excluded.target1,target2=excluded.target2,target3=excluded.target3,structure=excluded.structure','params':[str(r.SYMBOL),str(run_date),action,str(r.STAGE),int(_f(r.HUNTER_SCORE) or 0),vals('CMP'),vals('ENTRY_TRIGGER'),vals('STOP_LOSS'),vals('TARGET_1'),vals('TARGET_2'),vals('TARGET_3'),str(r.STRUCTURE)]})
+        if gate_ok and action in ('BUY','BUY ON TRIGGER'):
+            entry=vals('ENTRY_TRIGGER') if action=='BUY ON TRIGGER' else vals('CMP')
+            items.append({'sql':"INSERT INTO trades(symbol,signal_date,entry_date,entry_price,stop_loss,target1,target2,target3,status) SELECT ?,?,?,?,?,?,?,?,'OPEN' WHERE NOT EXISTS(SELECT 1 FROM trades WHERE symbol=? AND status NOT IN ('EXIT','T3 HIT / EXIT'))",'params':[str(r.SYMBOL),str(run_date),str(run_date),entry,vals('STOP_LOSS'),vals('TARGET_1'),vals('TARGET_2'),vals('TARGET_3'),str(r.SYMBOL)]})
     for i in range(0,len(items),10):batch(items[i:i+10],required=True)
     if stats:
         min_score=int(os.getenv('MIN_SCORE','82'))
         query('INSERT INTO backtest_results(run_date,min_score,trades,win_rate_pct,avg_return_pct,median_return_pct,stop_rate_pct,target1_hit_pct,target2_hit_pct,target3_hit_pct,profit_factor,avg_hold_days) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',[str(run_date),min_score,int(stats.get('trades',0)),_f(stats.get('win_rate_pct',0)),_f(stats.get('avg_return_pct',0)),_f(stats.get('median_return_pct',0)),_f(stats.get('stop_rate_pct',0)),_f(stats.get('t1_hit_pct',0)),_f(stats.get('t2_hit_pct',0)),_f(stats.get('t3_hit_pct',0)),_f(stats.get('profit_factor',0)),_f(stats.get('avg_hold_days',0))],required=True)
-    print(f'D1 sync complete: {len(latest)} market rows + {len(hunter)} signals')
+    print(f'D1 sync complete: {len(latest)} market rows + {len(hunter)} signals | gate_ok={gate_ok}')
