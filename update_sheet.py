@@ -116,22 +116,41 @@ view[['Decision','Decision Reason']]=view.SYMBOL.map(drow).apply(pd.Series)
 for outcol,hcol in [('Hunter Score','HUNTER_SCORE'),('Stage','STAGE'),('Entry Trigger','ENTRY_TRIGGER'),('Stop Loss','STOP_LOSS'),('Target 1','TARGET_1'),('Target 2','TARGET_2'),('Target 3','TARGET_3')]:view[outcol]=view.SYMBOL.map(lambda x:hmap.get(x,{}).get(hcol,''))
 view=view.sort_values(['Decision','Hunter Score'],ascending=[True,False],na_position='last').head(500)
 headers=['NSE Code','Volume','Close Price','CMP','50 DMA','100 DMA','200 DMA','Bull Run','Decision','Decision Reason','Hunter Score','Stage','Entry Trigger','Stop Loss','Target 1','Target 2','Target 3','Quality Gate'];rows=[headers]+[[r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'EMA50',''),getattr(r,'EMA100',''),getattr(r,'EMA200',''),r['Bull Run'],r['Decision'],r['Decision Reason'],r['Hunter Score'],r['Stage'],r['Entry Trigger'],r['Stop Loss'],r['Target 1'],r['Target 2'],r['Target 3'],hmap.get(r.SYMBOL,{}).get('QUALITY_GATE',gate_reason)] for _,r in view.iterrows()]
-ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED');hrows=( [hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist() if not hunter.empty else [['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]);report_date=latest_date.strftime('%d-%b-%Y');hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',STRAT.buy_score],['WATCH SCORE GATE',MIN_SCORE],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
+ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED')
+# Build the report with a deliberately text-prefixed date. This prevents Google Sheets
+# from converting 24-Aug-2026 to its serial 46258 and later displaying it as a number.
+hrows=( [hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist() if not hunter.empty else [['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]);report_date=latest_date.strftime('%d-%b-%Y');hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',"'"+report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',int(STRAT.buy_score)],['WATCH SCORE GATE',int(MIN_SCORE)],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
 if not cal.empty:hrows += [[''],['SCORE/HORIZON CALIBRATION']]+[cal.columns.tolist()]+cal.astype(object).where(pd.notna(cal),'').values.tolist()
 ws_hunter.update('A1',hrows,value_input_option='USER_ENTERED')
-# Explicitly reset numeric cells so percentages never render as dates.
+# Fix inherited Google Sheets number/date formats. Formatting is applied by the
+# actual report row positions, not hard-coded row numbers, because hunter row count varies.
 try:
-    ws_hunter.format('B1:B3',{'numberFormat':{'type':'TEXT','pattern':'@'}})
-    ws_hunter.format('B4:B8',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
-    ws_hunter.format('B10:B30',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
-    # Calibration is written after the summary; force every populated numeric column except text labels to NUMBER.
-    if not cal.empty:
-        header_row=next((i+1 for i,row in enumerate(hrows) if row and row[0]=='SCORE_BUCKET'),None)
-        if header_row:
-            end_row=header_row+len(cal)
+    def fmt_range(a1,typ='NUMBER',pattern='0.00'):
+        ws_hunter.format(a1,{'numberFormat':{'type':typ,'pattern':pattern}})
+    # Find the report section dynamically.
+    report_start=next((i+1 for i,row in enumerate(hrows) if len(row)>=2 and row[0]=='UNIVERSE'),None)
+    if report_start:
+        # Labels/text cells must never inherit DATE formatting.
+        fmt_range(f'B{report_start}:B{report_start+2}','TEXT','@')
+        # Date was intentionally entered with a leading apostrophe; force TEXT display.
+        fmt_range(f'B{report_start+2}:B{report_start+2}','TEXT','@')
+        # Summary values: integers where appropriate, decimals otherwise.
+        summary_start=next((i+1 for i,row in enumerate(hrows) if row and row[0]=='BACKTEST SUMMARY'),None)
+        if summary_start:
+            for rr in range(summary_start+1,len(hrows)+1):
+                label=hrows[rr-1][0] if rr-1<len(hrows) and hrows[rr-1] else ''
+                if label in ('','SCORE/HORIZON CALIBRATION'):break
+                if label=='trades':fmt_range(f'B{rr}:B{rr}','NUMBER','0')
+                else:fmt_range(f'B{rr}:B{rr}','NUMBER','0.00')
+        # Calibration numeric columns: every value column after SCORE_BUCKET is numeric.
+        cal_header=next((i+1 for i,row in enumerate(hrows) if row and row[0]=='SCORE_BUCKET' and 'WIN_RATE' in row),None)
+        if cal_header:
+            cal_end=cal_header+len(cal)
             for col in range(2,len(cal.columns)+1):
-                ws_hunter.format(f'{gspread.utils.rowcol_to_a1(header_row+1,col)}:{gspread.utils.rowcol_to_a1(end_row,col)}',{'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
-    ws_stocks.format('K2:K501',{'numberFormat':{'type':'NUMBER','pattern':'0'}});ws_stocks.format('B2:B501',{'numberFormat':{'type':'NUMBER','pattern':'0'}})
+                start=f'{gspread.utils.rowcol_to_a1(cal_header+1,col)}';end=f'{gspread.utils.rowcol_to_a1(cal_end,col)}'
+                fmt_range(f'{start}:{end}','NUMBER','0.00')
+    # Main stock sheet numeric columns should remain numeric, never date-formatted.
+    fmt_range('B2:B501','NUMBER','0');fmt_range('C2:G501','NUMBER','0.00');fmt_range('K2:K501','NUMBER','0')
 except Exception as e:print('Sheet format warning:',e)
 for ws in (ws_stocks,ws_hunter):
     try:ws.freeze(rows=1)
