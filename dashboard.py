@@ -19,7 +19,8 @@ def main():
     hf=OUT/'early_hunter.csv'
     if not hf.exists(): raise RuntimeError('output/early_hunter.csv not found')
     df=pd.read_csv(hf)
-    if df.empty: c=df.copy()
+    if df.empty:
+        c=df.copy()
     else:
         for col in ('PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_PROBABILITY','RISK_PCT','RESISTANCE_DISTANCE_PCT'):
             if col in df.columns: df[col]=pd.to_numeric(df[col],errors='coerce')
@@ -30,7 +31,10 @@ def main():
     c.to_csv(OUT/'buy_candidates.csv',index=False)
     if not c.empty:
         c['CATEGORY']=c['ACTION'].map({'PRE-BREAKOUT BUY':'PRE-BREAKOUT','BREAKOUT BUY':'BREAKOUT','SWING BUY':'SWING'})
-        c.insert(0,'RANK',range(1,len(c)+1))
+        if 'RANK' in c.columns:
+            c['RANK']=range(1,len(c)+1)
+        else:
+            c.insert(0,'RANK',range(1,len(c)+1))
     cols=['RANK','SYMBOL','ACTION','CATEGORY','DATE','BUY_DATE','CMP','ENTRY_PRICE','ENTRY_ZONE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','R_R','PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_PROBABILITY','TREND','ACCUMULATION','DELIVERY','VOLUME_RATIO','RESISTANCE','RESISTANCE_DISTANCE_PCT','RESISTANCE_TESTS','RELATIVE_STRENGTH','BREAKOUT_STATUS','REASONS']
     cols=[x for x in cols if x in c.columns]
     t=c[cols].copy() if not c.empty else pd.DataFrame(columns=cols)
