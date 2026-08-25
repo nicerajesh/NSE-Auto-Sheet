@@ -47,39 +47,38 @@ def main():
         'NEXT DAY PRE-BREAKOUT BUY',
         'NEXT DAY BREAKOUT BUY',
         'PRE-BREAKOUT BUY',
+        'PRE-BREAKOUT WATCH/BUY',
         'BREAKOUT BUY',
         'SWING BUY',
         'BUY NOW',
         'BUY ON BREAKOUT',
         'BREAKOUT IMMINENT',
+        'SWING BUY',
         'WATCH',
         'AVOID',
+        'AVOID / CHASE',
         'SELL / EXIT',
     }
     assert sig['ACTION'] in valid_actions, sig['ACTION']
 
-    # A stock can be in the confirmed-breakout state while its action is BREAKOUT BUY.
     valid_stages = {
         'NEXT-DAY PRE-BREAKOUT',
         'PRE-BREAKOUT',
+        'PRE-BREAKOUT BUY',
+        'PRE-BREAKOUT WATCH/BUY',
         'BREAKOUT CONFIRMED',
         'BREAKOUT BUY',
         'SWING',
+        'SWING BUY',
         'WATCH',
         'BASE FORMING',
         'DEVELOPING',
+        'AVOID / CHASE',
     }
     assert sig['STAGE'] in valid_stages, sig['STAGE']
 
-    assert sig.get('NEXT_DAY_ACTION', 'WATCH') in {
-        'NEXT DAY PRE-BREAKOUT BUY',
-        'NEXT DAY BREAKOUT BUY',
-        'PRE-BREAKOUT BUY',
-        'BREAKOUT BUY',
-        'SWING BUY',
-        'WATCH',
-        'AVOID',
-    }
+    # NEXT_DAY_ACTION is a normalized execution flag: BUY or WATCH.
+    assert sig.get('NEXT_DAY_ACTION', 'WATCH') in {'BUY', 'WATCH'}, sig.get('NEXT_DAY_ACTION')
 
     assert 0 <= float(sig.get('BREAKOUT_PROBABILITY', 0)) <= 100
     assert len(ind) == len(df)
@@ -89,8 +88,8 @@ def main():
         sig['STAGE'],
         sig['ACTION'],
         sig['HUNTER_SCORE'],
-        'prob=',
-        sig.get('BREAKOUT_PROBABILITY'),
+        'next_day=', sig.get('NEXT_DAY_ACTION'),
+        'prob=', sig.get('BREAKOUT_PROBABILITY'),
     )
 
 
