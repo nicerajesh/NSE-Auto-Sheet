@@ -92,7 +92,8 @@ for sym,r in hmap.items():current[str(sym)]={**current.get(str(sym),{'SYMBOL':st
 ledger=update_ledger(pd.DataFrame(old),current,allow_new=gate_ok);ledger.to_csv(OUT/'trade_ledger.csv',index=False)
 if not hunter.empty:
     pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last');hunter=hunter.merge(pos,on='SYMBOL',how='left')
-buy=hunter[hunter.ACTION.isin(['BUY','BUY ON TRIGGER'])].copy() if not hunter.empty else pd.DataFrame(columns=hunter.columns if not hunter.empty else [])
+# New engine buckets are intentionally preserved. BUY candidates include all actionable BUY buckets.
+buy=hunter[hunter.ACTION.isin(['BUY NOW','BUY ON BREAKOUT','BREAKOUT IMMINENT'])].copy() if not hunter.empty else pd.DataFrame(columns=hunter.columns if not hunter.empty else [])
 latest.to_csv(OUT/'latest_market.csv',index=False);hist[hist.DATE.eq(latest_date)].to_csv(OUT/'indicators.csv',index=False);hunter.to_csv(OUT/'early_hunter.csv',index=False);buy.to_csv(OUT/'buy_candidates.csv',index=False)
 try:sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'),gate_ok=gate_ok)
 except Exception as e:print('WARNING: D1 sync failed; continuing with Google Sheet update:',repr(e))
@@ -108,52 +109,40 @@ def bull(r):
 view['Bull Run']=view.apply(bull,axis=1)
 def drow(sym):
     r=hmap.get(sym)
-    if not r:return ('NO BUY','No Early Hunter setup')
+    if not r:return ('NO BUY','No Pre-Breakout setup')
     action=str(r.get('ACTION','WATCH'))
-    if not gate_ok and action in ('BUY','BUY ON TRIGGER'):return ('QUALITY BLOCKED',f'Model {action}; historical gate: {gate_reason}')
+    if not gate_ok and action in ('BUY NOW','BUY ON BREAKOUT','BREAKOUT IMMINENT'):return ('QUALITY BLOCKED',f'Model {action}; historical gate: {gate_reason}')
     return (action,str(r.get('REASONS','Setup requires confirmation')))
 view[['Decision','Decision Reason']]=view.SYMBOL.map(drow).apply(pd.Series)
-for outcol,hcol in [('Hunter Score','HUNTER_SCORE'),('Stage','STAGE'),('Entry Trigger','ENTRY_TRIGGER'),('Stop Loss','STOP_LOSS'),('Target 1','TARGET_1'),('Target 2','TARGET_2'),('Target 3','TARGET_3')]:view[outcol]=view.SYMBOL.map(lambda x:hmap.get(x,{}).get(hcol,''))
+for outcol,hcol in [('Hunter Score','HUNTER_SCORE'),('Stage','STAGE'),('Entry Trigger','BREAKOUT_TRIGGER'),('Stop Loss','STOP_LOSS'),('Target 1','TARGET_1'),('Target 2','TARGET_2'),('Target 3','TARGET_3')]:view[outcol]=view.SYMBOL.map(lambda x:hmap.get(x,{}).get(hcol,''))
 view=view.sort_values(['Decision','Hunter Score'],ascending=[True,False],na_position='last').head(500)
 headers=['NSE Code','Volume','Close Price','CMP','50 DMA','100 DMA','200 DMA','Bull Run','Decision','Decision Reason','Hunter Score','Stage','Entry Trigger','Stop Loss','Target 1','Target 2','Target 3','Quality Gate'];rows=[headers]+[[r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'EMA50',''),getattr(r,'EMA100',''),getattr(r,'EMA200',''),r['Bull Run'],r['Decision'],r['Decision Reason'],r['Hunter Score'],r['Stage'],r['Entry Trigger'],r['Stop Loss'],r['Target 1'],r['Target 2'],r['Target 3'],hmap.get(r.SYMBOL,{}).get('QUALITY_GATE',gate_reason)] for _,r in view.iterrows()]
 ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED')
-# Build the report with a deliberately text-prefixed date. This prevents Google Sheets
-# from converting 24-Aug-2026 to its serial 46258 and later displaying it as a number.
-hrows=( [hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist() if not hunter.empty else [['NO QUALIFIED EARLY-HUNTER SETUP TODAY']]);report_date=latest_date.strftime('%d-%b-%Y');hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',"'"+report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',int(STRAT.buy_score)],['WATCH SCORE GATE',int(MIN_SCORE)],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
+hrows=([hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist() if not hunter.empty else [['NO QUALIFIED PRE-BREAKOUT SETUP TODAY']]);report_date=latest_date.strftime('%d-%b-%Y');hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',"'"+report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['BUY SCORE GATE',int(STRAT.buy_score)],['WATCH SCORE GATE',int(MIN_SCORE)],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
 if not cal.empty:hrows += [[''],['SCORE/HORIZON CALIBRATION']]+[cal.columns.tolist()]+cal.astype(object).where(pd.notna(cal),'').values.tolist()
 ws_hunter.update('A1',hrows,value_input_option='USER_ENTERED')
-# Fix inherited Google Sheets number/date formats. Formatting is applied by the
-# actual report row positions, not hard-coded row numbers, because hunter row count varies.
 try:
-    def fmt_range(a1,typ='NUMBER',pattern='0.00'):
-        ws_hunter.format(a1,{'numberFormat':{'type':typ,'pattern':pattern}})
-    # Find the report section dynamically.
+    def fmt_range(a1,typ='NUMBER',pattern='0.00'):ws_hunter.format(a1,{'numberFormat':{'type':typ,'pattern':pattern}})
     report_start=next((i+1 for i,row in enumerate(hrows) if len(row)>=2 and row[0]=='UNIVERSE'),None)
     if report_start:
-        # Labels/text cells must never inherit DATE formatting.
-        fmt_range(f'B{report_start}:B{report_start+2}','TEXT','@')
-        # Date was intentionally entered with a leading apostrophe; force TEXT display.
-        fmt_range(f'B{report_start+2}:B{report_start+2}','TEXT','@')
-        # Summary values: integers where appropriate, decimals otherwise.
+        fmt_range(f'B{report_start}:B{report_start+2}','TEXT','@');fmt_range(f'B{report_start+2}:B{report_start+2}','TEXT','@')
         summary_start=next((i+1 for i,row in enumerate(hrows) if row and row[0]=='BACKTEST SUMMARY'),None)
         if summary_start:
             for rr in range(summary_start+1,len(hrows)+1):
                 label=hrows[rr-1][0] if rr-1<len(hrows) and hrows[rr-1] else ''
                 if label in ('','SCORE/HORIZON CALIBRATION'):break
-                if label=='trades':fmt_range(f'B{rr}:B{rr}','NUMBER','0')
-                else:fmt_range(f'B{rr}:B{rr}','NUMBER','0.00')
-        # Calibration numeric columns: every value column after SCORE_BUCKET is numeric.
+                fmt_range(f'B{rr}:B{rr}','NUMBER','0' if label=='trades' else '0.00')
         cal_header=next((i+1 for i,row in enumerate(hrows) if row and row[0]=='SCORE_BUCKET' and 'WIN_RATE' in row),None)
         if cal_header:
             cal_end=cal_header+len(cal)
             for col in range(2,len(cal.columns)+1):
-                start=f'{gspread.utils.rowcol_to_a1(cal_header+1,col)}';end=f'{gspread.utils.rowcol_to_a1(cal_end,col)}'
-                fmt_range(f'{start}:{end}','NUMBER','0.00')
-    # Main stock sheet numeric columns should remain numeric, never date-formatted.
+                start=f'{gspread.utils.rowcol_to_a1(cal_header+1,col)}';end=f'{gspread.utils.rowcol_to_a1(cal_end,col)}';fmt_range(f'{start}:{end}','NUMBER','0.00')
     fmt_range('B2:B501','NUMBER','0');fmt_range('C2:G501','NUMBER','0.00');fmt_range('K2:K501','NUMBER','0')
 except Exception as e:print('Sheet format warning:',e)
 for ws in (ws_stocks,ws_hunter):
     try:ws.freeze(rows=1)
     except Exception:pass
 status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | MODEL BUY {len(buy)} | WATCH gate {MIN_SCORE} | BUY gate {STRAT.buy_score} | BT {stats.get("trades",0)} | Win {stats.get("win_rate_pct",0)}% | PF {stats.get("profit_factor",0)} | Gate {gate_reason} | History {len(frames)} days';ws_stocks.update('T1',[['STATUS']]);ws_stocks.update('T2',[[status]]);print(status)
-if not buy.empty:print(buy[['SYMBOL','ACTION','STAGE','HUNTER_SCORE','CMP','BUY_ZONE_LOW','BUY_ZONE_HIGH','ENTRY_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3']].head(30).to_string(index=False))
+if not buy.empty:
+    cols=[c for c in ['SYMBOL','ACTION','STAGE','HUNTER_SCORE','CMP','ENTRY_ZONE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3'] if c in buy.columns]
+    print(buy[cols].head(30).to_string(index=False))
