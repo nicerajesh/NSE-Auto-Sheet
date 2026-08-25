@@ -15,12 +15,8 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30):
     active_stop=float(stop);rem=1.0;realised=0.0
     hit1=hit2=hit3=False;initial_stop_hit=False;breakeven_exit=False;stop_hit=False;exit_idx=None;exit_reason='TIME';max_high=entry;min_low=entry
     risk=max(1e-9,entry-float(stop))
-    # Do not move the entire remainder to breakeven immediately after T1.
-    # T1 only de-risks the position slightly; T2 is the point where a
-    # meaningful profit lock is justified. This avoids turning normal pullbacks
-    # after a first target into a large population of zero/near-zero exits.
-    t1_protect_stop=entry + 0.05*risk
-    t2_protect_stop=entry + 1.00*risk
+    t1_protect_stop=entry+0.05*risk
+    t2_protect_stop=entry+1.00*risk
     for j,row in f.iterrows():
         op=float(row.OPEN_PRICE);lo=float(row.LOW_PRICE);hi=float(row.HIGH_PRICE);cl=float(row.CLOSE_PRICE)
         max_high=max(max_high,hi);min_low=min(min_low,lo)
@@ -80,17 +76,11 @@ def run_backtest(hist,min_score=None,horizon=None):
         for i in range(BT.warmup,len(g)-horizon):
             if i-last<BT.min_gap_between_signals:continue
             sig=analyze_stock(g.iloc[:i+1],threshold)
-            if not sig or sig['HUNTER_SCORE']<threshold or sig['ACTION'] not in ('BUY','BUY ON TRIGGER'):continue
-            signal_close=float(sig['CMP']);trigger=float(sig['ENTRY_TRIGGER'])
-            if sig['ACTION']=='BUY ON TRIGGER':
-                entry_i=None;entry=None
-                for j in range(i+1,min(len(g),i+1+horizon)):
-                    if float(g.iloc[j].HIGH_PRICE)>=trigger:entry_i=j;entry=trigger;break
-                if entry_i is None:continue
-            else:
-                entry_i=i+1
-                if entry_i>=len(g):continue
-                entry=float(g.iloc[entry_i].OPEN_PRICE)
+            if not sig or sig['HUNTER_SCORE']<threshold or sig['ACTION']!='BUY':continue
+            # Same-candle execution: the signal is confirmed by today's close,
+            # so the backtest entry is today's close, not tomorrow's open and
+            # not a future trigger price.
+            entry_i=i;entry=float(g.iloc[i].CLOSE_PRICE);signal_close=entry
             entry,stop,t1,t2,t3=_rebase_levels(signal_close,entry,float(sig['STOP_LOSS']),float(sig['TARGET_1']),float(sig['TARGET_2']),float(sig['TARGET_3']))
             if entry<=0 or stop>=entry or t1<=entry or not (t1<t2<t3):continue
             available=min(horizon,len(g)-entry_i);o=outcome(g,entry_i,entry,stop,t1,t2,t3,available)
