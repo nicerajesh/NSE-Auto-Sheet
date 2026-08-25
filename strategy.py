@@ -1,113 +1,98 @@
 from __future__ import annotations
-import numpy as np,pandas as pd
-from config import STRAT
+import numpy as np
+import pandas as pd
 
-def finite(x):
-    try:return np.isfinite(float(x))
-    except:return False
+# RY APEX MATRIX V42 — Python mirror of the supplied Pine Script.
+# BUY is a SAME-CANDLE, confirmed-close signal. No future trigger search.
+PINE_BUY_SCORE=75
+PINE_APEX_SCORE=88
+PINE_TACTICAL_SCORE=82
+COOLDOWN_BARS=5
+INITIAL_ATR=2.5
+TRAIL_ATR=2.5
+RR1,RR2=2.0,3.0
+
+def _f(v,default=np.nan):
+    try:
+        x=float(v); return x if np.isfinite(x) else default
+    except Exception:return default
+
+def _features(w,i):
+    r=w.iloc[i]; c=_f(r.CLOSE_PRICE); o=_f(r.OPEN_PRICE); h=_f(r.HIGH_PRICE); l=_f(r.LOW_PRICE)
+    e20=_f(r.get('EMA20')); e50=_f(r.get('EMA50')); e200=_f(r.get('EMA200')); rsi=_f(r.get('RSI14')); atr=_f(r.get('ATR14')); vr=_f(r.get('VOL_RATIO')); adx=_f(r.get('ADX14')); plus=_f(r.get('PLUS_DI14')); minus=_f(r.get('MINUS_DI14'))
+    prior20=_f(r.get('PRIOR_HIGH20'))
+    if not np.isfinite(prior20) and i>=20:prior20=_f(w.HIGH_PRICE.iloc[i-20:i].max())
+    resistance=prior20; is_breakout=np.isfinite(resistance) and c>resistance*1.001
+    res_dist=abs(c-resistance)/resistance*100 if np.isfinite(resistance) and resistance>0 else 0
+    near_res=c<resistance and res_dist<=3 if np.isfinite(resistance) else False
+    rng=h-l; body=abs(c-o); body_ratio=body/rng if rng>0 else 0; close_pos=(c-l)/rng if rng>0 else 0; bullish=c>o; bull_quality=bullish and body_ratio>=.40 and close_pos>=.65
+    e20p5=_f(w.EMA20.iloc[i-5]) if i>=5 else np.nan; e50p5=_f(w.EMA50.iloc[i-5]) if i>=5 else np.nan; e200p10=_f(w.EMA200.iloc[i-10]) if i>=10 else np.nan
+    strong_trend=c>e20>e50>e200 and e20>e20p5 and e50>e50p5 if all(np.isfinite(x) for x in (c,e20,e50,e200,e20p5,e50p5)) else False
+    healthy_trend=c>e50 and e50>e200 if all(np.isfinite(x) for x in (c,e50,e200)) else False
+    bull_trend=c>e50 if np.isfinite(c) and np.isfinite(e50) else False
+    mc=_f(r.get('MARKET_CLOSE')); me20=_f(r.get('MARKET_EMA20')); me50=_f(r.get('MARKET_EMA50')); me200=_f(r.get('MARKET_EMA200'))
+    market_bull=mc>me20>me50>me200 if all(np.isfinite(x) for x in (mc,me20,me50,me200)) else False
+    market_neutral=mc>me50 and not market_bull if np.isfinite(mc) and np.isfinite(me50) else False
+    market_bear=mc<me50 if np.isfinite(mc) and np.isfinite(me50) else False
+    penalty=0 if market_bull or not np.isfinite(mc) else 3 if market_neutral else 8
+    market_regime='BULLISH' if market_bull else 'NEUTRAL' if market_neutral else 'BEARISH' if market_bear else 'UNAVAILABLE'
+    c20=_f(w.CLOSE_PRICE.iloc[i-20]) if i>=20 else np.nan; mc20=_f(w.MARKET_CLOSE.iloc[i-20]) if i>=20 and 'MARKET_CLOSE' in w else np.nan
+    stock_roc=(c/c20-1)*100 if np.isfinite(c20) and c20>0 else 0; market_roc=(mc/mc20-1)*100 if np.isfinite(mc20) and mc20>0 else 0; rs=stock_roc-market_roc if np.isfinite(mc20) else 0
+    rs_strong=rs>=5; rs_positive=rs>0
+    rsi1=_f(w.RSI14.iloc[i-1]) if i>=1 else np.nan; rsi_healthy=np.isfinite(rsi) and 50<=rsi<=72; rsi_strong=np.isfinite(rsi) and 58<=rsi<=72; rsi_recovery=np.isfinite(rsi) and np.isfinite(rsi1) and rsi>50 and rsi>rsi1
+    adx_good=np.isfinite(adx) and np.isfinite(plus) and np.isfinite(minus) and adx>=18 and plus>minus; adx_strong=np.isfinite(adx) and np.isfinite(plus) and np.isfinite(minus) and adx>=25 and plus>minus
+    vr1=_f(w.VOL_RATIO.iloc[i-1]) if i>=1 else np.nan; volume_strong=np.isfinite(vr) and vr>=2; volume_confirmed=np.isfinite(vr) and vr>=1.3; volume_normal=np.isfinite(vr) and vr>=.8; volume_dry=np.isfinite(vr) and vr<=.75; volume_expansion=np.isfinite(vr1) and vr1<=.75 and volume_confirmed; volume_acceleration=np.isfinite(vr) and np.isfinite(vr1) and vr>vr1 and vr>=1
+    avg_range=(w.HIGH_PRICE-w.LOW_PRICE).rolling(20).mean().iloc[i] if i>=19 else np.nan; atr_fast=w.ATR14.rolling(5).mean().iloc[i] if i>=4 else np.nan; atr_slow=w.ATR14.rolling(20).mean().iloc[i] if i>=19 else np.nan
+    vcp_potential=np.isfinite(avg_range) and rng<=avg_range*.8 and np.isfinite(atr_fast) and np.isfinite(atr_slow) and atr_fast<atr_slow; vcp_confirmed=vcp_potential and volume_dry; vcp_breakout=vcp_confirmed and is_breakout and volume_confirmed
+    rh=w.HIGH_PRICE.iloc[max(0,i-10):i].max() if i>=10 else np.nan; rl=w.LOW_PRICE.iloc[max(0,i-10):i].min() if i>=10 else np.nan; width=(rh-rl)/rl*100 if np.isfinite(rl) and rl>0 else 999
+    accumulation=healthy_trend and volume_dry and width<=12 and c>=e50 if np.isfinite(e50) else False
+    pullback=healthy_trend and l<=e20*1.03 and c>=e20*.98 and rsi_recovery if np.isfinite(e20) else False
+    e20p=_f(w.EMA20.iloc[i-1]) if i>=1 else np.nan; prevc=_f(w.CLOSE_PRICE.iloc[i-1]) if i>=1 else np.nan
+    ema_recovery=c>e20 and np.isfinite(e20p) and prevc<=e20p and bullish and rsi_recovery and np.isfinite(vr) and vr>=1 if np.isfinite(e20) else False
+    strong_breakout=is_breakout and volume_strong and bull_quality and c>e20 and c>e50
+    confirmed_breakout=is_breakout and volume_confirmed and bullish and close_pos>=.60 and c>e50
+    early_breakout=is_breakout and np.isfinite(vr) and vr>=1 and bullish and c>e20
+    extension=(c-e20)/atr if np.isfinite(atr) and atr>0 and np.isfinite(e20) else np.nan; over_extended=np.isfinite(extension) and extension>3
+    atr_pct=atr/c*100 if np.isfinite(atr) and c>0 else np.nan
+    trend_score=25 if strong_trend else 19 if healthy_trend else 12 if bull_trend else 0
+    rs_score=15 if rs_strong else 11 if rs_positive else 6 if rs>-3 else 0
+    momentum_score=15 if adx_strong and rsi_strong else 12 if adx_good and rsi_healthy else 8 if rsi_healthy or rsi_recovery else 3
+    volume_score=15 if volume_strong or volume_expansion else 12 if volume_confirmed else 9 if volume_acceleration else 8 if volume_dry else 5 if volume_normal else 2
+    structure_score=15 if vcp_breakout or strong_breakout else 13 if confirmed_breakout else 11 if vcp_confirmed else 10 if accumulation else 8 if near_res or pullback else 7 if ema_recovery else 3
+    risk_score=15 if np.isfinite(atr_pct) and atr_pct<=4 else 12 if np.isfinite(atr_pct) and atr_pct<=7 else 9 if np.isfinite(atr_pct) and atr_pct<=10 else 6 if np.isfinite(atr_pct) and not over_extended else 2
+    raw_score=trend_score+rs_score+momentum_score+volume_score+structure_score+risk_score; apex_score=max(0,raw_score-penalty)
+    accumulation_setup=accumulation and not is_breakout; pre_breakout=(near_res or vcp_confirmed or accumulation or pullback) and not is_breakout and healthy_trend and not over_extended; watch_setup=(healthy_trend or bull_trend) and (rs_positive or rsi_recovery or vcp_potential)
+    normal_setup=confirmed_breakout or strong_breakout or vcp_breakout or ema_recovery; normal_buy=apex_score>=PINE_BUY_SCORE and normal_setup and not over_extended; apex_buy=apex_score>=PINE_APEX_SCORE and (strong_breakout or vcp_breakout) and not over_extended; tactical_buy=(strong_breakout or vcp_breakout) and apex_score>=PINE_TACTICAL_SCORE and not over_extended; final_buy=apex_buy or tactical_buy or normal_buy
+    valid_risk=np.isfinite(atr) and (c-atr*INITIAL_ATR)<c
+    return locals()
 
 def analyze_stock(g,min_score=None):
     g=g.sort_values('DATE').reset_index(drop=True)
-    if len(g)<STRAT.min_history:return None
-    w=g.tail(min(220,len(g))).reset_index(drop=True)
-    c=pd.to_numeric(w.CLOSE_PRICE,errors='coerce').to_numpy(dtype=float); n=len(c); cur=float(c[-1]); x=w.iloc[-1]
-    if not finite(cur) or cur<=0:return None
-    lookback=min(80,n-1);start=max(0,n-lookback);seg=c[start:];low_idx=start+int(np.nanargmin(seg));low=float(c[low_idx])
-    prior_start=max(0,low_idx-30);prior=c[prior_start:low_idx];prior_high=float(np.nanmax(prior)) if len(prior) else np.nan
-    hh_idx=None;hh=np.nan
-    if finite(prior_high):
-        for i in range(low_idx+1,n):
-            if c[i]>prior_high*1.003:hh_idx=i;hh=float(c[i]);break
-    hl_idx=None;hl=np.nan;base_days=0
-    if hh_idx is not None and hh_idx+2<n:
-        post=c[hh_idx+1:];j=hh_idx+1+int(np.nanargmin(post));candidate=float(c[j])
-        if candidate>low*1.01 and candidate<=hh*.998:hl_idx=j;hl=c[j];base_days=n-j-1
-    second_hh=False;hh2=np.nan
-    if hl_idx is not None and hl_idx+1<n:
-        post=c[hl_idx+1:];j=hl_idx+1+int(np.nanargmax(post))
-        if c[j]>hh*1.003:second_hh=True;hh2=float(c[j])
-    get=lambda k:x.get(k,np.nan)
-    rsi=get('RSI14');adx=get('ADX14');vol=get('VOL_RATIO');deliv=get('DELIV_PER');d10=get('DELIV_AVG10');atrp=get('ATR_PCT');atravg=get('ATR_PCT_AVG30')
-    mh3=get('MACD_HIST_SLOPE');macdh=get('MACD_HIST');ema20=get('EMA20');ema50=get('EMA50');ema200=get('EMA200');slope20=get('EMA20_SLOPE_5');slope50=get('EMA50_SLOPE_5')
-    ret5=get('RET_5D');ret20=get('RET_20D');ret50=get('RET_50D');close_loc=get('CLOSE_LOCATION');lower_wick=get('LOWER_WICK');high52=get('HIGH_52W');prior20=get('PRIOR_HIGH20');prior55=get('PRIOR_HIGH55');di_spread=get('DI_SPREAD')
-    no_lower_low=cur>=float(np.nanmin(c[-8:-1]))*.998 if n>=8 else True
-    low_dist=(cur/low-1)*100 if low>0 else 999;from_52=(cur/high52-1)*100 if finite(high52) and high52>0 else 0
-    ret20_local=(c[-1]/c[-21]-1)*100 if n>=21 and c[-21]>0 else np.nan;ret50_local=(c[-1]/c[-51]-1)*100 if n>=51 and c[-51]>0 else np.nan
-    deep_fall=(finite(ret20_local) and ret20_local<=STRAT.max_fall_20d_pct) or (finite(ret50_local) and ret50_local<=STRAT.max_fall_50d_pct) or (finite(from_52) and from_52<=STRAT.max_52w_high_distance_pct)
-    bottom_hold=low_dist<=STRAT.late_low_distance_pct and no_lower_low
-    exhaustion=finite(vol) and vol<=1.70 and ((not finite(atravg)) or atrp<=atravg*1.25)
-    recovery=finite(ret5) and ret5>=STRAT.min_recovery_5d_pct and no_lower_low
-    delivery_build=finite(deliv) and finite(d10) and deliv>=max(STRAT.delivery_floor,d10*.88)
-    rsi_recovery=finite(rsi) and 41<=rsi<=68
-    momentum_turn=(finite(mh3) and mh3>0) or (finite(macdh) and macdh>-0.30 and finite(slope20) and slope20>0)
-    ema_turn=finite(slope20) and slope20>-0.25 and (not finite(slope50) or slope50>-0.40)
-    alignment=finite(ema20) and finite(ema50) and ema20>=ema50*.94
-    not_extended=(not finite(ret5) or ret5<=STRAT.max_entry_extension_pct) and (not finite(ret20) or ret20<=18)
-    demand=(finite(close_loc) and close_loc>=.55) or (finite(lower_wick) and lower_wick>=.25)
-    healthy_volume=finite(vol) and .55<=vol<=2.75
-    rs_improving=(not STRAT.require_rs_improving) or (finite(ret5) and finite(ret20) and ret5>=ret20-2.5)
-    # Resistance is measured from information available BEFORE today's candle.
-    # This makes the breakout decision causal and lets BUY fire on today's close.
-    prior_levels=[v for v in [prior20,prior55,hh] if finite(v) and v>0]
-    resistance=max(prior_levels) if prior_levels else cur*1.05
-    res_dist=(resistance/cur-1)*100 if cur>0 else 999
-    breakout_volume=finite(vol) and vol>=STRAT.volume_breakout_ratio
-    breakout_now=finite(resistance) and cur>=resistance*1.003 and breakout_volume and demand and not_extended
-    risk_room=STRAT.min_resistance_distance_pct<=max(res_dist,0)<=STRAT.max_resistance_distance_pct
-    score=0;reasons=[]
-    def add(ok,pts,msg):
-        nonlocal score
-        if bool(ok):score+=pts;reasons.append(msg)
-    add(deep_fall,8,'Deep fall');add(bottom_hold,7,'Bottom holding');add(not_extended,3,'Not extended')
-    add(hh_idx is not None,7,'First HH');add(hl_idx is not None,10,'Higher Low');add(base_days>=STRAT.min_base_days,4,'Base holding');add(second_hh,4,'Second HH')
-    add(recovery,5,'Recovery started');add(momentum_turn,5,'Momentum turn');add(rsi_recovery,4,'RSI recovery');add(ema_turn,3,'EMA slope improving');add(finite(di_spread) and di_spread>-2,3,'Trend pressure improving')
-    add(delivery_build,5,'Delivery stable');add(healthy_volume,4,'Healthy volume');add(demand,3,'Demand candle');add(finite(atrp) and finite(atravg) and atrp<atravg*1.05,3,'ATR compression');add(rs_improving,4,'Relative strength improving');add(finite(adx) and adx>=18,2,'Trend strength')
-    add(breakout_now,8,'Breakout confirmed today')
-    if finite(ret20_local) and ret20_local>STRAT.late_ret20_pct:score-=8;reasons.append('Late 20D move')
-    if low_dist>STRAT.late_low_distance_pct:score-=8;reasons.append('Too far from low')
-    if finite(atrp) and atrp>STRAT.max_atr_pct:score-=6;reasons.append('ATR too high')
-    if not rs_improving:score-=5;reasons.append('Relative strength weak')
-    if not no_lower_low:score-=10;reasons.append('Lower-low risk')
-    score=max(0,min(100,int(round(score))))
-    structural=hl_idx is not None and base_days>=max(3,STRAT.min_base_days-1)
-    momentum_ok=rsi_recovery and momentum_turn and ema_turn and rs_improving
-    risk_anchor=float(hl if finite(hl) else low);atr=float(get('ATR14')) if finite(get('ATR14')) else cur*.035
-    raw_stop=risk_anchor-1.25*atr;stop=max(raw_stop,cur*(1-STRAT.max_stop_pct/100));stop=min(stop,cur*(1-STRAT.min_stop_pct/100));risk=cur-stop
-    risk_ok=finite(risk) and STRAT.min_stop_pct<=risk/cur*100<=STRAT.max_stop_pct
-    location_ok=not_extended and (low_dist<=STRAT.late_low_distance_pct)
-    early_quality=demand and delivery_build and healthy_volume and exhaustion
-    # BUY is a SAME-CANDLE signal. No future trigger search is used here.
-    # A pre-breakout setup remains WATCH until today's close actually confirms it.
-    recovery_now=deep_fall and bottom_hold and structural and momentum_ok and location_ok and risk_ok and early_quality and recovery and cur>=float(ema20)*.995 if finite(ema20) else False
-    confirmed_now=breakout_now and structural and momentum_ok and risk_ok and rs_improving
-    threshold=STRAT.min_score if min_score is None else min_score;buy_gate=max(STRAT.buy_score,threshold)
-    eligible=score>=buy_gate
-    if eligible and confirmed_now: action='BUY'
-    elif eligible and recovery_now: action='BUY'
-    else: action='WATCH'
-    stage='CONFIRMED BREAKOUT' if confirmed_now else 'RECOVERY BUY' if recovery_now else 'PRE-BREAKOUT' if hl_idx is not None else 'FIRST REVERSAL' if hh_idx is not None else 'BOTTOM FORMING' if bottom_hold else 'WATCH'
-    setup_high=hh2 if finite(hh2) and hh2>cur else resistance
-    trigger=cur
-    zone_low=max(risk_anchor*.997,cur*.985);zone_high=cur
-    t1=cur+risk*STRAT.min_rr1;t2=cur+risk*STRAT.min_rr2;t3=cur+risk*STRAT.min_rr3
-    if resistance>cur and resistance<t1*1.03:t1=max(cur+risk*STRAT.min_rr1,resistance*.995)
-    if t2<=t1:t2=t1+risk*.6
-    if t3<=t2:t3=t2+risk*.7
-    if finite(high52) and high52>cur and high52<t3:t3=high52*.995
-    rr1=(t1-cur)/risk;rr2=(t2-cur)/risk;rr3=(t3-cur)/risk
-    structure='LOW → HH → HL → HH' if second_hh else 'LOW → HH → HL' if hl_idx is not None else 'LOW → HH' if hh_idx is not None else 'LOW HOLD' if bottom_hold else 'UNCONFIRMED'
-    def rv(v,d=2):return round(float(v),d) if finite(v) else ''
-    return {'SYMBOL':str(x.SYMBOL),'DATE':pd.Timestamp(x.DATE).strftime('%d-%b-%Y'),'CMP':rv(cur),'ACTION':action,'STAGE':stage,'HUNTER_SCORE':score,'STRUCTURE':structure,'RECENT_LOW':rv(low),'LOW_DISTANCE_PCT':rv(low_dist),'FIRST_HH':rv(hh),'HIGHER_LOW':rv(hl),'SECOND_HH':rv(hh2),'BUY_ZONE_LOW':rv(zone_low),'BUY_ZONE_HIGH':rv(zone_high),'ENTRY_TRIGGER':rv(trigger),'STOP_LOSS':rv(stop),'TARGET_1':rv(t1),'TARGET_2':rv(t2),'TARGET_3':rv(t3),'RR_T1':rv(rr1),'RR_T2':rv(rr2),'RR_T3':rv(rr3),'RESISTANCE':rv(resistance),'RESISTANCE_DISTANCE_PCT':rv(res_dist),'EMA20':rv(ema20),'EMA50':rv(ema50),'EMA100':rv(get('EMA100')),'EMA200':rv(ema200),'RSI14':rv(rsi),'MACD':rv(get('MACD'),4),'MACD_SIGNAL':rv(get('MACD_SIGNAL'),4),'MACD_HIST':rv(macdh,4),'ADX14':rv(adx),'ATR_PCT':rv(atrp),'ATR_COMPRESSION':'YES' if finite(atrp) and finite(atravg) and atrp<atravg*1.05 else 'NO','VOLUME_RATIO':rv(vol),'DELIVERY_PCT':rv(deliv),'DELIVERY_AVG10':rv(d10),'RET_5D_PCT':rv(ret5),'RET_20D_PCT':rv(ret20),'DIST_52W_HIGH_PCT':rv(from_52),'DIST_EMA200_PCT':rv(get('DIST_EMA200_PCT')),'REASONS':', '.join(reasons)}
+    if len(g)<200:return None
+    state=False;entry_i=-1;last_exit=-10**9;latest=None
+    for i in range(len(g)):
+        f=_features(g,i)
+        if state and i>entry_i:
+            close=_f(g.CLOSE_PRICE.iloc[i]); e20=_f(g.EMA20.iloc[i]); e50=_f(g.EMA50.iloc[i]); e20p=_f(g.EMA20.iloc[i-1]) if i>=1 else np.nan; e50p=_f(g.EMA50.iloc[i-1]) if i>=1 else np.nan; vr=_f(g.VOL_RATIO.iloc[i]); op=_f(g.OPEN_PRICE.iloc[i]); prevclose=_f(g.CLOSE_PRICE.iloc[i-1]); rsi=_f(g.RSI14.iloc[i]); atr=_f(g.ATR14.iloc[i]); trail=close-atr*TRAIL_ATR if np.isfinite(atr) else -np.inf
+            exit_trail=close<trail; exit_e20=np.isfinite(e20) and np.isfinite(e20p) and close<e20 and prevclose<e20p and close<op; exit_e50=np.isfinite(e50) and np.isfinite(e20) and close<e50 and e20<e50; exit_trend=np.isfinite(e20) and np.isfinite(e50) and np.isfinite(e50p) and e20<e50 and e50<e50p; exit_dist=close<op and np.isfinite(vr) and vr>=2 and close<prevclose; exit_mom=np.isfinite(rsi) and rsi<43 and np.isfinite(e20) and close<e20
+            if exit_trail or exit_e20 or exit_e50 or exit_trend or exit_dist or exit_mom:state=False;last_exit=i;entry_i=-1
+        f=_features(g,i)
+        new_buy=(not state) and f['final_buy'] and (i-last_exit>COOLDOWN_BARS) and f['valid_risk']
+        if new_buy:state=True;entry_i=i
+        f['new_buy']=new_buy;latest=f
+    if latest is None:return None
+    f=latest;c=f['c'];atr=f['atr'];risk=atr*INITIAL_ATR if np.isfinite(atr) else np.nan;sl=c-risk if np.isfinite(risk) else np.nan
+    typ='APEX BUY' if f['apex_buy'] else 'TACTICAL BUY' if f['tactical_buy'] else 'BUY'; stage='STRONG BREAKOUT' if f['strong_breakout'] else 'CONFIRMED BREAKOUT' if f['confirmed_breakout'] else 'VCP BREAKOUT' if f['vcp_breakout'] else 'EMA RECOVERY' if f['ema_recovery'] else 'PRE-BREAKOUT' if f['pre_breakout'] else 'WATCH';action='BUY' if f['new_buy'] else 'HOLD' if state else 'WATCH'
+    def rv(x,d=2):return round(float(x),d) if np.isfinite(x) else ''
+    return {'SYMBOL':str(g.iloc[-1].SYMBOL),'DATE':pd.Timestamp(g.iloc[-1].DATE).strftime('%d-%b-%Y'),'CMP':rv(c),'ACTION':action,'STAGE':stage,'HUNTER_SCORE':int(round(f['apex_score'])),'APEX_SCORE':int(round(f['apex_score'])),'ENTRY_TYPE':typ if f['new_buy'] else '','MARKET_REGIME':f['market_regime'],'INITIAL_SL':rv(sl),'STOP_LOSS':rv(sl),'TARGET_1':rv(c+risk*RR1 if np.isfinite(risk) else np.nan),'TARGET_2':rv(c+risk*RR2 if np.isfinite(risk) else np.nan),'TARGET_3':rv(c+risk*4 if np.isfinite(risk) else np.nan),'ENTRY_TRIGGER':rv(c),'RESISTANCE':rv(f['resistance']),'RESISTANCE_DISTANCE_PCT':rv(f['res_dist']),'RSI14':rv(f['rsi']),'ADX14':rv(f['adx']),'ATR_PCT':rv(f['atr_pct']),'VOLUME_RATIO':rv(f['vr']),'EMA20':rv(f['e20']),'EMA50':rv(f['e50']),'EMA200':rv(f['e200']),'SETUP':stage,'REASONS':'PINE CONFIRMED: '+typ if f['new_buy'] else 'No new Pine BUY on latest confirmed candle'}
 
 def scan_all(hist,min_score=None):
-    threshold=STRAT.min_score if min_score is None else min_score;rows=[]
-    for sym,g in hist.groupby('SYMBOL'):
+    rows=[]
+    for sym,g in hist.groupby('SYMBOL',sort=False):
         try:
-            r=analyze_stock(g,threshold)
-            if r and (r['ACTION']=='BUY' or r['HUNTER_SCORE']>=threshold):rows.append(r)
+            r=analyze_stock(g,min_score)
+            if r and (r['ACTION'] in ('BUY','HOLD') or r['HUNTER_SCORE']>=72):rows.append(r)
         except Exception as e:print('Strategy error',sym,e)
     out=pd.DataFrame(rows)
     if out.empty:return out
-    order={'BUY':0,'WATCH':1};out['_o']=out.ACTION.map(order).fillna(9)
-    out=out.sort_values(['_o','HUNTER_SCORE','RESISTANCE_DISTANCE_PCT'],ascending=[True,False,True]).drop(columns='_o')
-    out.insert(0,'RANK',range(1,len(out)+1));return out
+    order={'BUY':0,'HOLD':1,'WATCH':2};out['_o']=out.ACTION.map(order).fillna(9);out=out.sort_values(['_o','HUNTER_SCORE'],ascending=[True,False]).drop(columns='_o');out.insert(0,'RANK',range(1,len(out)+1));return out
