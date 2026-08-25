@@ -2,60 +2,401 @@ name: Update NSE Stocks to Google Sheet
 
 on:
   schedule:
+    # 14:45 UTC = 20:15 IST
+    # Monday to Friday
     - cron: '45 14 * * 1-5'
+
   workflow_dispatch:
 
 jobs:
   update-sheet:
+
     runs-on: ubuntu-latest
+
     timeout-minutes: 40
+
     steps:
+
+      # ============================================================
+      # 1. CHECKOUT REPOSITORY
+      # ============================================================
       - name: Checkout Repo (main)
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 1
+          fetch-depth: 0
 
+
+      # ============================================================
+      # 2. SETUP PYTHON
+      # ============================================================
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
 
+
+      # ============================================================
+      # 3. INSTALL DEPENDENCIES
+      # ============================================================
       - name: Install Libraries
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+
+      # ============================================================
+      # 4. VERIFY CODE VERSION
+      # ============================================================
       - name: Verify Code Version
         run: |
-          echo "=== NSE EARLY HUNTER V7 ==="
-          echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py update_sheet.py
+
+          echo "=================================================="
+          echo "       NSE EARLY HUNTER V8"
+          echo "=================================================="
+
+          echo "Branch:"
+          git branch --show-current
+
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo "Commit Message:"
+          git log -1 --pretty=%B
+
+          echo ""
+          echo "Checking Python syntax..."
+
+          python -m py_compile \
+            config.py \
+            indicator.py \
+            strategy.py \
+            backtest.py \
+            quality_gate.py \
+            d1_database.py \
+            trade_manager.py \
+            update_sheet.py
+
+          echo ""
           echo "Python syntax check: PASS"
+
+          echo ""
+          echo "Checking configuration..."
+
           python - <<'PY'
           from config import STRAT, BT
-          print(f"BUY_SCORE={STRAT.buy_score} MAX_STOP={STRAT.max_stop_pct} MIN_STOP={STRAT.min_stop_pct}")
-          print(f"HISTORY_DAYS=420 WARMUP={BT.warmup} HORIZON={BT.horizon}")
+
+          print("========== STRATEGY ==========")
+
+          print("BUY_SCORE =", getattr(STRAT, "buy_score", "N/A"))
+          print("MAX_STOP  =", getattr(STRAT, "max_stop_pct", "N/A"))
+          print("MIN_STOP  =", getattr(STRAT, "min_stop_pct", "N/A"))
+
+          print("")
+          print("========== BACKTEST ==========")
+
+          print("WARMUP    =", getattr(BT, "warmup", "N/A"))
+          print("HORIZON   =", getattr(BT, "horizon", "N/A"))
+          print("MIN_SCORE =", getattr(BT, "min_score", "N/A"))
+
+          print("")
+          print("Configuration import: PASS")
           PY
 
-      - name: Unit Tests
-        run: python test_system.py
 
-      - name: Run Early Hunter V7 + D1
+      # ============================================================
+      # 5. VALIDATE REQUIRED SECRETS
+      # ============================================================
+      - name: Validate Secrets
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+        run: |
+
+          echo "Checking required secrets..."
+
+          if [ -z "$GCP_CREDENTIALS" ]; then
+            echo "ERROR: GCP_CREDENTIALS is missing"
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "ERROR: CLOUDFLARE_API_TOKEN is missing"
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ERROR: CLOUDFLARE_ACCOUNT_ID is missing"
+            exit 1
+          fi
+
+          echo "Required secrets: PASS"
+
+
+      # ============================================================
+      # 6. UNIT TESTS
+      # ============================================================
+      - name: Unit Tests
+        run: |
+
+          echo "=================================================="
+          echo "             RUNNING UNIT TESTS"
+          echo "=================================================="
+
+          python test_system.py
+
+          echo ""
+          echo "Unit tests: PASS"
+
+
+      # ============================================================
+      # 7. CREATE OUTPUT DIRECTORY
+      # ============================================================
+      - name: Prepare Output Directory
+        run: |
+
+          rm -rf output
+          mkdir -p output
+
+          echo "Output directory prepared."
+
+
+      # ============================================================
+      # 8. RUN NSE EARLY HUNTER
+      # ============================================================
+      - name: Run NSE Early Hunter V8 + D1
+        env:
+
+          # ------------------------------
+          # Google
+          # ------------------------------
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+
+          # ------------------------------
+          # Cloudflare D1
+          # ------------------------------
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
           D1_DATABASE_ID: e6652e85-b927-4f11-b790-45fb6ee818f2
+
+          # ------------------------------
+          # Strategy
+          # ------------------------------
           HISTORY_DAYS: 420
           WATCH_MIN_SCORE: 72
-        run: python update_sheet.py
 
+          # ------------------------------
+          # Python
+          # ------------------------------
+          PYTHONUNBUFFERED: "1"
+
+        run: |
+
+          echo "=================================================="
+          echo "        STARTING NSE EARLY HUNTER V8"
+          echo "=================================================="
+
+          echo ""
+          echo "History Days: 420"
+          echo "Watch Minimum Score: 72"
+
+          echo ""
+
+          python update_sheet.py
+
+          EXIT_CODE=$?
+
+          echo ""
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "ERROR: update_sheet.py failed"
+            exit $EXIT_CODE
+          fi
+
+          echo "NSE Early Hunter completed successfully."
+
+
+      # ============================================================
+      # 9. VERIFY CSV OUTPUT
+      # ============================================================
+      - name: Verify Output
+        run: |
+
+          echo "=================================================="
+          echo "              VERIFYING OUTPUT"
+          echo "=================================================="
+
+          if [ ! -d "output" ]; then
+            echo "ERROR: output directory does not exist"
+            exit 1
+          fi
+
+          echo ""
+          echo "Generated files:"
+          find output -maxdepth 1 -type f -printf '%f\n' | sort
+
+          CSV_COUNT=$(find output -maxdepth 1 -type f -name "*.csv" | wc -l)
+
+          echo ""
+          echo "CSV files generated: $CSV_COUNT"
+
+          if [ "$CSV_COUNT" -eq 0 ]; then
+            echo "ERROR: No CSV files generated"
+            exit 1
+          fi
+
+          echo ""
+          echo "CSV output: PASS"
+
+
+      # ============================================================
+      # 10. VERIFY CSV FILES ARE NOT EMPTY
+      # ============================================================
+      - name: Validate CSV Files
+        run: |
+
+          echo "=================================================="
+          echo "            VALIDATING CSV FILES"
+          echo "=================================================="
+
+          FAILED=0
+
+          for file in output/*.csv
+          do
+
+            if [ ! -s "$file" ]; then
+              echo "ERROR: Empty CSV -> $file"
+              FAILED=1
+              continue
+            fi
+
+            LINES=$(wc -l < "$file")
+
+            echo "$(basename "$file") -> $LINES lines"
+
+            if [ "$LINES" -lt 2 ]; then
+              echo "WARNING: CSV contains no data rows -> $file"
+            fi
+
+          done
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "CSV validation failed."
+            exit 1
+          fi
+
+          echo ""
+          echo "CSV validation: PASS"
+
+
+      # ============================================================
+      # 11. SHOW IMPORTANT SIGNAL SUMMARY
+      # ============================================================
+      - name: Show Signal Summary
+        run: |
+
+          echo "=================================================="
+          echo "              SIGNAL SUMMARY"
+          echo "=================================================="
+
+          python - <<'PY'
+          import glob
+          import pandas as pd
+
+          files = glob.glob("output/*.csv")
+
+          if not files:
+              print("No CSV files found.")
+              raise SystemExit(0)
+
+          for file in files:
+
+              print("")
+              print("FILE:", file)
+
+              try:
+
+                  df = pd.read_csv(file)
+
+                  print("Rows:", len(df))
+                  print("Columns:", len(df.columns))
+
+                  if "ACTION" in df.columns:
+
+                      print("")
+                      print("ACTION COUNTS:")
+
+                      print(
+                          df["ACTION"]
+                          .fillna("UNKNOWN")
+                          .value_counts()
+                          .to_string()
+                      )
+
+                  if "HUNTER_SCORE" in df.columns:
+
+                      print("")
+
+                      scores = pd.to_numeric(
+                          df["HUNTER_SCORE"],
+                          errors="coerce"
+                      )
+
+                      print(
+                          "Highest Hunter Score:",
+                          scores.max()
+                      )
+
+              except Exception as e:
+
+                  print(
+                      "Could not summarize:",
+                      e
+                  )
+
+          PY
+
+
+      # ============================================================
+      # 12. UPLOAD CSV ARTIFACTS
+      # ============================================================
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
+
         with:
-          name: nse-early-hunter-v7
-          path: output/*.csv
+
+          name: nse-early-hunter-v8
+
+          path: |
+            output/*.csv
+
           if-no-files-found: error
+
           retention-days: 30
+
+
+      # ============================================================
+      # 13. FINAL STATUS
+      # ============================================================
+      - name: Final Status
+        run: |
+
+          echo ""
+          echo "=================================================="
+          echo "       NSE EARLY HUNTER V8 COMPLETED"
+          echo "=================================================="
+
+          echo ""
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo ""
+          echo "Generated output:"
+          ls -lh output/
+
+          echo ""
+          echo "Workflow completed successfully."
