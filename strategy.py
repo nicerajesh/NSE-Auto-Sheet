@@ -9,10 +9,10 @@ def finite(x):
 def analyze_stock(g,min_score=None):
     g=g.sort_values('DATE').reset_index(drop=True)
     if len(g)<STRAT.min_history:return None
-    w=g.tail(min(180,len(g))).reset_index(drop=True)
+    w=g.tail(min(220,len(g))).reset_index(drop=True)
     c=pd.to_numeric(w.CLOSE_PRICE,errors='coerce').to_numpy(dtype=float); n=len(c); cur=float(c[-1]); x=w.iloc[-1]
     if not finite(cur) or cur<=0:return None
-    lookback=min(70,n-1);start=max(0,n-lookback);seg=c[start:];low_idx=start+int(np.nanargmin(seg));low=float(c[low_idx])
+    lookback=min(80,n-1);start=max(0,n-lookback);seg=c[start:];low_idx=start+int(np.nanargmin(seg));low=float(c[low_idx])
     prior_start=max(0,low_idx-30);prior=c[prior_start:low_idx];prior_high=float(np.nanmax(prior)) if len(prior) else np.nan
     hh_idx=None;hh=np.nan
     if finite(prior_high):
@@ -29,47 +29,45 @@ def analyze_stock(g,min_score=None):
     get=lambda k:x.get(k,np.nan)
     rsi=get('RSI14');adx=get('ADX14');vol=get('VOL_RATIO');deliv=get('DELIV_PER');d10=get('DELIV_AVG10');atrp=get('ATR_PCT');atravg=get('ATR_PCT_AVG30')
     mh3=get('MACD_HIST_SLOPE');macdh=get('MACD_HIST');ema20=get('EMA20');ema50=get('EMA50');ema200=get('EMA200');slope20=get('EMA20_SLOPE_5');slope50=get('EMA50_SLOPE_5')
-    ret5=get('RET_5D');ret20=get('RET_20D');ret50=get('RET_50D');close_loc=get('CLOSE_LOCATION');lower_wick=get('LOWER_WICK');high52=get('HIGH_52W');prior20=get('PRIOR_HIGH20');prior55=get('PRIOR_HIGH55')
-    no_lower_low=cur>=float(np.nanmin(c[-7:-1]))*.998 if n>=7 else True
+    ret5=get('RET_5D');ret20=get('RET_20D');ret50=get('RET_50D');close_loc=get('CLOSE_LOCATION');lower_wick=get('LOWER_WICK');high52=get('HIGH_52W');prior20=get('PRIOR_HIGH20');prior55=get('PRIOR_HIGH55');di_spread=get('DI_SPREAD')
+    no_lower_low=cur>=float(np.nanmin(c[-8:-1]))*.998 if n>=8 else True
     low_dist=(cur/low-1)*100 if low>0 else 999;from_52=(cur/high52-1)*100 if finite(high52) and high52>0 else 0
     ret20_local=(c[-1]/c[-21]-1)*100 if n>=21 and c[-21]>0 else np.nan;ret50_local=(c[-1]/c[-51]-1)*100 if n>=51 and c[-51]>0 else np.nan
-    bottom_hold=low_dist<=20 and no_lower_low
-    exhaustion=(finite(vol) and vol<=1.70) and ((not finite(atravg)) or atrp<=atravg*1.25)
     deep_fall=(finite(ret20_local) and ret20_local<=STRAT.max_fall_20d_pct) or (finite(ret50_local) and ret50_local<=STRAT.max_fall_50d_pct) or (finite(from_52) and from_52<=STRAT.max_52w_high_distance_pct)
-    recovery=(finite(ret5) and ret5>=STRAT.min_recovery_5d_pct) and no_lower_low
+    bottom_hold=low_dist<=STRAT.late_low_distance_pct and no_lower_low
+    exhaustion=finite(vol) and vol<=1.70 and ((not finite(atravg)) or atrp<=atravg*1.25)
+    recovery=finite(ret5) and ret5>=STRAT.min_recovery_5d_pct and no_lower_low
     delivery_build=finite(deliv) and finite(d10) and deliv>=max(STRAT.delivery_floor,d10*.88)
-    rsi_recovery=finite(rsi) and 38<=rsi<=72
-    momentum_turn=(finite(mh3) and mh3>0) or (finite(macdh) and macdh>-0.35 and finite(slope20) and slope20>0)
-    ema_turn=finite(slope20) and slope20>-0.45 and (not finite(slope50) or slope50>-0.50)
+    rsi_recovery=finite(rsi) and 41<=rsi<=68
+    momentum_turn=(finite(mh3) and mh3>0) or (finite(macdh) and macdh>-0.30 and finite(slope20) and slope20>0)
+    ema_turn=finite(slope20) and slope20>-0.25 and (not finite(slope50) or slope50>-0.40)
     alignment=finite(ema20) and finite(ema50) and ema20>=ema50*.94
-    not_extended=(not finite(ret5) or ret5<=STRAT.max_entry_extension_pct) and (not finite(ret20) or ret20<=28)
-    demand=(finite(close_loc) and close_loc>=.52) or (finite(lower_wick) and lower_wick>=.22)
-    healthy_volume=finite(vol) and .45<=vol<=3.8
-    rs_improving=(not STRAT.require_rs_improving) or (finite(ret5) and finite(ret20) and ret5>=ret20-3.5)
+    not_extended=(not finite(ret5) or ret5<=STRAT.max_entry_extension_pct) and (not finite(ret20) or ret20<=18)
+    demand=(finite(close_loc) and close_loc>=.55) or (finite(lower_wick) and lower_wick>=.25)
+    healthy_volume=finite(vol) and .55<=vol<=2.75
+    rs_improving=(not STRAT.require_rs_improving) or (finite(ret5) and finite(ret20) and ret5>=ret20-2.5)
     resistance=max([v for v in [prior20,prior55,hh] if finite(v) and v>cur*1.005] or [cur*1.05]);res_dist=(resistance/cur-1)*100
     breakout_volume=finite(vol) and vol>=STRAT.volume_breakout_ratio
-
+    risk_room=STRAT.min_resistance_distance_pct<=res_dist<=STRAT.max_resistance_distance_pct
     score=0;reasons=[]
     def add(ok,pts,msg):
         nonlocal score
         if bool(ok):score+=pts;reasons.append(msg)
-    # Deliberately capped components: prevents almost every stock from becoming 90+.
-    add(deep_fall,15,'Deep fall');add(bottom_hold,10,'Bottom holding');add(exhaustion,6,'Selling exhaustion')
-    add(recovery,8,'Recovery started');add(hh_idx is not None,8,'First HH');add(hl_idx is not None,16,'Higher Low');add(second_hh,8,'Second HH');add(base_days>=STRAT.min_base_days,4,'Base holding')
-    add(momentum_turn,8,'Momentum turn');add(rsi_recovery,5,'RSI recovery');add(ema_turn,5,'EMA slope improving');add(alignment,3,'EMA alignment')
-    add(delivery_build,4,'Delivery stable');add(healthy_volume,2,'Healthy volume');add(demand,2,'Demand candle');add(not_extended,4,'Not extended');add(rs_improving,2,'Relative strength improving')
-    if finite(adx) and adx>=18:add(True,2,'Trend strength')
-    if finite(atrp) and finite(atravg) and atrp<atravg*1.05:add(True,2,'ATR compression')
-    if breakout_volume:add(True,4,'Breakout volume')
-    if not no_lower_low:score-=12;reasons.append('Lower-low risk')
-    if not rs_improving:score-=5;reasons.append('Relative strength weak')
+    # Separate components prevent the old score from saturating at 90-100.
+    add(deep_fall,8,'Deep fall');add(bottom_hold,7,'Bottom holding');add(risk_room,7,'Resistance room');add(not_extended,3,'Not extended')
+    add(hh_idx is not None,7,'First HH');add(hl_idx is not None,10,'Higher Low');add(base_days>=STRAT.min_base_days,4,'Base holding');add(second_hh,4,'Second HH')
+    add(recovery,5,'Recovery started');add(momentum_turn,5,'Momentum turn');add(rsi_recovery,4,'RSI recovery');add(ema_turn,3,'EMA slope improving');add(finite(di_spread) and di_spread>-2,3,'Trend pressure improving')
+    add(delivery_build,5,'Delivery stable');add(healthy_volume,4,'Healthy volume');add(demand,3,'Demand candle');add(finite(atrp) and finite(atravg) and atrp<atravg*1.05,3,'ATR compression');add(rs_improving,4,'Relative strength improving');add(finite(adx) and adx>=18,2,'Trend strength')
+    if finite(ret20_local) and ret20_local>STRAT.late_ret20_pct:score-=8;reasons.append('Late 20D move')
+    if low_dist>STRAT.late_low_distance_pct:score-=8;reasons.append('Too far from low')
     if res_dist<STRAT.min_resistance_distance_pct:score-=8;reasons.append('Resistance too close')
-    if not not_extended:score-=10;reasons.append('Extended')
-    if finite(atrp) and atrp>STRAT.max_atr_pct:score-=7;reasons.append('ATR too high')
+    if res_dist>STRAT.max_resistance_distance_pct:score-=4;reasons.append('Too much overhead')
+    if finite(atrp) and atrp>STRAT.max_atr_pct:score-=6;reasons.append('ATR too high')
+    if not rs_improving:score-=5;reasons.append('Relative strength weak')
+    if not no_lower_low:score-=10;reasons.append('Lower-low risk')
     score=max(0,min(100,int(round(score))))
-
     stage='CONFIRMED BREAKOUT' if second_hh and breakout_volume else 'PRE-BREAKOUT' if hl_idx is not None else 'FIRST REVERSAL' if hh_idx is not None else 'BOTTOM FORMING' if bottom_hold else 'WATCH'
-    atr=float(get('ATR14')) if finite(get('ATR14')) else cur*.03;anchor=float(hl if finite(hl) else low);raw_stop=anchor-1.05*atr
+    atr=float(get('ATR14')) if finite(get('ATR14')) else cur*.035;anchor=float(hl if finite(hl) else low);raw_stop=anchor-1.25*atr
     stop=max(raw_stop,cur*(1-STRAT.max_stop_pct/100));stop=min(stop,cur*(1-STRAT.min_stop_pct/100));risk=cur-stop
     if risk<=0:stop=cur*(1-STRAT.min_stop_pct/100);risk=cur-stop
     setup_high=hh2 if finite(hh2) and hh2>cur else hh if finite(hh) and hh>cur else resistance
@@ -83,13 +81,13 @@ def analyze_stock(g,min_score=None):
     rr1=(t1-cur)/risk;rr2=(t2-cur)/risk;rr3=(t3-cur)/risk
     threshold=STRAT.min_score if min_score is None else min_score;buy_gate=max(STRAT.buy_score,threshold)
     risk_ok=finite(risk) and STRAT.min_stop_pct<=risk/cur*100<=STRAT.max_stop_pct
-    structural_buy=(hl_idx is not None and base_days>=max(3,STRAT.min_base_days-1)) or (bottom_hold and hh_idx is not None)
+    structural_buy=hl_idx is not None and base_days>=max(3,STRAT.min_base_days-1)
     momentum_ok=rsi_recovery and momentum_turn and ema_turn and rs_improving
-    location_ok=res_dist>=STRAT.min_resistance_distance_pct and not_extended and low_dist<=20
-    setup_ok=deep_fall or bottom_hold or (hh_idx is not None and recovery)
+    location_ok=risk_room and not_extended and 4<=low_dist<=STRAT.late_low_distance_pct
+    setup_ok=deep_fall or bottom_hold
     eligible=score>=buy_gate
-    confirmed=eligible and structural_buy and momentum_ok and location_ok and risk_ok and second_hh and breakout_volume and score>=STRAT.strong_score
-    early=eligible and structural_buy and momentum_ok and location_ok and risk_ok and setup_ok
+    confirmed=eligible and score>=STRAT.strong_score and stage=='CONFIRMED BREAKOUT' and breakout_volume and structural_buy and momentum_ok and location_ok and risk_ok
+    early=eligible and score<STRAT.strong_score and structural_buy and momentum_ok and location_ok and risk_ok and setup_ok
     action='BUY' if confirmed else 'BUY ON TRIGGER' if early else 'WATCH'
     structure='LOW → HH → HL → HH' if second_hh else 'LOW → HH → HL' if hl_idx is not None else 'LOW → HH' if hh_idx is not None else 'LOW HOLD' if bottom_hold else 'UNCONFIRMED'
     def rv(v,d=2):return round(float(v),d) if finite(v) else ''
