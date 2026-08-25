@@ -43,7 +43,6 @@ def main():
     assert sig['STOP_LOSS'] < sig['CMP'] < sig['TARGET_1'] < sig['TARGET_2'] < sig['TARGET_3']
     assert 0 <= sig['HUNTER_SCORE'] <= 100
 
-    # V9 supports separate next-day, breakout and swing classifications.
     valid_actions = {
         'NEXT DAY PRE-BREAKOUT BUY',
         'NEXT DAY BREAKOUT BUY',
@@ -59,10 +58,12 @@ def main():
     }
     assert sig['ACTION'] in valid_actions, sig['ACTION']
 
+    # A stock can be in the confirmed-breakout state while its action is BREAKOUT BUY.
     valid_stages = {
         'NEXT-DAY PRE-BREAKOUT',
         'PRE-BREAKOUT',
         'BREAKOUT CONFIRMED',
+        'BREAKOUT BUY',
         'SWING',
         'WATCH',
         'BASE FORMING',
