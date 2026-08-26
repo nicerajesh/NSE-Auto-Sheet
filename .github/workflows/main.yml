@@ -30,7 +30,7 @@ jobs:
           pip install -r requirements.txt
       - name: Verify Engine
         run: |
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py incremental_d1.py persistent_runner.py trade_manager.py update_sheet.py run_update_safe.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py sitecustomize.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py incremental_d1.py persistent_runner.py persistent_runner_safe.py trade_manager.py update_sheet.py run_update_safe.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py sitecustomize.py test_system.py
           python - <<'PY'
           import sitecustomize
           from config import STRAT, BT
@@ -63,7 +63,7 @@ jobs:
           WATCH_MIN_SCORE: 75
           PERSISTENT_D1: '1'
           PYTHONUNBUFFERED: '1'
-        run: python persistent_runner.py
+        run: python persistent_runner_safe.py
       - name: Validate Calibration
         run: |
           test -f output/backtest_summary.csv
