@@ -29,31 +29,6 @@ def _f(v, default=float('nan')):
         return default
 
 
-def _composite_score(out, market):
-    """Continuous score: setup quality + timing + risk + regime, never max(bucket)."""
-    pre=_f(out.get('PRE_BREAKOUT_SCORE')); br=_f(out.get('BREAKOUT_SCORE')); sw=_f(out.get('SWING_SCORE'))
-    scores=[x for x in (pre,br,sw) if math.isfinite(x)]
-    base=sum(scores)/len(scores) if scores else 0.0
-    best=max(scores) if scores else 0.0
-    # Reward the best valid setup, but penalize disagreement between setup buckets.
-    dispersion=(max(scores)-min(scores)) if len(scores)>=2 else 0.0
-    agreement=max(0.0,100.0-dispersion*0.45)
-    delivery=1.0 if str(out.get('DELIVERY','')).startswith('STRONG') else 0.65 if str(out.get('DELIVERY',''))=='GOOD' else 0.0
-    accumulation=1.0 if out.get('ACCUMULATION')=='STRONG' else 0.0
-    rs=1.0 if out.get('RELATIVE_STRENGTH')=='STRONG' else 0.7 if out.get('RELATIVE_STRENGTH')=='POSITIVE' else 0.0
-    trend=1.0 if out.get('TREND')=='STRONG BULLISH' else 0.7 if out.get('TREND')=='ALIGNED' else 0.0
-    dry=1.0 if out.get('VOLUME_DRYUP')=='YES' else 0.0
-    expansion=1.0 if out.get('VOLUME_EXPANSION')=='YES' else 0.0
-    sector=1.0 if out.get('SECTOR_STRENGTH')=='POSITIVE' else 0.45 if out.get('SECTOR_STRENGTH')=='UNAVAILABLE' else 0.0
-    risk_pct=_f(out.get('RISK_PCT'))
-    if math.isfinite(risk_pct): risk=max(0.0,min(1.0,(7.5-risk_pct)/5.5))
-    else: risk=0.0
-    market_score=float(market.get('score',5) or 5)/10.0
-    timing=0.55*agreement+0.45*best
-    final=(0.32*base+0.13*timing+0.10*(delivery*100)+0.08*(accumulation*100)+0.08*(rs*100)+0.08*(trend*100)+0.06*(dry*100)+0.05*(expansion*100)+0.04*(sector*100)+0.04*(risk*100)+0.02*(market_score*100))
-    return int(round(max(0,min(100,final))))
-
-
 def _liquidity_ok(g):
     try:
         q=pd.to_numeric(g.TTL_TRD_QNTY,errors='coerce')
@@ -61,6 +36,55 @@ def _liquidity_ok(g):
         cur=_f(q.iloc[-1]);med=_f(q.iloc[-20:].median())
         return math.isfinite(cur) and math.isfinite(med) and cur>=max(1000,med*0.35)
     except Exception:return True
+
+
+def _entry_ok(out):
+    """Reject late/chasing entries even when the underlying setup score is high."""
+    cmpv=_f(out.get('CMP')); max_buy=_f(out.get('MAX_BUY_PRICE')); entry=_f(out.get('ENTRY_PRICE'))
+    if math.isfinite(cmpv) and math.isfinite(max_buy) and max_buy>0 and cmpv>max_buy*1.001:
+        return False,'ABOVE_MAX_BUY_PRICE'
+    if math.isfinite(cmpv) and math.isfinite(entry) and entry>0 and cmpv>entry*1.01:
+        return False,'ENTRY_CHASE'
+    r20=_f(out.get('RET_20D_PCT'))
+    if math.isfinite(r20) and r20>15:
+        return False,'EXTENDED_20D'
+    rsi=_f(out.get('RSI'))
+    if math.isfinite(rsi) and rsi>78:
+        return False,'RSI_EXTREME'
+    return True,''
+
+
+def _final_trade_score(out, market):
+    """Action-specific score. A 100 in an unrelated bucket cannot inflate the final score."""
+    action=str(out.get('ACTION','WATCH'))
+    pre=_f(out.get('PRE_BREAKOUT_SCORE'),0); br=_f(out.get('BREAKOUT_SCORE'),0); sw=_f(out.get('SWING_SCORE'),0)
+    if action=='PRE-BREAKOUT BUY': setup=pre
+    elif action=='BREAKOUT BUY': setup=br
+    elif action=='SWING BUY': setup=sw
+    else: setup=max(pre,br,sw)
+
+    delivery=100 if str(out.get('DELIVERY','')).startswith('STRONG') else 65 if str(out.get('DELIVERY',''))=='GOOD' else 0
+    accum=100 if out.get('ACCUMULATION')=='STRONG' else 0
+    rs=100 if out.get('RELATIVE_STRENGTH')=='STRONG' else 70 if out.get('RELATIVE_STRENGTH')=='POSITIVE' else 0
+    trend=100 if out.get('TREND')=='STRONG BULLISH' else 70 if out.get('TREND')=='ALIGNED' else 0
+    dry=100 if out.get('VOLUME_DRYUP')=='YES' else 0
+    expansion=100 if out.get('VOLUME_EXPANSION')=='YES' else 0
+    sector=100 if out.get('SECTOR_STRENGTH')=='POSITIVE' else 45 if out.get('SECTOR_STRENGTH')=='UNAVAILABLE' else 0
+    regime=float(market.get('score',5) or 5)*10
+    risk=_f(out.get('RISK_PCT'))
+    risk_score=max(0,min(100,(7.5-risk)/5.5*100)) if math.isfinite(risk) else 0
+    entry_ok,_=_entry_ok(out)
+    entry=100 if entry_ok else 0
+
+    if action=='PRE-BREAKOUT BUY':
+        final=.50*setup+.10*delivery+.10*accum+.10*rs+.08*trend+.04*dry+.03*sector+.03*regime+.02*entry
+    elif action=='BREAKOUT BUY':
+        final=.45*setup+.15*expansion+.10*delivery+.10*rs+.08*trend+.05*sector+.04*regime+.03*entry
+    elif action=='SWING BUY':
+        final=.48*setup+.14*trend+.10*rs+.10*delivery+.08*accum+.04*sector+.03*regime+.03*entry
+    else:
+        final=.50*setup+.15*trend+.15*rs+.10*delivery+.10*regime
+    return int(round(max(0,min(100,final))))
 
 try:
     import strategy as _s
@@ -77,29 +101,36 @@ try:
             res=_f(h.iloc[i-20:i].max())
             if not math.isfinite(res) or res<=0:continue
             fut=h.iloc[i+1:min(n,i+21)];hits.append(int((fut>=res*1.002).any()))
-        if len(hits)<20:return None
+        if len(hits)<30:return None
         return int(round(100*(sum(hits)+5)/(len(hits)+10)))
 
     def analyze_stock(g,min_score=None,market=None):
         g=g.sort_values('DATE').reset_index(drop=True);m=_market(g) if market is None else market
         out=_orig_analyze(g,min_score,m)
         if not out:return out
-        final=_composite_score(out,m)
+        final=_final_trade_score(out,m)
         out['FINAL_TRADE_SCORE']=final
-        out['MODEL_CONFIDENCE']=int(min(95,final))
+        out['MODEL_CONFIDENCE']=min(95,final)
         out['HUNTER_SCORE']=final
         out['NEXT_DAY_SETUP_SCORE']=final
         out['MARKET_REGIME']=m.get('regime','NEUTRAL');out['MARKET_BREADTH']=round(_f(m.get('breadth'),50),2)
-        # Final release gates. Existing indicator gates remain the first line of defence.
+
         action=out.get('ACTION')
         if action in {'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}:
-            risk=_f(out.get('RISK_PCT'))
-            sector=out.get('SECTOR_STRENGTH','UNAVAILABLE')
-            liquidity=_liquidity_ok(g)
-            regime_ok=float(m.get('score',5) or 5)>=6
-            if final<85 or not liquidity or not regime_ok or (math.isfinite(risk) and risk>7.5) or sector=='WEAK':
+            risk=_f(out.get('RISK_PCT')); sector=out.get('SECTOR_STRENGTH','UNAVAILABLE')
+            liquidity=_liquidity_ok(g); regime_ok=float(m.get('score',5) or 5)>=6
+            entry_ok,entry_reason=_entry_ok(out)
+            # BUY release is intentionally much stricter than WATCH scoring.
+            if final<88 or not liquidity or not regime_ok or not entry_ok or (math.isfinite(risk) and risk>7.0) or sector=='WEAK':
                 out['ACTION']='WATCH';out['CATEGORY']='WATCH';out['NEXT_DAY_ACTION']='WATCH';out['STAGE']='WATCH'
-                out['RELEASE_BLOCK_REASON']='COMPOSITE_SCORE_OR_RISK_GATE'
+                reasons=[]
+                if final<88: reasons.append('FINAL_SCORE')
+                if not liquidity: reasons.append('LIQUIDITY')
+                if not regime_ok: reasons.append('MARKET_REGIME')
+                if not entry_ok: reasons.append(entry_reason or 'ENTRY')
+                if math.isfinite(risk) and risk>7.0: reasons.append('RISK')
+                if sector=='WEAK': reasons.append('SECTOR')
+                out['RELEASE_BLOCK_REASON']='|'.join(reasons)
         p=_strict_probability(g,final,out.get('ACTION'))
         out['BREAKOUT_PROBABILITY']=p if p is not None else ''
         out['PROBABILITY_METHOD']='PRE_SETUP_HISTORICAL_PRIOR' if p is not None else 'INSUFFICIENT_SETUP_HISTORY'
@@ -128,7 +159,6 @@ try:
                 except Exception as e:print(f'SCAN BLOCKED {sym}:',repr(e))
             if not out:return pd.DataFrame()
             df=pd.DataFrame(out)
-            # Concentration control: at most two names per sector, then top 5 by composite score.
             if 'SECTOR_STRENGTH' in df.columns:
                 selected=[];counts={}
                 for _,row in df.sort_values(['FINAL_TRADE_SCORE','BREAKOUT_SCORE','PRE_BREAKOUT_SCORE'],ascending=False).iterrows():
