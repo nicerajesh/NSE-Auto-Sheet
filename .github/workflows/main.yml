@@ -30,10 +30,12 @@ jobs:
           pip install -r requirements.txt
       - name: Verify Engine
         run: |
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py sitecustomize.py test_system.py
           python - <<'PY'
           from config import STRAT, BT
           from strategy import ACTIONABLE
+          import sitecustomize
+          print('GSPREAD_COMPAT_SHIM=LOADED')
           print('ACTIONABLE=',sorted(ACTIONABLE))
           print('BUY_SCORE=',STRAT.buy_score)
           print('DELIVERY_FLOOR=',STRAT.delivery_floor)
@@ -72,10 +74,15 @@ jobs:
           python update_sheet.py
           rc=$?
           if [ "$rc" -ne 0 ]; then
-            echo "update_sheet.py failed with exit code $rc; using safe sheet writer fallback."
-            test -f output/early_hunter.csv
-            test -f output/backtest_summary.csv
+            echo "update_sheet.py failed with exit code $rc; running safe sheet writer fallback."
+            test -f output/early_hunter.csv || exit "$rc"
+            test -f output/backtest_summary.csv || exit "$rc"
             python sheet_writer_hotfix.py
+            hotfix_rc=$?
+            if [ "$hotfix_rc" -ne 0 ]; then
+              echo "SAFE SHEET WRITER FAILED with exit code $hotfix_rc"
+              exit "$hotfix_rc"
+            fi
           fi
           exit 0
       - name: Validate Calibration
