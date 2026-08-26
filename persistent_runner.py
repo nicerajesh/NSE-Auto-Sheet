@@ -9,7 +9,7 @@ from d1_database import setup, query, batch
 ROOT=Path(__file__).resolve().parent; OUT=ROOT/'output'; OUT.mkdir(exist_ok=True)
 HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','480')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1'))
 def session():
- s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0','Accept-Language':'en-US,en;q=0.9','Referer':'https://www.nseindia.com/','Accept':'application/json,text/plain,*/*'}); 
+ s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0','Accept-Language':'en-US,en;q=0.9','Referer':'https://www.nseindia.com/','Accept':'application/json,text/plain,*/*'})
  try:s.get('https://www.nseindia.com',timeout=20)
  except Exception:pass
  return s
@@ -33,7 +33,7 @@ def fetch_bhav(s,d):
    if a in df.columns and b not in df.columns:df=df.rename(columns={a:b})
   need=['SYMBOL','SERIES','OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS','DELIV_QTY','DELIV_PER']
   if any(c not in df.columns for c in need):return None
-  df=df[df.SERIES.astype(str).str.strip().eq('EQ')].copy();
+  df=df[df.SERIES.astype(str).str.strip().eq('EQ')].copy()
   for c in need[2:]:df[c]=pd.to_numeric(df[c],errors='coerce')
   df=df.dropna(subset=['SYMBOL','OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS']); df['SYMBOL']=df.SYMBOL.astype(str).str.strip().str.upper(); df=df[df.TURNOVER_LACS>=MIN_TURNOVER_LACS].copy(); df['DATE']=pd.Timestamp(d); return df
  except Exception as e:print('Fetch warning',d,e); return None
@@ -63,10 +63,9 @@ def make_runner():
  src=(ROOT/'update_sheet.py').read_text(encoding='utf-8'); start='s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0'; end="if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')"; a=src.find(start); b=src.find(end,a)
  if a<0 or b<0:raise RuntimeError('Legacy history loader not found')
  b+=len(end); src=src[:a]+"frames=[pd.read_csv(OUT/'persistent_history.csv',parse_dates=['DATE'])]; print(f'PERSISTENT D1 INPUT: {len(frames[0])} rows')"+src[b:]
- # Remove every aggregate object from the Hunter sheet. It must be a flat stock table only.
- src=src.replace('hrows += summary_rows','summary_rows=[]')
- cal="if not cal.empty:\n    hrows += [[''],['SCORE/HORIZON CALIBRATION'],cal.columns.tolist()]+[[scalarize(x) for x in row] for row in cal.astype(object).where(pd.notna(cal),'').itertuples(index=False,name=None)]"
- src=src.replace(cal,'# Calibration is kept in CSV/Backtest Audit, never in Early Hunter.')
+ # The legacy script used to append nested backtest dictionaries to Early Hunter and then crash at Google Sheets row ~518.
+ # Disable ONLY that legacy write. The CSV outputs are retained and repair_sheet_output.py is the authoritative sheet writer.
+ src=src.replace("ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')", "print('SAFE SHEET PATH: skipping legacy Early Hunter write; repair_sheet_output.py will publish flat rows')")
  return src
 def run():
  src=make_runner()
