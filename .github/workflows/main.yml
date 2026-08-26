@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '45 14 * * 1-5'
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'fix/*'
 
 jobs:
   update-sheet:
@@ -13,7 +17,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -27,6 +31,7 @@ jobs:
       - name: Verify Engine
         run: |
           echo '=== NSE EARLY HUNTER — EVENT CALIBRATED FOUR-BUCKET ENGINE ==='
+          echo "REF=${{ github.ref_name }}"
           echo "COMMIT=$(git rev-parse HEAD)"
           python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py test_system.py
           python - <<'PY'
@@ -34,7 +39,9 @@ jobs:
           from strategy import ACTIONABLE
           print('ACTIONABLE=',sorted(ACTIONABLE))
           print('BUY_SCORE=',STRAT.buy_score)
-          print('RESISTANCE_MAX_PCT=',STRAT.max_resistance_distance_pct)
+          print('DELIVERY_FLOOR=',STRAT.delivery_floor)
+          print('VOLUME_BREAKOUT_RATIO=',STRAT.volume_breakout_ratio)
+          print('MAX_RESISTANCE_DISTANCE_PCT=',STRAT.max_resistance_distance_pct)
           print('MIN_RESISTANCE_TESTS=',STRAT.min_resistance_tests)
           print('BREAKOUT_LOOKAHEAD=',BT.breakout_lookahead_days)
           print('PROBABILITY_MIN_SAMPLES=',BT.probability_min_samples)
@@ -97,7 +104,7 @@ jobs:
           if df.empty:
               print('NO QUALIFIED BUY CANDIDATES — valid when quality gate blocks the model.')
           else:
-              cols=[c for c in ['SYMBOL','ACTION','CATEGORY','CMP','ENTRY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_CONFIDENCE'] if c in df.columns]
+              cols=[c for c in ['SYMBOL','ACTION','CATEGORY','CMP','ENTRY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_PROBABILITY'] if c in df.columns]
               print(df[cols].head(50).to_string(index=False))
           PY
       - name: Upload CSV artifacts
