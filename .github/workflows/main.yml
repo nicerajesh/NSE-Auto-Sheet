@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '45 14 * * 1-5'
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'fix/*'
 
 jobs:
   update-sheet:
@@ -13,7 +17,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -26,17 +30,14 @@ jobs:
           pip install -r requirements.txt
       - name: Verify Engine
         run: |
-          echo '=== NSE EARLY HUNTER — EVENT CALIBRATED FOUR-BUCKET ENGINE ==='
-          echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py incremental_d1.py persistent_runner.py trade_manager.py update_sheet.py run_update_safe.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py sitecustomize.py test_system.py
           python - <<'PY'
+          import sitecustomize
           from config import STRAT, BT
           from strategy import ACTIONABLE
+          print('GSPREAD_COMPAT_SHIM=LOADED')
           print('ACTIONABLE=',sorted(ACTIONABLE))
           print('BUY_SCORE=',STRAT.buy_score)
-          print('RESISTANCE_MAX_PCT=',STRAT.max_resistance_distance_pct)
-          print('MIN_RESISTANCE_TESTS=',STRAT.min_resistance_tests)
-          print('BREAKOUT_LOOKAHEAD=',BT.breakout_lookahead_days)
           print('PROBABILITY_MIN_SAMPLES=',BT.probability_min_samples)
           PY
       - name: Unit Tests
@@ -52,32 +53,28 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo 'CLOUDFLARE_ACCOUNT_ID missing' && exit 1)
       - name: Prepare Output
         run: rm -rf output && mkdir -p output
-      - name: Run NSE Scanner
+      - name: Run Persistent NSE Engine
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_ID: e6652e85-b927-4f11-b790-45fb6ee818f2
           HISTORY_DAYS: 480
-          WATCH_MIN_SCORE: 72
+          WATCH_MIN_SCORE: 75
+          PERSISTENT_D1: '1'
           PYTHONUNBUFFERED: '1'
-        run: python update_sheet.py
+        run: python persistent_runner.py
       - name: Validate Calibration
         run: |
           test -f output/backtest_summary.csv
           test -f output/score_calibration.csv
-          python - <<'PY'
-          import pandas as pd
-          s=pd.read_csv('output/backtest_summary.csv').iloc[0]
-          c=pd.read_csv('output/score_calibration.csv')
-          print('BACKTEST TRADES=',int(s.get('trades',0)))
-          print('EVENT SAMPLES=',int(s.get('breakout_event_samples',0)))
-          print('PRE-BREAKOUT EVENT RATE=',float(s.get('pre_breakout_event_rate_pct',0)))
-          print('CALIBRATION ROWS=',len(c))
-          if 'ANALYSIS' in c.columns: print(c.groupby('ANALYSIS').size().to_string())
-          PY
       - name: Finalize Quality Gate and Outputs
         run: python finalize_outputs.py
+      - name: Repair Google Sheet Output
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          PYTHONUNBUFFERED: '1'
+        run: python repair_sheet_output.py
       - name: Build Trading Dashboard
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
@@ -94,16 +91,13 @@ jobs:
           python - <<'PY'
           import pandas as pd
           df=pd.read_csv('output/buy_candidates.csv')
-          if df.empty:
-              print('NO QUALIFIED BUY CANDIDATES — valid when quality gate blocks the model.')
-          else:
-              cols=[c for c in ['SYMBOL','ACTION','CATEGORY','CMP','ENTRY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_CONFIDENCE'] if c in df.columns]
-              print(df[cols].head(50).to_string(index=False))
+          if df.empty: print('NO QUALIFIED BUY CANDIDATES — valid when timing/quality gates block the model.')
+          else: print(df.head(50).to_string(index=False))
           PY
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nse-early-hunter-event-calibrated
+          name: nse-early-hunter-persistent-decision-engine
           path: output/*.csv
           if-no-files-found: error
           retention-days: 30

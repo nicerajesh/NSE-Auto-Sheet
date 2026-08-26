@@ -60,6 +60,27 @@ def fetch_bhav(s,d):
         for c in need[2:]:df[c]=pd.to_numeric(df[c],errors='coerce')
         df=df.dropna(subset=['SYMBOL','OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS']);df['SYMBOL']=df['SYMBOL'].astype(str).str.strip().str.upper();df=df[df.TURNOVER_LACS>=MIN_TURNOVER_LACS].copy();df['DATE']=pd.Timestamp(d);return df
     except Exception as e:print('Fetch',d,e);return None
+
+def scalarize(v):
+    if v is None:return ''
+    if isinstance(v,(list,tuple,set,dict)):
+        if isinstance(v,dict):return json.dumps(v,sort_keys=True,default=str)
+        return ', '.join(str(x) for x in v)
+    if isinstance(v,(pd.Timestamp,datetime)):return v.strftime('%Y-%m-%d')
+    try:
+        if pd.isna(v):return ''
+    except Exception:pass
+    if hasattr(v,'item'):
+        try:return v.item()
+        except Exception:pass
+    return v
+
+def flat_rows(headers, df):
+    out=[list(headers)]
+    if df is None or df.empty:return out
+    for row in df[list(headers)].itertuples(index=False,name=None):out.append([scalarize(v) for v in row])
+    return out
+
 s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0
 while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+120:
     if d.weekday()<5:
@@ -72,12 +93,9 @@ while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+120:
 if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')
 hist=pd.concat(frames,ignore_index=True);hist.columns=[str(c).replace('\ufeff','').strip().upper() for c in hist.columns];hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True);hist=add_indicators_all(hist)
 latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()
-# Relative strength must be computed BEFORE strategy.scan_all(). The strategy uses RS_VS_UNIVERSE as a hard gate.
 med=hist.groupby('DATE')['RET_20D'].transform('median');hist['RS_VS_UNIVERSE']=hist.RET_20D-med;hist['RS_RANK']=hist.groupby('DATE').RET_20D.rank(pct=True)*100
-# Sanity check: strategy should receive a populated RS series for the latest date.
 rs_latest=hist.loc[hist.DATE.eq(latest_date),'RS_VS_UNIVERSE'].dropna()
-if len(rs_latest)<max(50, int(len(latest)*0.25)):
-    print(f'WARNING: RS coverage is low on {latest_date:%Y-%m-%d}: {len(rs_latest)} valid values for {len(latest)} latest symbols')
+if len(rs_latest)<max(50, int(len(latest)*0.25)):print(f'WARNING: RS coverage is low on {latest_date:%Y-%m-%d}: {len(rs_latest)} valid values for {len(latest)} latest symbols')
 hunter=scan_all(hist,MIN_SCORE);hunter=pd.DataFrame() if hunter is None else hunter
 if not hunter.empty:
     rs=hist[hist.DATE.eq(latest_date)][['SYMBOL','RS_VS_UNIVERSE','RS_RANK']];hunter=hunter.merge(rs,on='SYMBOL',how='left')
@@ -89,17 +107,14 @@ old_rows=[]
 try: old_rows=load_open_trades(required=False) or []
 except Exception as e: print('D1 ledger load warning:',e)
 old=[]
-for r in old_rows:
-    old.append({'SYMBOL':r.get('symbol',''),'ENTRY_DATE':r.get('entry_date',''),'ENTRY':r.get('entry_price',''),'STOP_LOSS':r.get('stop_loss',''),'TARGET_1':r.get('target1',''),'TARGET_2':r.get('target2',''),'TARGET_3':r.get('target3',''),'STATUS':r.get('status','OPEN'),'LAST_DATE':r.get('entry_date',''),'LAST_CLOSE':r.get('entry_price',''),'EXIT_DATE':r.get('exit_date',''),'EXIT_PRICE':r.get('exit_price',''),'EXIT_REASON':r.get('exit_reason','')})
-hmap=hunter.set_index('SYMBOL').to_dict('index') if not hunter.empty else {}
-current={}
+for r in old_rows:old.append({'SYMBOL':r.get('symbol',''),'ENTRY_DATE':r.get('entry_date',''),'ENTRY':r.get('entry_price',''),'STOP_LOSS':r.get('stop_loss',''),'TARGET_1':r.get('target1',''),'TARGET_2':r.get('target2',''),'TARGET_3':r.get('target3',''),'STATUS':r.get('status','OPEN'),'LAST_DATE':r.get('entry_date',''),'LAST_CLOSE':r.get('entry_price',''),'EXIT_DATE':r.get('exit_date',''),'EXIT_PRICE':r.get('exit_price',''),'EXIT_REASON':r.get('exit_reason','')})
+hmap=hunter.set_index('SYMBOL').to_dict('index') if not hunter.empty else {};current={}
 for r in latest.itertuples(index=False):
-    sym=str(r.SYMBOL); current[sym]={'SYMBOL':sym,'DATE':latest_date.strftime('%Y-%m-%d'),'CMP':float(r.CLOSE_PRICE),'ACTION':'WATCH','STOP_LOSS':None,'TARGET_1':None,'TARGET_2':None,'TARGET_3':None}
+    sym=str(r.SYMBOL);current[sym]={'SYMBOL':sym,'DATE':latest_date.strftime('%Y-%m-%d'),'CMP':float(r.CLOSE_PRICE),'ACTION':'WATCH','STOP_LOSS':None,'TARGET_1':None,'TARGET_2':None,'TARGET_3':None}
 for sym,r in hmap.items():current[str(sym)]={**current.get(str(sym),{'SYMBOL':str(sym),'DATE':latest_date.strftime('%Y-%m-%d')}),**r,'DATE':latest_date.strftime('%Y-%m-%d')}
 ledger=update_ledger(pd.DataFrame(old),current,allow_new=gate_ok);ledger.to_csv(OUT/'trade_ledger.csv',index=False)
 if not hunter.empty:
-    pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last')
-    hunter=hunter.merge(pos,on='SYMBOL',how='left')
+    pos=ledger[['SYMBOL','STATUS','EXIT_DATE','EXIT_PRICE','EXIT_REASON']].drop_duplicates('SYMBOL',keep='last');hunter=hunter.merge(pos,on='SYMBOL',how='left')
 buy=hunter[hunter.ACTION.isin(BUY_ACTIONS)].copy() if not hunter.empty else pd.DataFrame(columns=hunter.columns if not hunter.empty else [])
 latest.to_csv(OUT/'latest_market.csv',index=False);hist[hist.DATE.eq(latest_date)].to_csv(OUT/'indicators.csv',index=False);hunter.to_csv(OUT/'early_hunter.csv',index=False);buy.to_csv(OUT/'buy_candidates.csv',index=False)
 try:sync_latest(latest,hunter,stats,latest_date.strftime('%Y-%m-%d'),gate_ok=gate_ok)
@@ -123,11 +138,24 @@ def drow(sym):
 view[['Decision','Decision Reason']]=view.SYMBOL.map(drow).apply(pd.Series)
 for outcol,hcol in [('Hunter Score','HUNTER_SCORE'),('Stage','STAGE'),('Entry Price','ENTRY_PRICE'),('Entry Zone','ENTRY_ZONE'),('Entry Trigger','BREAKOUT_TRIGGER'),('Stop Loss','STOP_LOSS'),('Target 1','TARGET_1'),('Target 2','TARGET_2'),('Target 3','TARGET_3')]:view[outcol]=view.SYMBOL.map(lambda x:hmap.get(x,{}).get(hcol,''))
 view=view.sort_values(['Decision','Hunter Score'],ascending=[True,False],na_position='last').head(500)
-headers=['NSE Code','Volume','Close Price','CMP','50 DMA','100 DMA','200 DMA','Bull Run','Decision','Decision Reason','Hunter Score','Stage','Entry Price','Entry Zone','Entry Trigger','Stop Loss','Target 1','Target 2','Target 3','Quality Gate'];rows=[headers]+[[r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'EMA50',''),getattr(r,'EMA100',''),getattr(r,'EMA200',''),r['Bull Run'],r['Decision'],r['Decision Reason'],r['Hunter Score'],r['Stage'],r['Entry Price'],r['Entry Zone'],r['Entry Trigger'],r['Stop Loss'],r['Target 1'],r['Target 2'],r['Target 3'],hmap.get(r.SYMBOL,{}).get('QUALITY_GATE',gate_reason)] for _,r in view.iterrows()]
-ws_stocks.clear();ws_hunter.clear();ws_stocks.update('A1',rows,value_input_option='USER_ENTERED')
-hrows=([hunter.columns.tolist()]+hunter.astype(object).where(pd.notna(hunter),'').values.tolist() if not hunter.empty else [['NO QUALIFIED SETUP TODAY']]);report_date=latest_date.strftime('%d-%b-%Y');hrows += [[''],['UNIVERSE','NIFTY 500'],['DATA DATE',"'"+report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['PRE-BREAKOUT BUY',int((hunter.ACTION=='PRE-BREAKOUT BUY').sum())],['BREAKOUT BUY',int((hunter.ACTION=='BREAKOUT BUY').sum())],['SWING BUY',int((hunter.ACTION=='SWING BUY').sum())],['BUY SCORE GATE',int(STRAT.buy_score)],['WATCH SCORE GATE',int(MIN_SCORE)],[''],['BACKTEST SUMMARY']]+[[k,v] for k,v in stats.items()]
-if not cal.empty:hrows += [[''],['SCORE/HORIZON CALIBRATION']]+[cal.columns.tolist()]+cal.astype(object).where(pd.notna(cal),'').values.tolist()
-ws_hunter.update('A1',hrows,value_input_option='USER_ENTERED')
+headers=['NSE Code','Volume','Close Price','CMP','50 DMA','100 DMA','200 DMA','Bull Run','Decision','Decision Reason','Hunter Score','Stage','Entry Price','Entry Zone','Entry Trigger','Stop Loss','Target 1','Target 2','Target 3','Quality Gate']
+rows=[headers]+[[scalarize(v) for v in [r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'EMA50',''),getattr(r,'EMA100',''),getattr(r,'EMA200',''),r['Bull Run'],r['Decision'],r['Decision Reason'],r['Hunter Score'],r['Stage'],r['Entry Price'],r['Entry Zone'],r['Entry Trigger'],r['Stop Loss'],r['Target 1'],r['Target 2'],r['Target 3'],hmap.get(r.SYMBOL,{}).get('QUALITY_GATE',gate_reason)]] for _,r in view.iterrows()]
+ws_stocks.clear();ws_hunter.clear();ws_stocks.update(values=rows,range_name='A1',value_input_option='USER_ENTERED')
+hunter_headers=hunter.columns.tolist() if not hunter.empty else ['STATUS'];hrows=flat_rows(hunter_headers,hunter) if not hunter.empty else [['NO QUALIFIED SETUP TODAY']]
+report_date=latest_date.strftime('%d-%b-%Y')
+summary_rows=[[''],['UNIVERSE','NIFTY 500'],['DATA DATE',report_date],['QUALITY GATE',gate_reason],['BUY CANDIDATES',int(len(buy))],['PRE-BREAKOUT BUY',int((hunter.ACTION=='PRE-BREAKOUT BUY').sum())],['BREAKOUT BUY',int((hunter.ACTION=='BREAKOUT BUY').sum())],['SWING BUY',int((hunter.ACTION=='SWING BUY').sum())],['BUY SCORE GATE',int(STRAT.buy_score)],['WATCH SCORE GATE',int(MIN_SCORE)],[''],['BACKTEST SUMMARY']]
+for k,v in stats.items():
+    if isinstance(v,list):
+        action_df=pd.DataFrame(v)
+        summary_rows.append([str(k)])
+        if not action_df.empty:
+            cols=action_df.columns.tolist();summary_rows.append(cols)
+            summary_rows.extend([[scalarize(x) for x in row] for row in action_df.itertuples(index=False,name=None)])
+    else:summary_rows.append([str(k),scalarize(v)])
+hrows += summary_rows
+if not cal.empty:
+    hrows += [[''],['SCORE/HORIZON CALIBRATION'],cal.columns.tolist()]+[[scalarize(x) for x in row] for row in cal.astype(object).where(pd.notna(cal),'').itertuples(index=False,name=None)]
+ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')
 try:
     def fmt_range(a1,typ='NUMBER',pattern='0.00'):ws_hunter.format(a1,{'numberFormat':{'type':typ,'pattern':pattern}})
     fmt_range('B2:B501','NUMBER','0');fmt_range('C2:G501','NUMBER','0.00');fmt_range('K2:K501','NUMBER','0')
@@ -135,7 +163,7 @@ except Exception as e:print('Sheet format warning:',e)
 for ws in (ws_stocks,ws_hunter):
     try:ws.freeze(rows=1)
     except Exception:pass
-status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | MODEL BUY {len(buy)} | PRE {int((hunter.ACTION=="PRE-BREAKOUT BUY").sum())} | BREAKOUT {int((hunter.ACTION=="BREAKOUT BUY").sum())} | SWING {int((hunter.ACTION=="SWING BUY").sum())} | WATCH gate {MIN_SCORE} | BUY gate {STRAT.buy_score} | BT {stats.get("trades",0)} | Win {stats.get("win_rate_pct",0)}% | PF {stats.get("profit_factor",0)} | Gate {gate_reason} | History {len(frames)} days';ws_stocks.update('T1',[['STATUS']]);ws_stocks.update('T2',[[status]]);print(status)
+status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | MODEL BUY {len(buy)} | PRE {int((hunter.ACTION=="PRE-BREAKOUT BUY").sum())} | BREAKOUT {int((hunter.ACTION=="BREAKOUT BUY").sum())} | SWING {int((hunter.ACTION=="SWING BUY").sum())} | WATCH gate {MIN_SCORE} | BUY gate {STRAT.buy_score} | BT {stats.get("trades",0)} | Win {stats.get("win_rate_pct",0)}% | PF {stats.get("profit_factor",0)} | Gate {gate_reason} | History {len(frames)} days';ws_stocks.update(values=[['STATUS']],range_name='T1');ws_stocks.update(values=[[status]],range_name='T2');print(status)
 if not buy.empty:
     cols=[c for c in ['SYMBOL','ACTION','CATEGORY','HUNTER_SCORE','CMP','ENTRY_PRICE','ENTRY_ZONE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3'] if c in buy.columns]
     print(buy[cols].head(30).to_string(index=False))
