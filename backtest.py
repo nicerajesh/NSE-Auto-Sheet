@@ -1,8 +1,8 @@
-from __future__ import annotations
 import pandas as pd
 from indicator import add_indicators
-from strategy import ACTIONABLE, analyze_stock
+from strategy import ACTIONABLE, analyze_stock, market_context
 from config import BT, STRAT
+
 
 def _num(v,default=0.0):
     try:
@@ -63,17 +63,22 @@ def _stats(trades):
 
 def run_backtest(hist,min_score=None,horizon=None):
     threshold=BT.min_score if min_score is None else int(min_score);horizon=BT.horizon if horizon is None else int(horizon);rows=[];events=[]
+    # Build market regime point-in-time from the complete universe, never from a single stock.
+    full=hist.sort_values('DATE').copy()
+    market_by_date={}
+    if {'CLOSE_PRICE','EMA20','EMA50'}.issubset(full.columns):
+        for d,day in full.groupby('DATE',sort=False):
+            market_by_date[pd.Timestamp(d)]=market_context(day)
     for sym,raw in hist.groupby('SYMBOL'):
         g=add_indicators(raw).sort_values('DATE').reset_index(drop=True)
         if len(g)<BT.warmup+horizon+1:continue
         last=-999
         for i in range(BT.warmup,len(g)-horizon-1):
             if i-last<BT.min_gap_between_signals:continue
-            sig=analyze_stock(g.iloc[:i+1],threshold)
+            d=pd.Timestamp(g.iloc[i].DATE);m=market_by_date.get(d,{'score':5,'regime':'NEUTRAL','breadth':float('nan')})
+            sig=analyze_stock(g.iloc[:i+1],threshold,m)
             if not sig:continue
-            pre_score=float(sig.get('PRE_BREAKOUT_SCORE',0) or 0); resistance=_num(sig.get('RESISTANCE'))
-            # Event calibration measures the setup itself, not only setups that passed the final BUY gate.
-            # This prevents strict entry gates from artificially producing zero pre-breakout samples.
+            pre_score=float(sig.get('PRE_BREAKOUT_SCORE',0) or 0);resistance=_num(sig.get('RESISTANCE'))
             if pre_score>=BT.min_score and resistance>0:
                 try:
                     ev=_event_outcome(g,i,resistance,BT.breakout_lookahead_days)
@@ -83,7 +88,7 @@ def run_backtest(hist,min_score=None,horizon=None):
             if action=='BREAKOUT BUY':
                 try:
                     ev=_event_outcome(g,i,resistance,BT.breakout_lookahead_days)
-                    if ev:events.append({'SYMBOL':sym,'SIGNAL_DATE':g.iloc[i].DATE,'ACTION':action,'SCORE':sig.get('BREAKOUT_SCORE',sig.get('HUNTER_SCORE',0)),**ev})
+                    if ev:events.append({'SYMBOL':sym,'SIGNAL_DATE':g.iloc[i].DATE,'ACTION':action,'SCORE':sig.get('BREAKOUT_SCORE',0),**ev})
                 except Exception:pass
             if action not in ACTIONABLE:continue
             entry_i=i+1;entry,trigger,stop,t1,t2,t3=_levels(sig)
