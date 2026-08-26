@@ -6,7 +6,7 @@ from config import BT, STRAT
 
 def _num(v,default=0.0):
     try:
-        x=float(v); return x if pd.notna(v) else default
+        x=float(v); return x if pd.notna(x) else default
     except Exception:return default
 
 def _levels(sig):
@@ -32,6 +32,7 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30,trigger=None,require_trigge
             elif hi>=trig:fill=trig;entered=True
             else:continue
             risk=max(1e-9,fill-stop);active_stop=stop
+        if not entered:continue
         if lo<=active_stop:
             realised+=rem*(active_stop-fill)/fill*100;rem=0;stop_hit=True;exit_idx=j;exit_reason='STOP' if not hit1 else 'PROTECTED_STOP';break
         if not hit1 and hi>=t1:
@@ -70,11 +71,19 @@ def run_backtest(hist,min_score=None,horizon=None):
             if i-last<BT.min_gap_between_signals:continue
             sig=analyze_stock(g.iloc[:i+1],threshold)
             if not sig:continue
-            action=sig.get('ACTION')
-            if action in ('PRE-BREAKOUT BUY','PRE-BREAKOUT WATCH/BUY','WATCH'):
+            pre_score=float(sig.get('PRE_BREAKOUT_SCORE',0) or 0); resistance=_num(sig.get('RESISTANCE'))
+            # Event calibration measures the setup itself, not only setups that passed the final BUY gate.
+            # This prevents strict entry gates from artificially producing zero pre-breakout samples.
+            if pre_score>=BT.min_score and resistance>0:
                 try:
-                    ev=_event_outcome(g,i,float(sig.get('RESISTANCE')),BT.breakout_lookahead_days)
-                    if ev:events.append({'SYMBOL':sym,'SIGNAL_DATE':g.iloc[i].DATE,'ACTION':action,'SCORE':sig.get('PRE_BREAKOUT_SCORE',sig.get('HUNTER_SCORE',0)),**ev})
+                    ev=_event_outcome(g,i,resistance,BT.breakout_lookahead_days)
+                    if ev:events.append({'SYMBOL':sym,'SIGNAL_DATE':g.iloc[i].DATE,'ACTION':'PRE-BREAKOUT SETUP','SCORE':pre_score,**ev})
+                except Exception:pass
+            action=sig.get('ACTION')
+            if action=='BREAKOUT BUY':
+                try:
+                    ev=_event_outcome(g,i,resistance,BT.breakout_lookahead_days)
+                    if ev:events.append({'SYMBOL':sym,'SIGNAL_DATE':g.iloc[i].DATE,'ACTION':action,'SCORE':sig.get('BREAKOUT_SCORE',sig.get('HUNTER_SCORE',0)),**ev})
                 except Exception:pass
             if action not in ACTIONABLE:continue
             entry_i=i+1;entry,trigger,stop,t1,t2,t3=_levels(sig)
@@ -97,5 +106,6 @@ def run_backtest(hist,min_score=None,horizon=None):
     if not trades.empty:
         buckets=pd.cut(trades.SCORE,[0,67,74,81,89,100],labels=['<68','68-74','75-81','82-89','90+']);q=trades.assign(SCORE_BUCKET=buckets).groupby(['ACTION','SCORE_BUCKET'],observed=False).agg(TRADES=('RETURN_PCT','size'),WIN_RATE=('RETURN_PCT',lambda s:round((s>0).mean()*100,2)),AVG_RETURN=('RETURN_PCT','mean'),MEDIAN_RETURN=('RETURN_PCT','median')).reset_index();q['AVG_RETURN']=q.AVG_RETURN.round(2);q['MEDIAN_RETURN']=q.MEDIAN_RETURN.round(2);q['ANALYSIS']='TRADE_SCORE';calibration.append(q)
         h=trades.groupby(['ACTION','HOLD_DAYS']).RETURN_PCT.mean().reset_index(name='AVG_RETURN');h['HORIZON_DAYS']=h.HOLD_DAYS;h['ANALYSIS']='HORIZON';calibration.append(h[['ACTION','HORIZON_DAYS','AVG_RETURN','ANALYSIS']])
-    cal=pd.concat(calibration,ignore_index=True) if calibration else pd.DataFrame();stats['action_stats']=action_stats.to_dict('records') if not action_stats.empty else [];stats['breakout_event_samples']=len(events_df);stats['breakout_event_rate_pct']=round(events_df.BREAKOUT_HIT.mean()*100,2) if not events_df.empty else 0.0;stats['pre_breakout_event_rate_pct']=round(events_df.loc[events_df.ACTION.str.contains('PRE-BREAKOUT',na=False),'BREAKOUT_HIT'].mean()*100,2) if not events_df.empty and events_df.ACTION.str.contains('PRE-BREAKOUT',na=False).any() else 0.0
+    cal=pd.concat(calibration,ignore_index=True) if calibration else pd.DataFrame();stats['action_stats']=action_stats.to_dict('records') if not action_stats.empty else [];stats['breakout_event_samples']=len(events_df);stats['breakout_event_rate_pct']=round(events_df.BREAKOUT_HIT.mean()*100,2) if not events_df.empty else 0.0
+    pre_events=events_df[events_df.ACTION.eq('PRE-BREAKOUT SETUP')] if not events_df.empty else pd.DataFrame();stats['pre_breakout_event_samples']=len(pre_events);stats['pre_breakout_event_rate_pct']=round(pre_events.BREAKOUT_HIT.mean()*100,2) if not pre_events.empty else 0.0
     return trades,stats,cal
