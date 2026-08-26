@@ -30,21 +30,14 @@ jobs:
           pip install -r requirements.txt
       - name: Verify Engine
         run: |
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py sitecustomize.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py reset_d1.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py sitecustomize.py test_system.py
           python - <<'PY'
+          import sitecustomize
           from config import STRAT, BT
           from strategy import ACTIONABLE
-          import sitecustomize
           print('GSPREAD_COMPAT_SHIM=LOADED')
           print('ACTIONABLE=',sorted(ACTIONABLE))
           print('BUY_SCORE=',STRAT.buy_score)
-          print('DELIVERY_FLOOR=',STRAT.delivery_floor)
-          print('VOLUME_BREAKOUT_RATIO=',STRAT.volume_breakout_ratio)
-          print('MAX_RESISTANCE_DISTANCE_PCT=',STRAT.max_resistance_distance_pct)
-          print('MIN_RESISTANCE_TESTS=',STRAT.min_resistance_tests)
-          print('MIN_RR1=',STRAT.min_rr1)
-          print('MAX_SECTOR_BUYS=',STRAT.max_sector_buy_count)
-          print('BREAKOUT_LOOKAHEAD=',BT.breakout_lookahead_days)
           print('PROBABILITY_MIN_SAMPLES=',BT.probability_min_samples)
           PY
       - name: Unit Tests
@@ -58,6 +51,12 @@ jobs:
           test -n "$GCP_CREDENTIALS" || (echo 'GCP_CREDENTIALS missing' && exit 1)
           test -n "$CLOUDFLARE_API_TOKEN" || (echo 'CLOUDFLARE_API_TOKEN missing' && exit 1)
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo 'CLOUDFLARE_ACCOUNT_ID missing' && exit 1)
+      - name: RESET D1 Database
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: e6652e85-b927-4f11-b790-45fb6ee818f2
+        run: python reset_d1.py
       - name: Prepare Output
         run: rm -rf output && mkdir -p output
       - name: Run NSE Scanner
@@ -77,28 +76,13 @@ jobs:
             echo "update_sheet.py failed with exit code $rc; running safe sheet writer fallback."
             test -f output/early_hunter.csv || exit "$rc"
             test -f output/backtest_summary.csv || exit "$rc"
-            python sheet_writer_hotfix.py
-            hotfix_rc=$?
-            if [ "$hotfix_rc" -ne 0 ]; then
-              echo "SAFE SHEET WRITER FAILED with exit code $hotfix_rc"
-              exit "$hotfix_rc"
-            fi
+            python sheet_writer_hotfix.py || exit $?
           fi
           exit 0
       - name: Validate Calibration
         run: |
           test -f output/backtest_summary.csv
           test -f output/score_calibration.csv
-          python - <<'PY'
-          import pandas as pd
-          s=pd.read_csv('output/backtest_summary.csv').iloc[0]
-          c=pd.read_csv('output/score_calibration.csv')
-          print('BACKTEST TRADES=',int(s.get('trades',0)))
-          print('EVENT SAMPLES=',int(s.get('breakout_event_samples',0)))
-          print('PRE-BREAKOUT EVENT RATE=',float(s.get('pre_breakout_event_rate_pct',0)))
-          print('CALIBRATION ROWS=',len(c))
-          if 'ANALYSIS' in c.columns: print(c.groupby('ANALYSIS').size().to_string())
-          PY
       - name: Finalize Quality Gate and Outputs
         run: python finalize_outputs.py
       - name: Repair Google Sheet Output
@@ -122,11 +106,8 @@ jobs:
           python - <<'PY'
           import pandas as pd
           df=pd.read_csv('output/buy_candidates.csv')
-          if df.empty:
-              print('NO QUALIFIED BUY CANDIDATES — valid when timing/quality gates block the model.')
-          else:
-              cols=[c for c in ['SYMBOL','ACTION','CATEGORY','CMP','ENTRY_STATUS','ENTRY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','RISK_REWARD_T1','HUNTER_SCORE','NEXT_DAY_SETUP_SCORE','BREAKOUT_PROBABILITY','MARKET_REGIME','SECTOR_STRENGTH','REASONS'] if c in df.columns]
-              print(df[cols].head(50).to_string(index=False))
+          if df.empty: print('NO QUALIFIED BUY CANDIDATES — valid when timing/quality gates block the model.')
+          else: print(df.head(50).to_string(index=False))
           PY
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
