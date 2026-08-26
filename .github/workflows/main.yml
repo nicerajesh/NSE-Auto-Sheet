@@ -33,7 +33,7 @@ jobs:
           echo '=== NSE EARLY HUNTER — FRESH DECISION ENGINE ==='
           echo "REF=${{ github.ref_name }}"
           echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py test_system.py
           python - <<'PY'
           from config import STRAT, BT
           from strategy import ACTIONABLE
@@ -87,6 +87,11 @@ jobs:
           PY
       - name: Finalize Quality Gate and Outputs
         run: python finalize_outputs.py
+      - name: Repair Google Sheet Output
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          PYTHONUNBUFFERED: '1'
+        run: python repair_sheet_output.py
       - name: Build Trading Dashboard
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
