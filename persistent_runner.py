@@ -72,9 +72,15 @@ def sync_bhav(df):
     print(f'D1 market sync: upserted {len(df)} bhavcopy rows')
 
 def transformed_update_source():
-    src=(ROOT/'update_sheet.py').read_text(encoding='utf-8'); start="s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0"; end="if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')"; a=src.find(start); b=src.find(end,a)
+    src=(ROOT/'update_sheet.py').read_text(encoding='utf-8')
+    start="s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0"; end="if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')"; a=src.find(start); b=src.find(end,a)
     if a<0 or b<0:raise RuntimeError('Could not locate legacy NSE history loader')
-    b+=len(end); replacement="frames=[pd.read_csv(OUT/'persistent_history.csv',parse_dates=['DATE'])]; print(f'PERSISTENT D1 INPUT: {len(frames[0])} historical market rows')"; return src[:a]+replacement+src[b:]
+    b+=len(end); replacement="frames=[pd.read_csv(OUT/'persistent_history.csv',parse_dates=['DATE'])]; print(f'PERSISTENT D1 INPUT: {len(frames[0])} historical market rows')"; src=src[:a]+replacement+src[b:]
+    # Never append aggregate backtest/calibration objects to Early Hunter. They caused Google Sheets struct_value errors.
+    src=src.replace("hrows += summary_rows", "summary_rows=[]")
+    cal_block="if not cal.empty:\n    hrows += [[''],['SCORE/HORIZON CALIBRATION'],cal.columns.tolist()]+[[scalarize(x) for x in row] for row in cal.astype(object).where(pd.notna(cal),'').itertuples(index=False,name=None)]"
+    src=src.replace(cal_block, "# calibration is handled by Backtest Audit, not Early Hunter")
+    return src
 
 def run_transformed():
     src=transformed_update_source()
