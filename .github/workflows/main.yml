@@ -26,9 +26,9 @@ jobs:
           pip install -r requirements.txt
       - name: Verify Engine
         run: |
-          echo '=== NSE EARLY HUNTER — EVENT CALIBRATED FOUR-BUCKET ENGINE ==='
+          echo '=== NSE EARLY HUNTER — PERSISTENT D1 ENGINE ==='
           echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py persistent_runner.py persistent_runner_safe.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py test_system.py
           python - <<'PY'
           from config import STRAT, BT
           from strategy import ACTIONABLE
@@ -52,16 +52,17 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo 'CLOUDFLARE_ACCOUNT_ID missing' && exit 1)
       - name: Prepare Output
         run: rm -rf output && mkdir -p output
-      - name: Run NSE Scanner
+      - name: Run Persistent NSE Engine
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_ID: e6652e85-b927-4f11-b790-45fb6ee818f2
           HISTORY_DAYS: 480
-          WATCH_MIN_SCORE: 72
+          WATCH_MIN_SCORE: 75
+          PERSISTENT_D1: '1'
           PYTHONUNBUFFERED: '1'
-        run: python update_sheet.py
+        run: python persistent_runner_safe.py
       - name: Validate Calibration
         run: |
           test -f output/backtest_summary.csv
@@ -78,6 +79,11 @@ jobs:
           PY
       - name: Finalize Quality Gate and Outputs
         run: python finalize_outputs.py
+      - name: Repair Google Sheet Output
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          PYTHONUNBUFFERED: '1'
+        run: python repair_sheet_output.py
       - name: Build Trading Dashboard
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
@@ -103,7 +109,7 @@ jobs:
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nse-early-hunter-event-calibrated
+          name: nse-early-hunter-persistent-decision-engine
           path: output/*.csv
           if-no-files-found: error
           retention-days: 30
