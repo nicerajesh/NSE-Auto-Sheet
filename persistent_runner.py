@@ -1,77 +1,120 @@
 from __future__ import annotations
-import os, re, sys, subprocess, tempfile, json, time
+import os, re, sys, subprocess, tempfile, time
 from datetime import datetime, timedelta
+from io import StringIO, BytesIO
 from pathlib import Path
 import pandas as pd
-from d1_database import query, setup
+import requests
+from d1_database import setup, query, batch
 
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'output'; OUT.mkdir(exist_ok=True)
+HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','480'))
+MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1'))
 
-def status():
-    setup()
-    data=query('SELECT COUNT(*) AS n, MAX(trade_date) AS max_date FROM bhavcopy',required=True)
-    row=(data.get('result',[{}])[0].get('results') or [{}])[0]
-    return int(row.get('n') or 0), row.get('max_date')
+def session():
+    s=requests.Session(); s.headers.update({'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/151 Safari/537.36','Accept-Language':'en-US,en;q=0.9','Referer':'https://www.nseindia.com/','Accept':'application/json,text/plain,*/*'})
+    try:s.get('https://www.nseindia.com',timeout=20)
+    except Exception:pass
+    return s
 
-def d1_history():
-    n,max_date=status()
-    if n==0:return None,None
-    end=pd.Timestamp(max_date); start=end-pd.Timedelta(days=720)
-    parts=[]; cur=start
-    cols=['symbol','trade_date','open','high','low','close','volume','turnover_lacs','delivery_qty','delivery_pct']
+def universe(s):
+    for url in ('https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv','https://www.niftyindices.com/IndexConstituent/ind_nifty500list.xlsx'):
+        try:
+            r=s.get(url,headers={'User-Agent':s.headers['User-Agent'],'Referer':'https://www.niftyindices.com/'},timeout=30)
+            if not r.ok or len(r.content)<1000:continue
+            df=pd.read_csv(StringIO(r.content.decode('utf-8-sig',errors='replace'))) if url.endswith('.csv') else pd.read_excel(BytesIO(r.content),engine='openpyxl')
+            cols={str(c).strip().upper().replace(' ','_'):c for c in df.columns}; col=cols.get('SYMBOL') or cols.get('SYMBOLS') or cols.get('SECURITY')
+            if col:
+                syms=df[col].astype(str).str.strip().str.upper(); syms=[x for x in syms if re.fullmatch(r'[A-Z0-9&.-]+',x) and not any(k in x for k in ('ETF','BEES','GOLD','SILVER','LIQUID'))]
+                if len(syms)>=450:return set(syms)
+        except Exception as e: print('NIFTY500 source warning:',e)
+    raise RuntimeError('Unable to obtain NIFTY500 universe')
+
+def fetch_bhav(s,d):
+    try:
+        r=s.get(f'https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{d:%d%m%Y}.csv',timeout=25)
+        if r.status_code!=200 or len(r.content)<500:return None
+        df=pd.read_csv(StringIO(r.text),encoding='utf-8-sig'); df.columns=[str(c).replace('\ufeff','').strip().upper().replace(' ','_') for c in df.columns]
+        for a,b in {'OPEN':'OPEN_PRICE','HIGH':'HIGH_PRICE','LOW':'LOW_PRICE','CLOSE':'CLOSE_PRICE','VOLUME':'TTL_TRD_QNTY','DELIVERY_PCT':'DELIV_PER','DELIVERY_PERCENT':'DELIV_PER','DELIVERY_QUANTITY':'DELIV_QTY'}.items():
+            if a in df.columns and b not in df.columns:df=df.rename(columns={a:b})
+        need=['SYMBOL','SERIES','OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS','DELIV_QTY','DELIV_PER']
+        if any(c not in df.columns for c in need):return None
+        df=df[df.SERIES.astype(str).str.strip().eq('EQ')].copy(); df=df[~df.SYMBOL.astype(str).str.contains(r'BEES|ETF|GOLD|LIQUID|SILVER|CASE',case=False,regex=True,na=False)]
+        for c in need[2:]:df[c]=pd.to_numeric(df[c],errors='coerce')
+        df=df.dropna(subset=['SYMBOL','OPEN_PRICE','HIGH_PRICE','LOW_PRICE','CLOSE_PRICE','TTL_TRD_QNTY','TURNOVER_LACS']); df['SYMBOL']=df.SYMBOL.astype(str).str.strip().str.upper(); df=df[df.TURNOVER_LACS>=MIN_TURNOVER_LACS].copy(); df['DATE']=pd.Timestamp(d); return df
+    except Exception as e: print('Fetch warning',d,e); return None
+
+def d1_state():
+    setup(); data=query('SELECT COUNT(*) AS n, COUNT(DISTINCT trade_date) AS sessions, MAX(trade_date) AS max_date FROM bhavcopy',required=True); row=(data.get('result',[{}])[0].get('results') or [{}])[0]; return int(row.get('n') or 0),int(row.get('sessions') or 0),row.get('max_date')
+
+def load_d1_history():
+    n,sessions,max_date=d1_state()
+    if not max_date:return pd.DataFrame(),None,n,sessions
+    end=pd.Timestamp(max_date); start=end-pd.Timedelta(days=800); parts=[]; cur=start
     while cur<=end:
-        stop=min(cur+pd.Timedelta(days=89),end)
-        sql='SELECT symbol,trade_date,open,high,low,close,volume,turnover_lacs,delivery_qty,delivery_pct FROM bhavcopy WHERE trade_date>=? AND trade_date<=? ORDER BY trade_date,symbol'
-        data=query(sql,[cur.strftime('%Y-%m-%d'),stop.strftime('%Y-%m-%d')],required=True)
-        rows=(data.get('result',[{}])[0].get('results') or [])
-        if rows: parts.append(pd.DataFrame(rows,columns=cols))
+        stop=min(cur+pd.Timedelta(days=89),end); data=query('SELECT symbol,trade_date,open,high,low,close,volume,turnover_lacs,delivery_qty,delivery_pct FROM bhavcopy WHERE trade_date>=? AND trade_date<=? ORDER BY trade_date,symbol',[cur.strftime('%Y-%m-%d'),stop.strftime('%Y-%m-%d')],required=True); rows=(data.get('result',[{}])[0].get('results') or [])
+        if rows:parts.append(pd.DataFrame(rows))
         cur=stop+pd.Timedelta(days=1)
-    if not parts:return None,max_date
-    df=pd.concat(parts,ignore_index=True).drop_duplicates(['symbol','trade_date']).copy()
-    df=df.rename(columns={'symbol':'SYMBOL','trade_date':'DATE','open':'OPEN_PRICE','high':'HIGH_PRICE','low':'LOW_PRICE','close':'CLOSE_PRICE','volume':'TTL_TRD_QNTY','turnover_lacs':'TURNOVER_LACS','delivery_qty':'DELIV_QTY','delivery_pct':'DELIV_PER'})
-    df['DATE']=pd.to_datetime(df['DATE']); return df,max_date
+    if not parts:return pd.DataFrame(),max_date,n,sessions
+    df=pd.concat(parts,ignore_index=True).drop_duplicates(['symbol','trade_date']); df=df.rename(columns={'symbol':'SYMBOL','trade_date':'DATE','open':'OPEN_PRICE','high':'HIGH_PRICE','low':'LOW_PRICE','close':'CLOSE_PRICE','volume':'TTL_TRD_QNTY','turnover_lacs':'TURNOVER_LACS','delivery_qty':'DELIV_QTY','delivery_pct':'DELIV_PER'}); df['DATE']=pd.to_datetime(df.DATE); return df,max_date,n,sessions
 
-def patched_source(incremental: bool):
-    src=(ROOT/'update_sheet.py').read_text(encoding='utf-8')
-    # Save the complete history before the legacy writer can fail. This is used only on bootstrap.
-    src=src.replace("latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()", "hist.to_csv(OUT/'history_full.csv',index=False);latest_date=hist.DATE.max();latest=hist[hist.DATE.eq(latest_date)].copy()")
-    if not incremental:return src
-    marker=re.compile(r"s=sess\(\);universe=fetch_nifty500_symbols\(s\);frames=\[\];d=datetime\.now\(\);attempts=0.*?if not frames:raise RuntimeError\('No NIFTY 500 NSE bhavcopy data found'\)",re.S)
-    replacement='''s=sess();universe=fetch_nifty500_symbols(s); frames=[]\n# Persistent D1 is the source of historical market data. Fetch only sessions missing after D1.\n_d1hist=pd.read_csv(OUT/'d1_history.csv',parse_dates=['DATE'])\nframes=[_d1hist.copy()] if not _d1hist.empty else []\n_d1max=pd.to_datetime(_d1hist.DATE).max() if frames else pd.Timestamp(datetime.now().date())-timedelta(days=1)\nd=_d1max.to_pydatetime()+timedelta(days=1); end=datetime.now()\nwhile d.date()<=end.date():\n    if d.weekday()<5:\n        x=fetch_bhav(s,d)\n        if x is not None and not x.empty:\n            x=x[x.SYMBOL.isin(universe)].copy()\n            if not x.empty: frames.append(x); print(f'Incremental load {d:%Y-%m-%d}: {len(x)} NIFTY500 EQ rows')\n    d+=timedelta(days=1)\nif not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')'''
-    new, count=marker.subn(replacement,src,count=1)
-    if count!=1:raise RuntimeError('Could not locate NSE history loader block for incremental patch')
-    return new
+def sync_bhav(df):
+    if df.empty:return
+    items=[]
+    for r in df.itertuples(index=False):
+        def num(v):
+            try:
+                x=float(v); return x if pd.notna(x) else None
+            except Exception:return None
+        items.append({'sql':'INSERT INTO bhavcopy(symbol,trade_date,open,high,low,close,volume,turnover_lacs,delivery_qty,delivery_pct) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol,trade_date) DO UPDATE SET open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,volume=excluded.volume,turnover_lacs=excluded.turnover_lacs,delivery_qty=excluded.delivery_qty,delivery_pct=excluded.delivery_pct','params':[str(r.SYMBOL),str(r.DATE)[:10],num(r.OPEN_PRICE),num(r.HIGH_PRICE),num(r.LOW_PRICE),num(r.CLOSE_PRICE),int(num(r.TTL_TRD_QNTY) or 0),num(r.TURNOVER_LACS),int(num(r.DELIV_QTY) or 0),num(r.DELIV_PER)]})
+    for i in range(0,len(items),50):batch(items[i:i+50],required=True)
+    print(f'D1 market sync: upserted {len(df)} bhavcopy rows')
 
-def run_source(src):
-    with tempfile.NamedTemporaryFile('w',suffix='.py',delete=False,dir=ROOT) as f:
-        f.write(src); path=f.name
+def transformed_update_source():
+    src=(ROOT/'update_sheet.py').read_text(encoding='utf-8'); start="s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0"; end="if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')"; a=src.find(start); b=src.find(end,a)
+    if a<0 or b<0:raise RuntimeError('Could not locate legacy NSE history loader')
+    b+=len(end); replacement="frames=[pd.read_csv(OUT/'persistent_history.csv',parse_dates=['DATE'])]; print(f'PERSISTENT D1 INPUT: {len(frames[0])} historical market rows')"; return src[:a]+replacement+src[b:]
+
+def run_transformed():
+    src=transformed_update_source()
+    with tempfile.NamedTemporaryFile('w',suffix='.py',delete=False,dir=ROOT) as f:f.write(src); path=f.name
     try:return subprocess.run([sys.executable,path],env=os.environ.copy()).returncode
     finally:
         try:Path(path).unlink()
         except OSError:pass
 
 def main():
-    n,max_date=status()
-    # Bootstrap once if the database contains only the single-day data left by the old reset workflow.
-    bootstrap=n < 100000
+    s=session(); uni=universe(s); hist,max_date,n,sessions=load_d1_history(); bootstrap=(n==0 or sessions<300)
     if bootstrap:
-        print(f'PERSISTENT D1: bootstrap required (currently {n} bhavcopy rows, latest={max_date})')
-        rc=run_source(patched_source(False))
-        # Even if the legacy Sheets writer fails, history_full.csv must be backfilled before recovery.
-        if (OUT/'history_full.csv').exists():
-            print('PERSISTENT D1: backfilling complete historical market set')
-            brc=subprocess.run([sys.executable,'d1_backfill.py'],env=os.environ.copy()).returncode
-            if brc!=0: return brc
-        if rc!=0:
-            print('PERSISTENT D1: bootstrap scanner exited',rc,'; safe writer may recover later')
-            return 0
-        return 0
-    df,newest=d1_history();
-    if df is None or df.empty:raise RuntimeError('Persistent D1 history could not be loaded')
-    df.to_csv(OUT/'d1_history.csv',index=False)
-    print(f'PERSISTENT D1: loaded {len(df)} historical rows through {newest}; fetching only missing sessions')
-    rc=run_source(patched_source(True))
-    return rc
+        print(f'PERSISTENT D1: BOOTSTRAP (rows={n}, sessions={sessions})'); frames=[]; d=datetime.now(); attempts=0
+        while len(frames)<HISTORY_DAYS and attempts<HISTORY_DAYS+120:
+            if d.weekday()<5:
+                x=fetch_bhav(s,d)
+                if x is not None:
+                    x=x[x.SYMBOL.isin(uni)].copy()
+                    if not x.empty:frames.append(x); print(f'Bootstrap load {d:%Y-%m-%d}: {len(x)} NIFTY500 EQ rows')
+                time.sleep(.15)
+            d-=timedelta(days=1); attempts+=1
+        if not frames:raise RuntimeError('Bootstrap NSE history unavailable')
+        hist=pd.concat(frames,ignore_index=True)
+    else:
+        hist=hist[hist.SYMBOL.isin(uni)].copy(); latest=pd.to_datetime(hist.DATE).max(); frames=[]; d=latest.to_pydatetime()+timedelta(days=1); today=datetime.now()
+        while d.date()<=today.date():
+            if d.weekday()<5:
+                x=fetch_bhav(s,d)
+                if x is not None:
+                    x=x[x.SYMBOL.isin(uni)].copy()
+                    if not x.empty:frames.append(x); print(f'Incremental NSE load {d:%Y-%m-%d}: {len(x)} NIFTY500 EQ rows')
+                time.sleep(.15)
+            d+=timedelta(days=1)
+        if frames:
+            new=pd.concat(frames,ignore_index=True); sync_bhav(new); hist=pd.concat([hist,new],ignore_index=True)
+        else:print('PERSISTENT D1: no new NSE session to add')
+    hist=hist.sort_values(['SYMBOL','DATE']).drop_duplicates(['SYMBOL','DATE']).reset_index(drop=True); hist.to_csv(OUT/'persistent_history.csv',index=False)
+    if bootstrap:sync_bhav(hist)
+    print(f'PERSISTENT D1 READY: {len(hist)} rows | {hist.DATE.nunique()} sessions | latest={pd.to_datetime(hist.DATE).max():%Y-%m-%d}')
+    rc=run_transformed()
+    if rc!=0:raise SystemExit(rc)
 
-if __name__=='__main__': raise SystemExit(main())
+if __name__=='__main__':raise SystemExit(main())
