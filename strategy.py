@@ -87,17 +87,34 @@ def _features(g,i,market):
     risk=entry-stop if np.isfinite(entry) and np.isfinite(stop) else np.nan;risk_pct=risk/entry*100 if np.isfinite(risk) and entry else np.nan;valid_risk=np.isfinite(risk_pct) and STRAT.min_stop_pct<=risk_pct<=STRAT.max_stop_pct
     t1=entry+risk*STRAT.min_rr1 if np.isfinite(risk) and risk>0 else np.nan;t2=entry+risk*STRAT.min_rr2 if np.isfinite(risk) and risk>0 else np.nan;t3=entry+risk*STRAT.min_rr3 if np.isfinite(risk) and risk>0 else np.nan
     zone_low=entry*(1-STRAT.max_buy_zone_pct/100);zone_high=entry*(1+STRAT.max_buy_zone_pct/100);max_buy=min(zone_high,trigger*.997 if np.isfinite(trigger) else zone_high)
-    pre_buy=pre_gate and pre>=STRAT.buy_score and valid_risk;breakout_buy=confirmed and breakout>=STRAT.buy_score and volume_expansion and delivery_good and trend_ready and rs_positive and breakout_candle and breakout_extension and valid_risk;swing_buy=(not confirmed and swing>=STRAT.buy_score and trend_ready and rs_positive and not_extended and valid_risk and not pre_buy)
+    pre_buy=pre_gate and pre>=STRAT.buy_score and valid_risk
+    breakout_buy=confirmed and breakout>=STRAT.buy_score and volume_expansion and delivery_good and trend_ready and rs_positive and breakout_candle and breakout_extension and valid_risk
+    # Swing BUY stays secondary; it now requires a genuine pullback and does not override a weaker model just because score is high.
+    swing_buy=(not confirmed and swing>=STRAT.buy_score and trend_strong and rs_positive and rs_improving and accumulation and delivery_good and pullback and not_extended and valid_risk and not pre_buy)
     if pre_buy:action='PRE-BREAKOUT BUY'
     elif breakout_buy:action='BREAKOUT BUY'
     elif swing_buy:action='SWING BUY'
     elif confirmed:action='AVOID / CHASE'
     else:action='WATCH'
-    confidence=int(min(90,max(0,round(max(pre,breakout)*.90)))) if action in ACTIONABLE else int(min(69,max(0,round(pre*.90))))
     reasons=[]
-    for ok,msg in [(trend_strong,'Strong trend'),(trend_ready,'Trend aligned'),(higher_low,'Higher-low'),(tests>=STRAT.min_resistance_tests,f'{tests} resistance tests'),(compression,'Compression'),(base_tightening,'Base tightening'),(dryup,'Volume dry-up'),(volume_expansion,'Volume expansion'),(accumulation,'Accumulation/OBV'),(delivery_ok,'Delivery improving'),(rs_strong,'Strong RS'),(sector_strength=='POSITIVE','Sector positive'),(confirmed,'Breakout confirmed'),(not valid_risk,'Risk outside limits'),(not sector_ok,'Sector weak')]:
+    for ok,msg in [(trend_strong,'Strong trend'),(trend_ready,'Trend aligned'),(higher_low,'Higher-low'),(tests>=STRAT.min_resistance_tests,f'{tests} resistance tests'),(compression,'Compression'),(base_tightening,'Base tightening'),(dryup,'Volume dry-up'),(volume_expansion,'Volume expansion'),(accumulation,'Accumulation/OBV'),(delivery_ok,'Delivery improving'),(rs_strong,'Strong RS'),(rs_improving,'RS improving'),(sector_strength=='POSITIVE','Sector positive'),(confirmed,'Breakout confirmed'),(not valid_risk,'Risk outside limits'),(not sector_ok,'Sector weak')]:
         if ok:reasons.append(msg)
     return locals()
+
+
+def _calibrated_probability(g, score, action):
+    # Prefer historical event calibration only when enough samples exist.
+    if action not in ACTIONABLE:return ''
+    try:
+        if 'BREAKOUT_EVENT_RATE_BY_SCORE' not in g.attrs:return ''
+        table=g.attrs['BREAKOUT_EVENT_RATE_BY_SCORE']
+        candidates=[x for x in table if x.get('ACTION')==action and x.get('SAMPLES',0)>=30]
+        if not candidates:return ''
+        for x in candidates:
+            lo,hi=x.get('LOW'),x.get('HIGH')
+            if lo <= score <= hi:return round(float(x.get('RATE',np.nan)),1)
+    except Exception:pass
+    return ''
 
 
 def analyze_stock(g,min_score=None,market=None):
@@ -108,14 +125,23 @@ def analyze_stock(g,min_score=None,market=None):
         x=_f(x);return round(x,2) if np.isfinite(x) else ''
     close=f['close'];qty=_f(r.get('DELIV_QTY'));delivery_value=close*qty if np.isfinite(close) and np.isfinite(qty) else np.nan;category={'PRE-BREAKOUT BUY':'PRE-BREAKOUT','BREAKOUT BUY':'BREAKOUT','SWING BUY':'SWING','AVOID / CHASE':'AVOID'}.get(f['action'],'WATCH')
     rr=(f['t1']-f['entry'])/f['risk'] if np.isfinite(f['risk']) and f['risk']>0 else np.nan
-    return {'SYMBOL':str(r.SYMBOL),'DATE':pd.Timestamp(r.DATE).strftime('%d-%b-%Y'),'CMP':rv(close),'ACTION':f['action'],'CATEGORY':category,'NEXT_DAY_ACTION':'BUY' if f['action'] in BUY_ACTIONS else 'WATCH','BUY_DATE':(pd.Timestamp(r.DATE)+pd.tseries.offsets.BDay(1)).strftime('%d-%b-%Y'),'STAGE':f['action'],'PRE_BREAKOUT_SCORE':f['pre'],'BREAKOUT_SCORE':f['breakout'],'SWING_SCORE':f['swing'],'HUNTER_SCORE':max(f['pre'],f['breakout'],f['swing']),'NEXT_DAY_SETUP_SCORE':f['pre'],'BREAKOUT_PROBABILITY':f['confidence'],'MARKET_REGIME':market.get('regime','NEUTRAL'),'MARKET_BREADTH':rv(market.get('breadth')),'TREND':'STRONG BULLISH' if f['trend_strong'] else 'ALIGNED' if f['trend_ready'] else 'WEAK','ACCUMULATION':'STRONG' if f['accumulation'] else 'WEAK','DELIVERY':'STRONG + IMPROVING' if f['delivery_ok'] else 'GOOD' if f['delivery_good'] else 'WEAK','DELIVERY_PCT':rv(f['deliv']),'DELIVERY_VALUE':rv(delivery_value),'VOLUME_RATIO':rv(f['vol']),'VOLUME_DRYUP':'YES' if f['dryup'] else 'NO','VOLUME_EXPANSION':'YES' if f['volume_expansion'] else 'NO','ATR_PCT':rv(f['atr_pct']),'ATR_COMPRESSION':'YES' if f['atr_compress'] else 'NO','BB_WIDTH':'COMPRESSING' if f['bb_compress'] else 'NORMAL','BASE_RANGE_PCT':rv(f['base_range']),'BASE_TIGHTENING':'YES' if f['base_tightening'] else 'NO','RESISTANCE':rv(f['prior20']),'RESISTANCE_DISTANCE_PCT':rv(f['distance']),'RESISTANCE_TESTS':int(f['tests']),'HIGHER_LOW':'YES' if f['higher_low'] else 'NO','RELATIVE_STRENGTH':'STRONG' if f['rs_strong'] else 'POSITIVE' if f['rs_positive'] else 'WEAK','RS_VS_UNIVERSE':rv(f['rs']),'RS_IMPROVING':'YES' if f['rs_improving'] else 'NO','SECTOR_STRENGTH':f['sector_strength'],'BREAKOUT_STATUS':'CONFIRMED' if f['confirmed'] else 'NOT YET BROKEN','ENTRY_PRICE':rv(f['entry']),'ENTRY_ZONE':f"{rv(f['zone_low'])} - {rv(f['zone_high'])}",'MAX_BUY_PRICE':rv(f['max_buy']),'BREAKOUT_TRIGGER':rv(f['trigger']),'STOP_LOSS':rv(f['stop']),'TARGET_1':rv(f['t1']),'TARGET_2':rv(f['t2']),'TARGET_3':rv(f['t3']),'RISK_PCT':rv(f['risk_pct']),'R_R':rv(rr),'REASONS':'; '.join(f['reasons']),'QUALITY_GATE':'PENDING'}
+    return {'SYMBOL':str(r.SYMBOL),'DATE':pd.Timestamp(r.DATE).strftime('%d-%b-%Y'),'CMP':rv(close),'ACTION':f['action'],'CATEGORY':category,'NEXT_DAY_ACTION':'BUY' if f['action'] in BUY_ACTIONS else 'WATCH','BUY_DATE':(pd.Timestamp(r.DATE)+pd.tseries.offsets.BDay(1)).strftime('%d-%b-%Y'),'STAGE':f['action'],'PRE_BREAKOUT_SCORE':f['pre'],'BREAKOUT_SCORE':f['breakout'],'SWING_SCORE':f['swing'],'HUNTER_SCORE':max(f['pre'],f['breakout'],f['swing']),'NEXT_DAY_SETUP_SCORE':f['pre'],'BREAKOUT_PROBABILITY':_calibrated_probability(g,max(f['pre'],f['breakout']),f['action']),'MARKET_REGIME':market.get('regime','NEUTRAL'),'MARKET_BREADTH':rv(market.get('breadth')),'TREND':'STRONG BULLISH' if f['trend_strong'] else 'ALIGNED' if f['trend_ready'] else 'WEAK','ACCUMULATION':'STRONG' if f['accumulation'] else 'WEAK','DELIVERY':'STRONG + IMPROVING' if f['delivery_ok'] else 'GOOD' if f['delivery_good'] else 'WEAK','DELIVERY_PCT':rv(f['deliv']),'DELIVERY_VALUE':rv(delivery_value),'VOLUME_RATIO':rv(f['vol']),'VOLUME_DRYUP':'YES' if f['dryup'] else 'NO','VOLUME_EXPANSION':'YES' if f['volume_expansion'] else 'NO','ATR_PCT':rv(f['atr_pct']),'ATR_COMPRESSION':'YES' if f['atr_compress'] else 'NO','BB_WIDTH':'COMPRESSING' if f['bb_compress'] else 'NORMAL','BASE_RANGE_PCT':rv(f['base_range']),'BASE_TIGHTENING':'YES' if f['base_tightening'] else 'NO','RESISTANCE':rv(f['prior20']),'RESISTANCE_DISTANCE_PCT':rv(f['distance']),'RESISTANCE_TESTS':int(f['tests']),'HIGHER_LOW':'YES' if f['higher_low'] else 'NO','RELATIVE_STRENGTH':'STRONG' if f['rs_strong'] else 'POSITIVE' if f['rs_positive'] else 'WEAK','RS_VS_UNIVERSE':rv(f['rs']),'RS_IMPROVING':'YES' if f['rs_improving'] else 'NO','SECTOR_STRENGTH':f['sector_strength'],'BREAKOUT_STATUS':'CONFIRMED' if f['confirmed'] else 'NOT YET BROKEN','ENTRY_PRICE':rv(f['entry']),'ENTRY_ZONE':f"{rv(f['zone_low'])} - {rv(f['zone_high'])}",'BREAKOUT_TRIGGER':rv(f['trigger']),'MAX_BUY_PRICE':rv(f['max_buy']),'STOP_LOSS':rv(f['stop']),'TARGET_1':rv(f['t1']),'TARGET_2':rv(f['t2']),'TARGET_3':rv(f['t3']),'RISK_PCT':rv(f['risk_pct']),'RISK_REWARD_T1':rv(rr),'REASONS':' | '.join(f['reasons']),'QUALITY_GATE':'PENDING'}
 
 
 def scan_all(hist,min_score=None):
-    market=_market_context(hist);out=[]
-    for sym,g in hist.groupby('SYMBOL',sort=False):
+    if hist is None or hist.empty:return pd.DataFrame()
+    work=hist.copy();work=work.sort_values(['SYMBOL','DATE'])
+    latest_date=work.DATE.max();market=_market_context(work)
+    rows=[]
+    # Calibration metadata is added later by the backtest pipeline. For live scan, blank probability is intentional unless calibrated history is attached.
+    for sym,g in work.groupby('SYMBOL',sort=False):
+        if len(g)<MIN_HISTORY:continue
         try:
             sig=analyze_stock(g,min_score,market)
-            if sig is not None:out.append(sig)
-        except Exception as e:print(f'Strategy error {sym}: {e}')
-    return pd.DataFrame(out)
+            if sig:rows.append(sig)
+        except Exception as exc:
+            print(f'STRATEGY WARNING {sym}: {exc}')
+    df=pd.DataFrame(rows)
+    if df.empty:return df
+    latest=df[df.DATE.eq(pd.Timestamp(latest_date).strftime('%d-%b-%Y'))].copy()
+    return latest.sort_values(['HUNTER_SCORE','BREAKOUT_SCORE','PRE_BREAKOUT_SCORE'],ascending=False).reset_index(drop=True)
