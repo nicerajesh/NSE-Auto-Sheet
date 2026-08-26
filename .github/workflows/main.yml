@@ -30,7 +30,7 @@ jobs:
           pip install -r requirements.txt
       - name: Verify Engine
         run: |
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py reset_d1.py trade_manager.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py sitecustomize.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py reset_d1.py trade_manager.py update_sheet.py run_update_safe.py finalize_outputs.py dashboard.py repair_sheet_output.py sheet_writer_hotfix.py sitecustomize.py test_system.py
           python - <<'PY'
           import sitecustomize
           from config import STRAT, BT
@@ -59,7 +59,7 @@ jobs:
         run: python reset_d1.py
       - name: Prepare Output
         run: rm -rf output && mkdir -p output
-      - name: Run NSE Scanner
+      - name: Run NSE Scanner Safely
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -68,17 +68,7 @@ jobs:
           HISTORY_DAYS: 480
           WATCH_MIN_SCORE: 75
           PYTHONUNBUFFERED: '1'
-        run: |
-          set +e
-          python update_sheet.py
-          rc=$?
-          if [ "$rc" -ne 0 ]; then
-            echo "update_sheet.py failed with exit code $rc; running safe sheet writer fallback."
-            test -f output/early_hunter.csv || exit "$rc"
-            test -f output/backtest_summary.csv || exit "$rc"
-            python sheet_writer_hotfix.py || exit $?
-          fi
-          exit 0
+        run: python run_update_safe.py
       - name: Validate Calibration
         run: |
           test -f output/backtest_summary.csv
