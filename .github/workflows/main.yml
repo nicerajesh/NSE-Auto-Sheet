@@ -28,7 +28,7 @@ jobs:
         run: |
           echo '=== NSE EARLY HUNTER — PROFIT-OPTIMIZED DECISION ENGINE ==='
           echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile action_labels.py config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py persistent_runner.py persistent_runner_safe.py v3_engine.py v3_runner.py decision_engine.py v3_dashboard.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py persistent_runner.py persistent_runner_safe.py v3_engine.py v3_runner.py decision_engine.py v3_dashboard.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py test_system.py
           python - <<'PY'
           from decision_engine import BUY_NOW, BUY_BREAKOUT, BUY_DIP, WAIT, AVOID
           print('USER_ACTIONS=', [BUY_NOW, BUY_BREAKOUT, BUY_DIP, WAIT, AVOID])
@@ -66,14 +66,17 @@ jobs:
           test -f output/buy_candidates.csv
           test -f output/decision_candidates.csv
           test -f output/trading_commands.csv
+          test -f output/low52_reversal.csv
           python - <<'PY'
           import pandas as pd
           e=pd.read_csv('output/early_hunter.csv')
           d=pd.read_csv('output/decision_candidates.csv')
           c=pd.read_csv('output/trading_commands.csv')
+          l=pd.read_csv('output/low52_reversal.csv')
           print('EARLY_HUNTER_ROWS=',len(e))
           print('DECISION_ROWS=',len(d))
           print('TRADING_COMMAND_ROWS=',len(c))
+          print('LOW52_REVERSAL_ROWS=',len(l))
           required=['V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT','USER_ACTION','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE']
           missing=[x for x in required if x not in d.columns]
           if missing: raise SystemExit('Missing decision fields: '+','.join(missing))
@@ -99,6 +102,17 @@ jobs:
           test -f output/trade_ledger.csv
           test -f output/decision_candidates.csv
           test -f output/trading_commands.csv
+          test -f output/low52_reversal.csv
+      - name: Show 52-Week-Low Reversal Candidates
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          df=pd.read_csv('output/low52_reversal.csv')
+          if df.empty:
+              print('NO STOCKS CURRENTLY NEAR 52-WEEK LOW WITH A REVERSAL SIGNAL')
+          else:
+              print(df.head(30).to_string(index=False))
+          PY
       - name: Show Trading Commands
         run: |
           python - <<'PY'
