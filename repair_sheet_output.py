@@ -1,28 +1,34 @@
 from __future__ import annotations
 import os
+import json
 from pathlib import Path
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 
 OUT = Path('output')
+DEFAULT_SHEET_ID = '1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM'
 
 
 def _credentials():
     raw = os.getenv('GCP_CREDENTIALS', '')
     if not raw:
         raise RuntimeError('GCP_CREDENTIALS missing')
-    import json
     info = json.loads(raw)
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     return Credentials.from_service_account_info(info, scopes=scopes)
 
 
 def _clean(v):
-    if pd.isna(v):
+    if v is None:
         return ''
     if isinstance(v, (dict, list, tuple, set)):
-        return str(v)
+        return json.dumps(v, sort_keys=True, default=str)
+    try:
+        if pd.isna(v):
+            return ''
+    except Exception:
+        pass
     if hasattr(v, 'item'):
         try:
             return v.item()
@@ -49,6 +55,21 @@ def _write(ws, df):
         pass
 
 
+def _open_sheet(gc):
+    # Prefer explicit URL when supplied; otherwise use the same stable sheet ID
+    # already used by update_sheet.py. This removes an unnecessary secret/config
+    # dependency from the repair step.
+    sheet_url = os.getenv('GOOGLE_SHEET_URL') or os.getenv('SHEET_URL')
+    if sheet_url:
+        return gc.open_by_url(sheet_url)
+
+    sheet_id = os.getenv('SPREADSHEET_ID') or DEFAULT_SHEET_ID
+    if sheet_id:
+        return gc.open_by_key(sheet_id)
+
+    raise RuntimeError('Google Sheet configuration missing: set GOOGLE_SHEET_URL/SHEET_URL or SPREADSHEET_ID')
+
+
 def main():
     hunter_path = OUT / 'early_hunter.csv'
     buy_path = OUT / 'buy_candidates.csv'
@@ -61,12 +82,7 @@ def main():
     dash = pd.read_csv(dash_path) if dash_path.exists() else pd.DataFrame()
 
     gc = gspread.authorize(_credentials())
-    sheet_url = os.getenv('GOOGLE_SHEET_URL', '')
-    if not sheet_url:
-        sheet_url = os.getenv('SHEET_URL', '')
-    if not sheet_url:
-        raise RuntimeError('GOOGLE_SHEET_URL/SHEET_URL missing')
-    sh = gc.open_by_url(sheet_url)
+    sh = _open_sheet(gc)
 
     def get_or_create(title):
         try:
