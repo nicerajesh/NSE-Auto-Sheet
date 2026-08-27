@@ -28,7 +28,7 @@ jobs:
         run: |
           echo '=== NSE EARLY HUNTER — PROFIT-OPTIMIZED DECISION ENGINE ==='
           echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py persistent_runner.py persistent_runner_safe.py v3_engine.py v3_runner.py decision_engine.py v3_dashboard.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py test_system.py
+          python -m py_compile action_labels.py config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py persistent_runner.py persistent_runner_safe.py v3_engine.py v3_runner.py decision_engine.py v3_dashboard.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py test_system.py
           python - <<'PY'
           from decision_engine import BUY_NOW, BUY_BREAKOUT, BUY_DIP, WAIT, AVOID
           print('USER_ACTIONS=', [BUY_NOW, BUY_BREAKOUT, BUY_DIP, WAIT, AVOID])
