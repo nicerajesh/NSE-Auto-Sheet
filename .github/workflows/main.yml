@@ -74,8 +74,9 @@ jobs:
           print('EARLY_HUNTER_ROWS=',len(e))
           print('DECISION_ROWS=',len(d))
           print('TRADING_COMMAND_ROWS=',len(c))
-          for col in ['V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT']:
-              if col not in d.columns: raise SystemExit(f'Missing decision field: {col}')
+          required=['V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT','USER_ACTION','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE']
+          missing=[x for x in required if x not in d.columns]
+          if missing: raise SystemExit('Missing decision fields: '+','.join(missing))
           if not c.empty: print(c.head(15).to_string(index=False))
           PY
       - name: Finalize Quality Gate and Outputs
