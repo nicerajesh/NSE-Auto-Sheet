@@ -46,13 +46,19 @@ class StrategyConfig:
     late_low_distance_pct:float=24.0
     max_breakout_extension_pct:float=6.0
     breakout_min_close_strength:float=0.65
-    # Advanced pre-breakout controls
     min_volume_dryup_ratio:float=0.80
     max_volume_dryup_ratio:float=1.05
     require_volume_dryup:bool=True
     min_base_tightening_pct:float=5.0
     max_buy_zone_pct:float=1.5
     max_gap_entry_pct:float=2.0
+    # Execution/risk controls are configurable instead of embedded in backtest code.
+    t1_position_pct:float=0.40
+    t2_position_pct:float=0.30
+    t1_stop_lock_r:float=0.05
+    t2_stop_lock_r:float=1.00
+    atr_stop_multiplier:float=1.50
+    protected_stop_mode:str='R_MULTIPLE'
 
 @dataclass(frozen=True)
 class BacktestConfig:
