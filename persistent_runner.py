@@ -72,12 +72,32 @@ def sync(df):
 
 def make_runner():
     src=(ROOT/'update_sheet.py').read_text(encoding='utf-8')
-    start='s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0'
+    # Do not depend on the legacy textual loader. The persistent history is already
+    # prepared in main(); inject it at the point where update_sheet expects frames.
+    marker='s=sess();universe=fetch_nifty500_symbols(s);frames=[];d=datetime.now();attempts=0'
+    a=src.find(marker)
+    if a<0:
+        # Newer update_sheet versions may use different loader names. Locate the
+        # first assignment that initializes frames and replace that loader block
+        # conservatively by matching a known downstream guard.
+        for candidate in ('frames=[];d=datetime.now();attempts=0','frames=[]'):
+            a=src.find(candidate)
+            if a>=0:
+                break
     end="if not frames:raise RuntimeError('No NIFTY 500 NSE bhavcopy data found')"
-    a=src.find(start); b=src.find(end,a)
-    if a<0 or b<0:raise RuntimeError('Legacy history loader not found in update_sheet.py')
+    b=src.find(end,a if a>=0 else 0)
+    if a<0 or b<0:
+        # If the update script has already been converted to consume persistent
+        # history directly, run it unchanged rather than failing on legacy text.
+        if 'persistent_history.csv' in src or 'PERSISTENT D1 INPUT' in src:
+            return src
+        raise RuntimeError('update_sheet.py has no compatible history-loader block')
     b+=len(end)
-    safe=("_persistent_hist=pd.read_csv('output/persistent_history.csv',parse_dates=['DATE']);""universe=set(_persistent_hist['SYMBOL'].astype(str).str.upper());""frames=[g.copy() for _,g in _persistent_hist.groupby('DATE',sort=True)];""print(f'PERSISTENT D1 INPUT: {len(_persistent_hist)} rows | {len(frames)} sessions');""del _persistent_hist")
+    safe=("_persistent_hist=pd.read_csv('output/persistent_history.csv',parse_dates=['DATE']);"
+          "universe=set(_persistent_hist['SYMBOL'].astype(str).str.upper());"
+          "frames=[g.copy() for _,g in _persistent_hist.groupby('DATE',sort=True)];"
+          "print(f'PERSISTENT D1 INPUT: {len(_persistent_hist)} rows | {len(frames)} sessions');"
+          "del _persistent_hist")
     src=src[:a]+safe+src[b:]
     src=src.replace("ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')","print('SAFE SHEET PATH: skipping legacy Early Hunter write; repair_sheet_output.py will publish flat rows')")
     return src
