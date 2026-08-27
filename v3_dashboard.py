@@ -1,36 +1,26 @@
 from __future__ import annotations
 import pandas as pd
 from pathlib import Path
-from decision_engine import classify_portfolio, BUY_NOW, BUY_BREAKOUT, BUY_DIP, WAIT, AVOID
+from decision_engine import classify_portfolio
+from v3_engine import apply_v3
 
 OUT=Path('output')
 
-
-def _money(v):
-    try:return f'₹{float(v):,.2f}'
-    except:return '—'
-
-def _pct(v):
-    try:return f'{float(v):+.1f}%'
-    except:return '—'
-
 def main():
-    src=OUT/'early_hunter.csv'
+    src=OUT/'early_hunter.csv'; hist_path=OUT/'persistent_history.csv'
     if not src.exists(): raise RuntimeError('output/early_hunter.csv missing')
-    df=pd.read_csv(src)
-    # The decision engine enriches the raw hunter output. It intentionally does
-    # not weaken the upstream quality gate or manufacture a BUY when the gate fails.
-    enriched=classify_portfolio(df)
+    if not hist_path.exists(): raise RuntimeError('output/persistent_history.csv missing')
+    base=pd.read_csv(src); hist=pd.read_csv(hist_path,parse_dates=['DATE'])
+    if 'SYMBOL' not in hist.columns: raise RuntimeError('persistent_history.csv missing SYMBOL')
+    enriched=pd.DataFrame([apply_v3(r.to_dict(),hist) for _,r in base.iterrows()]) if not base.empty else base.copy()
+    enriched=classify_portfolio(enriched)
     if not enriched.empty and 'QUALITY_GATE' in enriched.columns:
         gate=enriched.QUALITY_GATE.astype(str).iloc[0]
         if gate!='PASS':
-            enriched['USER_ACTION']='🔴 ABHI MAT KHARIDO — MODEL QUALITY GATE BLOCKED'
+            enriched['USER_ACTION']='🔴 ABHI MAT KHARIDO — QUALITY GATE BLOCKED'
     enriched.to_csv(OUT/'decision_candidates.csv',index=False)
-
-    cols=['RANK','SYMBOL','USER_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT','CHANCE_PLUS10_PCT','CHANCE_PLUS20_PCT','CHANCE_PLUS30_PCT','CHANCE_PLUS50_PCT','ENTRY_TIMING','WHY']
-    cols=[c for c in cols if c in enriched.columns]
-    top=enriched[cols].copy().head(30)
-    # Human-readable command table for the Google Sheet publisher.
+    cols=['RANK','SYMBOL','USER_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT','CHANCE_PLUS10_PCT','CHANCE_PLUS20_PCT','CHANCE_PLUS30_PCT','CHANCE_PLUS50_PCT','ENTRY_TIMING','V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','WHY']
+    cols=[c for c in cols if c in enriched.columns]; top=enriched[cols].head(30)
     human=pd.DataFrame({
         'RANK':top.get('RANK',pd.Series(dtype=int)),
         'STOCK':top.get('SYMBOL',pd.Series(dtype=str)),
@@ -50,11 +40,12 @@ def main():
         '30% CHANCE':top.get('CHANCE_PLUS30_PCT',pd.Series(dtype=float)),
         '50% CHANCE':top.get('CHANCE_PLUS50_PCT',pd.Series(dtype=float)),
         'TIMING':top.get('ENTRY_TIMING',pd.Series(dtype=str)),
+        'V3 OPPORTUNITY':top.get('V3_OPPORTUNITY_SCORE',pd.Series(dtype=float)),
         'WHY':top.get('WHY',pd.Series(dtype=str)),
     })
     human.to_csv(OUT/'trading_commands.csv',index=False)
-    counts={str(a):int((enriched.get('USER_ACTION',pd.Series(dtype=str))==a).sum()) for a in [BUY_NOW,BUY_BREAKOUT,BUY_DIP,WAIT,AVOID]}
-    print('TRADING COMMANDS:',counts)
-    print('Decision candidates:',len(top))
+    counts=human['KYA KARNA HAI'].value_counts(dropna=False).to_dict() if not human.empty else {}
+    print('TRADING COMMANDS READY:',len(human),'|',counts)
+    if not human.empty: print(human.head(15).to_string(index=False))
 
 if __name__=='__main__':main()
