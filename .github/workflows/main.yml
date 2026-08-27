@@ -26,9 +26,9 @@ jobs:
           pip install -r requirements.txt
       - name: Verify Engine
         run: |
-          echo '=== NSE EARLY HUNTER — PERSISTENT D1 ENGINE ==='
+          echo '=== NSE EARLY HUNTER — V3 PROFIT-OPTIMIZED ENTRY ENGINE ==='
           echo "COMMIT=$(git rev-parse HEAD)"
-          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py persistent_runner.py persistent_runner_safe.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py test_system.py
+          python -m py_compile config.py indicator.py strategy.py backtest.py quality_gate.py d1_database.py trade_manager.py persistent_runner.py persistent_runner_safe.py v3_engine.py v3_runner.py update_sheet.py finalize_outputs.py dashboard.py repair_sheet_output.py test_system.py
           python - <<'PY'
           from config import STRAT, BT
           from strategy import ACTIONABLE
@@ -38,6 +38,8 @@ jobs:
           print('MIN_RESISTANCE_TESTS=',STRAT.min_resistance_tests)
           print('BREAKOUT_LOOKAHEAD=',BT.breakout_lookahead_days)
           print('PROBABILITY_MIN_SAMPLES=',BT.probability_min_samples)
+          print('V3_ENTRY_TIMING=enabled')
+          print('V3_CHASE_PROTECTION=enabled')
           PY
       - name: Unit Tests
         run: python test_system.py
@@ -52,7 +54,7 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo 'CLOUDFLARE_ACCOUNT_ID missing' && exit 1)
       - name: Prepare Output
         run: rm -rf output && mkdir -p output
-      - name: Run Persistent NSE Engine
+      - name: Run V3 Persistent NSE Engine
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -62,7 +64,7 @@ jobs:
           WATCH_MIN_SCORE: 75
           PERSISTENT_D1: '1'
           PYTHONUNBUFFERED: '1'
-        run: python persistent_runner_safe.py
+        run: python v3_runner.py
       - name: Validate Calibration
         run: |
           test -f output/backtest_summary.csv
@@ -103,13 +105,13 @@ jobs:
           if df.empty:
               print('NO QUALIFIED BUY CANDIDATES — valid when quality gate blocks the model.')
           else:
-              cols=[c for c in ['SYMBOL','ACTION','CATEGORY','CMP','ENTRY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_CONFIDENCE'] if c in df.columns]
+              cols=[c for c in ['SYMBOL','ACTION','CATEGORY','CMP','ENTRY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_CONFIDENCE','V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','ENTRY_TIMING','V3_STATUS'] if c in df.columns]
               print(df[cols].head(50).to_string(index=False))
           PY
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nse-early-hunter-persistent-decision-engine
+          name: nse-early-hunter-v3-profit-optimized-entry-engine
           path: output/*.csv
           if-no-files-found: error
           retention-days: 30
