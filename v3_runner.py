@@ -17,9 +17,14 @@ def main():
     original=pr.make_runner
     pr.make_runner=make_runner_v3
     try:
-        return pr.main()
+        rc=pr.main()
     finally:
         pr.make_runner=original
+    if rc:
+        return rc
+    from v3_dashboard import main as build_dashboard
+    build_dashboard()
+    return 0
 
 
 if __name__=='__main__':
