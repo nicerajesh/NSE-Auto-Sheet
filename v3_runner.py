@@ -1,31 +1,33 @@
 from __future__ import annotations
-import persistent_runner as pr
+import os
+import subprocess
+import sys
+from pathlib import Path
 
-_ORIGINAL_MAKE_RUNNER=pr.make_runner
-
-
-def make_runner_v3():
-    src=_ORIGINAL_MAKE_RUNNER()
-    needle='from __future__ import annotations\n'
-    patch=needle+'import v3_engine\nv3_engine.install()\n'
-    if needle not in src:
-        raise RuntimeError('Runner bootstrap marker missing')
-    return src.replace(needle,patch,1)
+ROOT = Path(__file__).resolve().parent
 
 
-def main():
-    original=pr.make_runner
-    pr.make_runner=make_runner_v3
-    try:
-        rc=pr.main()
-    finally:
-        pr.make_runner=original
+def main() -> int:
+    """Run V3 without monkey-patching or source-code rewriting.
+
+    update_sheet.py owns persistent D1 history and produces the canonical
+    scanner/backtest outputs. v3_dashboard.py then converts those outputs into
+    the user-facing V3 decision/trading-command files.
+    """
+    runner = ROOT / 'persistent_runner.py'
+    dashboard = ROOT / 'v3_dashboard.py'
+    if not runner.exists():
+        raise RuntimeError(f'Persistent runner missing: {runner}')
+    if not dashboard.exists():
+        raise RuntimeError(f'V3 dashboard missing: {dashboard}')
+    env = os.environ.copy()
+    env.setdefault('PERSISTENT_D1', '1')
+    env.setdefault('PYTHONUNBUFFERED', '1')
+    rc = subprocess.run([sys.executable, str(runner)], cwd=str(ROOT), env=env).returncode
     if rc:
         return rc
-    from v3_dashboard import main as build_dashboard
-    build_dashboard()
-    return 0
+    return subprocess.run([sys.executable, str(dashboard)], cwd=str(ROOT), env=env).returncode
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
     raise SystemExit(main())
