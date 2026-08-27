@@ -24,8 +24,8 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30,trigger=None,require_trigge
         if gap>STRAT.max_gap_entry_pct:return None
         fill=first_open
     risk=max(1e-9,fill-stop);active_stop=stop
-    for j,row in f.iterrows():
-        op=_num(row.OPEN_PRICE);hi=_num(row.HIGH_PRICE);lo=_num(row.LOW_PRICE);cl=_num(row.CLOSE_PRICE);max_high=max(max_high,hi);min_low=min(min_low,lo)
+    for row in f.itertuples(index=True):
+        j=row.Index;op=_num(row.OPEN_PRICE);hi=_num(row.HIGH_PRICE);lo=_num(row.LOW_PRICE);cl=_num(row.CLOSE_PRICE);max_high=max(max_high,hi);min_low=min(min_low,lo)
         if require_trigger and not entered:
             trig=_num(trigger)
             if op>=trig:fill=op;entered=True
@@ -35,9 +35,9 @@ def outcome(g,entry_i,entry,stop,t1,t2,t3,horizon=30,trigger=None,require_trigge
         if lo<=active_stop:
             realised+=rem*(active_stop-fill)/fill*100;rem=0;stop_hit=True;exit_idx=j;exit_reason='STOP' if not hit1 else 'PROTECTED_STOP';break
         if not hit1 and hi>=t1:
-            realised+=.40*(t1-fill)/fill*100;rem-=.40;hit1=True;active_stop=max(active_stop,fill+0.05*risk)
+            realised+=STRAT.t1_position_pct*(t1-fill)/fill*100;rem-=STRAT.t1_position_pct;hit1=True;active_stop=max(active_stop,fill+STRAT.t1_stop_lock_r*risk)
         if not hit2 and hi>=t2:
-            realised+=.30*(t2-fill)/fill*100;rem-=.30;hit2=True;active_stop=max(active_stop,fill+risk)
+            realised+=STRAT.t2_position_pct*(t2-fill)/fill*100;rem-=STRAT.t2_position_pct;hit2=True;active_stop=max(active_stop,fill+STRAT.t2_stop_lock_r*risk)
         if not hit3 and hi>=t3:
             realised+=rem*(t3-fill)/fill*100;rem=0;hit3=True;exit_idx=j;exit_reason='T3';break
         if hit1 and lo<=active_stop:
@@ -50,10 +50,10 @@ def _event_outcome(g,i,resistance,lookahead):
     if i+1>=len(g) or not pd.notna(resistance):return None
     future=g.iloc[i+1:min(len(g),i+1+lookahead)]
     if future.empty:return None
-    r=float(resistance);max_high=float(future.HIGH_PRICE.max());hit_idx=None
-    for j,row in future.iterrows():
-        if _num(row.HIGH_PRICE)>=r*1.002:hit_idx=j;break
-    return {'BREAKOUT_HIT':int(hit_idx is not None),'DAYS_TO_BREAKOUT':int(hit_idx-(i+1)+1) if hit_idx is not None else None,'MAX_HIGH_PCT':(max_high-_num(g.iloc[i].CLOSE_PRICE))/_num(g.iloc[i].CLOSE_PRICE)*100}
+    r=float(resistance);highs=pd.to_numeric(future.HIGH_PRICE,errors='coerce');hit=highs>=r*1.002
+    if not hit.any():return {'BREAKOUT_HIT':0,'DAYS_TO_BREAKOUT':None,'MAX_HIGH_PCT':(float(highs.max())-_num(g.iloc[i].CLOSE_PRICE))/_num(g.iloc[i].CLOSE_PRICE)*100}
+    first_pos=hit.to_numpy().nonzero()[0][0];hit_idx=future.index[first_pos]
+    return {'BREAKOUT_HIT':1,'DAYS_TO_BREAKOUT':int(hit_idx-(i+1)+1),'MAX_HIGH_PCT':(float(highs.max())-_num(g.iloc[i].CLOSE_PRICE))/_num(g.iloc[i].CLOSE_PRICE)*100}
 
 def _stats(trades):
     if trades.empty:return {'trades':0}
