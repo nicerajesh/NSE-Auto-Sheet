@@ -1,9 +1,11 @@
 from __future__ import annotations
 import persistent_runner as pr
 
+_ORIGINAL_MAKE_RUNNER=pr.make_runner
+
 
 def make_runner_v3():
-    src=pr.make_runner()
+    src=_ORIGINAL_MAKE_RUNNER()
     needle='from __future__ import annotations\n'
     patch=needle+'import v3_engine\nv3_engine.install()\n'
     if needle not in src:
