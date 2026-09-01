@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, sys, subprocess, tempfile
+import os, sys, subprocess, tempfile, re
 from datetime import datetime, timedelta
 from io import StringIO, BytesIO
 from pathlib import Path
@@ -154,12 +154,21 @@ def sync(df):
 
 def make_runner():
     src=(ROOT/'update_sheet.py').read_text(encoding='utf-8')
-    start='s=sess();universe=fetch_nifty500_symbols(s);hist=load_d1_history();frames=[]'
+    # Regex (not an exact string) so an unrelated refactor of the loader line
+    # (e.g. fetch_nifty500_symbols starting to also return sector_map) doesn't
+    # silently break this patch the way an exact-string match already has once.
+    m=re.search(r"s=sess\(\);universe(?:\s*,\s*\w+)?\s*=\s*fetch_nifty500_symbols\(s\);hist=load_d1_history\(\);frames=\[\]",src)
+    if not m:raise RuntimeError('Legacy history loader not found in update_sheet.py')
+    a=m.start()
     end="if hist.empty:raise RuntimeError('No NIFTY 500 history available in D1 or NSE bhavcopy')"
-    a=src.find(start); b=src.find(end,a)
-    if a<0 or b<0:raise RuntimeError('Legacy history loader not found in update_sheet.py')
+    b=src.find(end,a)
+    if b<0:raise RuntimeError('Legacy history loader end-marker not found in update_sheet.py')
     b+=len(end)
-    safe=("import pandas as pd;""_persistent_hist=pd.read_csv('output/persistent_history.csv',parse_dates=['DATE']);""universe=set(_persistent_hist['SYMBOL'].astype(str).str.upper())-{'"+NIFTY_SYMBOL+"'};""hist=_persistent_hist.copy();""frames=[g.copy() for _,g in hist.groupby('DATE',sort=True)];""print(f'PERSISTENT D1 INPUT: {len(hist)} rows | {len(frames)} sessions');""del _persistent_hist")
+    # sector_map is used later in update_sheet.py (trade_manager.update_ledger) —
+    # the persistent path has no fresh NSE constituent fetch to source it from,
+    # so it degrades to empty (UNKNOWN sector for exposure caps) rather than
+    # leaving the name undefined and crashing further down.
+    safe=("import pandas as pd;""_persistent_hist=pd.read_csv('output/persistent_history.csv',parse_dates=['DATE']);""universe=set(_persistent_hist['SYMBOL'].astype(str).str.upper())-{'"+NIFTY_SYMBOL+"'};""sector_map={};""hist=_persistent_hist.copy();""frames=[g.copy() for _,g in hist.groupby('DATE',sort=True)];""print(f'PERSISTENT D1 INPUT: {len(hist)} rows | {len(frames)} sessions');""del _persistent_hist")
     src=src[:a]+safe+src[b:]
     src=src.replace("ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')","print('SAFE SHEET PATH: skipping legacy Early Hunter write; repair_sheet_output.py will publish flat rows')")
     return src
