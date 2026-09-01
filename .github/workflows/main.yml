@@ -68,8 +68,10 @@ jobs:
           test -f output/trading_commands.csv
           test -f output/low52_reversal.csv
           test -f output/apex_matrix.csv
+          test -f output/stealth_accumulation.csv
           test -f output/low52_backtest_summary.csv
           test -f output/apex_backtest_summary.csv
+          test -f output/stealth_backtest_summary.csv
           python - <<'PY'
           import pandas as pd
           e=pd.read_csv('output/early_hunter.csv')
@@ -78,12 +80,14 @@ jobs:
           l=pd.read_csv('output/low52_reversal.csv')
           lb=pd.read_csv('output/low52_backtest_summary.csv')
           ab=pd.read_csv('output/apex_backtest_summary.csv')
+          sb=pd.read_csv('output/stealth_backtest_summary.csv')
           print('EARLY_HUNTER_ROWS=',len(e))
           print('DECISION_ROWS=',len(d))
           print('TRADING_COMMAND_ROWS=',len(c))
           print('LOW52_REVERSAL_ROWS=',len(l))
           print('LOW52_BACKTEST_TRADES=',lb.get('trades',[0])[0] if not lb.empty else 0, '| PF=',lb.get('profit_factor',[None])[0] if not lb.empty else None)
           print('APEX_BACKTEST_TRADES=',ab.get('trades',[0])[0] if not ab.empty else 0, '| PF=',ab.get('profit_factor',[None])[0] if not ab.empty else None)
+          print('STEALTH_BACKTEST_TRADES=',sb.get('trades',[0])[0] if not sb.empty else 0, '| PF=',sb.get('profit_factor',[None])[0] if not sb.empty else None)
           required=['V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT','USER_ACTION','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE']
           missing=[x for x in required if x not in d.columns]
           if missing: raise SystemExit('Missing decision fields: '+','.join(missing))
@@ -111,8 +115,21 @@ jobs:
           test -f output/trading_commands.csv
           test -f output/low52_reversal.csv
           test -f output/apex_matrix.csv
+          test -f output/stealth_accumulation.csv
+          test -f output/master_buy_dashboard.csv
           test -f output/low52_backtest_summary.csv
           test -f output/apex_backtest_summary.csv
+          test -f output/stealth_backtest_summary.csv
+      - name: Show Master Buy Dashboard
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          df=pd.read_csv('output/master_buy_dashboard.csv')
+          if df.empty:
+              print('NO PUBLISHED BUYS FROM ANY SCANNER TODAY')
+          else:
+              print(df.head(30).to_string(index=False))
+          PY
       - name: Show APEX Matrix Candidates
         run: |
           python - <<'PY'
@@ -130,6 +147,16 @@ jobs:
           df=pd.read_csv('output/low52_reversal.csv')
           if df.empty:
               print('NO STOCKS CURRENTLY NEAR 52-WEEK LOW WITH A REVERSAL SIGNAL')
+          else:
+              print(df.head(30).to_string(index=False))
+          PY
+      - name: Show Stealth Accumulation Candidates
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          df=pd.read_csv('output/stealth_accumulation.csv')
+          if df.empty:
+              print('NO STEALTH ACCUMULATION SETUPS TODAY')
           else:
               print(df.head(30).to_string(index=False))
           PY
