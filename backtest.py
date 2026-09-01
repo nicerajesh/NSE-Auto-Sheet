@@ -150,7 +150,7 @@ def walk_forward_consistency(trades: pd.DataFrame, horizon=None) -> tuple[pd.Dat
     return wdf, ok, reason
 
 
-
+def run_backtest_low52(hist,horizon=None):
     """Walk-forward backtest for the 52-week-low reversal scanner — same
     no-lookahead methodology as run_backtest() above (re-evaluate the signal
     at each historical day using only data available up to that day, enter
