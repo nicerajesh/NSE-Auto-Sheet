@@ -11,7 +11,8 @@ from config import NIFTY_SYMBOL
 # Repository root is one level above src/. Keep generated CSVs in root/output so
 # GitHub Actions and the dynamically generated runner use the same path.
 ROOT=Path(__file__).resolve().parents[1]
-OUT=ROOT/'output'; OUT.mkdir(parents=True, exist_ok=True)
+SRC=Path(__file__).resolve().parent
+OUT=Path(os.getenv('NSE_OUTPUT_DIR', str(ROOT/'output'))).resolve(); OUT.mkdir(parents=True, exist_ok=True)
 HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','480'))
 MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1'))
 
@@ -154,8 +155,29 @@ def sync(df):
     for i in range(0,len(items),50):batch(items[i:i+50],required=True)
     print(f'D1 market sync: upserted {len(df)} rows')
 
+def _find_update_sheet():
+    # Compatibility resolver: the engine can be launched from repo root, src/,
+    # a GitHub Actions working directory, or another cwd. Prefer src/ but accept
+    # a root copy for older layouts.
+    candidates = [
+        SRC / 'update_sheet.py',
+        ROOT / 'update_sheet.py',
+        Path.cwd() / 'src' / 'update_sheet.py',
+        Path.cwd() / 'update_sheet.py',
+    ]
+    seen=set()
+    for candidate in candidates:
+        candidate=candidate.resolve()
+        if candidate in seen: continue
+        seen.add(candidate)
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError('update_sheet.py not found. Checked: ' + ', '.join(str(x.resolve()) for x in candidates))
+
 def make_runner():
-    src=(ROOT/'update_sheet.py').read_text(encoding='utf-8')
+    update_sheet_path=_find_update_sheet()
+    print(f'PERSISTENT RUNNER: using update_sheet.py = {update_sheet_path}')
+    src=update_sheet_path.read_text(encoding='utf-8')
     # Regex (not an exact string) so an unrelated refactor of the loader line
     # (e.g. fetch_nifty500_symbols starting to also return sector_map) doesn't
     # silently break this patch the way an exact-string match already has once.
@@ -170,7 +192,8 @@ def make_runner():
     # the persistent path has no fresh NSE constituent fetch to source it from,
     # so it degrades to empty (UNKNOWN sector for exposure caps) rather than
     # leaving the name undefined and crashing further down.
-    safe=("import pandas as pd;""_persistent_hist=pd.read_csv('output/persistent_history.csv',parse_dates=['DATE']);""universe=set(_persistent_hist['SYMBOL'].astype(str).str.upper())-{'"+NIFTY_SYMBOL+"'};""sector_map={};""hist=_persistent_hist.copy();""frames=[g.copy() for _,g in hist.groupby('DATE',sort=True)];""print(f'PERSISTENT D1 INPUT: {len(hist)} rows | {len(frames)} sessions');""del _persistent_hist")
+    persistent_path=str((OUT/'persistent_history.csv').resolve()).replace('\\','/')
+    safe=("import pandas as pd;"f"_persistent_hist=pd.read_csv(r'{persistent_path}',parse_dates=['DATE']);""universe=set(_persistent_hist['SYMBOL'].astype(str).str.upper())-{'"+NIFTY_SYMBOL+"'};""sector_map={};""hist=_persistent_hist.copy();""frames=[g.copy() for _,g in hist.groupby('DATE',sort=True)];""print(f'PERSISTENT D1 INPUT: {len(hist)} rows | {len(frames)} sessions');""del _persistent_hist")
     src=src[:a]+safe+src[b:]
     src=src.replace("ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')","print('SAFE SHEET PATH: skipping legacy Early Hunter write; repair_sheet_output.py will publish flat rows')")
     return src
@@ -216,6 +239,13 @@ def main():
     if bootstrap:sync(hist)
     print(f'PERSISTENT D1 READY: {len(hist)} rows | {hist.DATE.nunique()} sessions | latest={pd.to_datetime(hist.DATE).max():%Y-%m-%d}')
     rc=run()
-    if rc:raise SystemExit(rc)
+    if rc:
+        # Return the code (don't raise SystemExit here) so callers like
+        # v3_runner.py that do `rc=pr.main()` inside a try/finally actually
+        # receive an int and can log/handle it, instead of the SystemExit
+        # silently unwinding the stack with no traceback printed.
+        print(f'PERSISTENT RUNNER: update_sheet.py subprocess exited with code {rc}')
+        return rc
+    return 0
 
 if __name__=='__main__':raise SystemExit(main())
