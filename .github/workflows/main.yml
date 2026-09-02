@@ -59,6 +59,22 @@ jobs:
           mkdir -p "$NSE_OUTPUT_DIR"
           echo "NSE_OUTPUT_DIR=$NSE_OUTPUT_DIR"
           test -d "$NSE_OUTPUT_DIR"
+      - name: Verify Source Layout
+        run: |
+          test -f src/update_sheet.py
+          test -f src/persistent_runner.py
+          test -f src/v3_runner.py
+          echo 'SOURCE LAYOUT OK: update_sheet.py is under src/'
+          if [ -f update_sheet.py ]; then echo 'WARNING: legacy root update_sheet.py exists; src/ version will be used'; fi
+      - name: Prepare Universal Source Compatibility
+        run: |
+          # Keep a root compatibility copy for legacy launchers that still look
+          # for update_sheet.py beside the repository root. The runtime prefers
+          # src/update_sheet.py, so this does not change the canonical source.
+          cp src/update_sheet.py update_sheet.py
+          test -f update_sheet.py
+          echo 'UNIVERSAL SOURCE COMPATIBILITY OK'
+
       - name: Run V3 Persistent NSE Engine
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
