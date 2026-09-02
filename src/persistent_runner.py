@@ -50,22 +50,7 @@ def fetch_bhav(s,d):
     except Exception as e: print('Fetch warning',d,e); return None
 
 def fetch_nifty_index(s,d):
-    """Best-effort NIFTY 50 index OHLC for one date, shaped like a normal bhavcopy
-    row (SYMBOL='NIFTY 50') so it flows through the same D1/history pipeline as any
-    stock. This powers the APEX MATRIX scanner's NIFTY-relative market regime and
-    relative-strength calculation.
-
-    Primary source: NSE's daily market-summary CSV
-    (archives/equities/mkt/MA{DDMMYY}.csv), which contains a small table:
-        ,INDEX,PREVIOUS CLOSE,OPEN,HIGH,LOW,CLOSE,GAIN/LOSS
-        ,Nifty 50,     25790.25,     25897.35, ...
-    This exact structure was confirmed by fetching and inspecting a real file
-    (13-Jan-2026) directly — not a guess. A second, unverified URL is kept as a
-    fallback only. ANY failure (wrong URL, renamed columns, network hiccup,
-    weekend/holiday with no file) is logged and swallowed — callers must treat a
-    missing NIFTY row as normal and fall back (e.g. to universe breadth or
-    NEUTRAL regime) rather than failing the run.
-    """
+    """Best-effort NIFTY 50 index OHLC for one date, shaped like a normal bhavcopy row."""
     mkt_url=f'https://nsearchives.nseindia.com/archives/equities/mkt/MA{d:%d%m%y}.csv'
     try:
         r=s.get(mkt_url,timeout=20)
@@ -74,19 +59,13 @@ def fetch_nifty_index(s,d):
             for idx,line in enumerate(lines):
                 cells=[c.strip().upper() for c in line.split(',')]
                 if 'INDEX' in cells and 'CLOSE' in cells and 'OPEN' in cells:header_idx=idx;break
-            if header_idx is None:
-                print(f'NIFTY index fetch: header row not found in {mkt_url}')
-            else:
-                header=[c.strip().upper() for c in lines[header_idx].split(',')]
-                row=None
+            if header_idx is not None:
+                header=[c.strip().upper() for c in lines[header_idx].split(',')]; row=None; idx_col=header.index('INDEX')
                 for line in lines[header_idx+1:header_idx+300]:
                     cells=[c.strip() for c in line.split(',')]
                     if len(cells)<len(header):break
-                    idx_col=header.index('INDEX')
                     if idx_col<len(cells) and cells[idx_col].upper()=='NIFTY 50':row=dict(zip(header,cells));break
-                if row is None:
-                    print(f'NIFTY index fetch: "Nifty 50" row not found in {mkt_url}')
-                else:
+                if row is not None:
                     def pick(*keys):
                         for k in keys:
                             v=row.get(k)
@@ -95,40 +74,28 @@ def fetch_nifty_index(s,d):
                                 except Exception:pass
                         return None
                     o,h,l,c=pick('OPEN'),pick('HIGH'),pick('LOW'),pick('CLOSE')
-                    if any(v is None for v in (o,h,l,c)):
-                        print(f'NIFTY index fetch: missing OHLC in row {row}')
-                    else:
+                    if all(v is not None for v in (o,h,l,c)):
                         return pd.DataFrame([{'SYMBOL':NIFTY_SYMBOL,'DATE':pd.Timestamp(d),'OPEN_PRICE':o,'HIGH_PRICE':h,'LOW_PRICE':l,'CLOSE_PRICE':c,'TTL_TRD_QNTY':0.0,'TURNOVER_LACS':0.0,'DELIV_QTY':0.0,'DELIV_PER':0.0}])
-        else:
-            print(f'NIFTY index fetch: {mkt_url} status={r.status_code} len={len(r.content)}')
-    except Exception as e:
-        print('NIFTY index fetch warning (primary)',d,e)
-    # Fallback: unverified alternate endpoint, tried only if the primary source failed.
+    except Exception as e: print('NIFTY index fetch warning (primary)',d,e)
     fallback_url=f'https://nsearchives.nseindia.com/content/indices/ind_close_all_{d:%d%m%Y}.csv'
     try:
         r=s.get(fallback_url,timeout=20)
-        if r.status_code!=200 or len(r.content)<200:
-            print(f'NIFTY index fetch: fallback {fallback_url} status={r.status_code}');return None
+        if r.status_code!=200 or len(r.content)<200:return None
         df=pd.read_csv(StringIO(r.text),encoding='utf-8-sig'); df.columns=[str(c).replace('\ufeff','').strip().upper().replace(' ','_') for c in df.columns]
         name_col=next((c for c in df.columns if 'INDEX' in c and 'NAME' in c),None)
-        if not name_col:
-            print(f'NIFTY index fetch: fallback {fallback_url} has no index-name column, cols={list(df.columns)}');return None
+        if not name_col:return None
         row=df[df[name_col].astype(str).str.strip().str.upper().eq('NIFTY 50')]
-        if row.empty:
-            print(f'NIFTY index fetch: fallback {fallback_url} has no Nifty 50 row');return None
+        if row.empty:return None
         row=row.iloc[0]
         def pick2(*keys):
             for k in keys:
                 if k in row.index and pd.notna(row[k]):return row[k]
             return None
         o,h,l,c=pick2('OPEN_INDEX_VALUE','OPEN'),pick2('HIGH_INDEX_VALUE','HIGH'),pick2('LOW_INDEX_VALUE','LOW'),pick2('CLOSING_INDEX_VALUE','CLOSE','CLOSE_INDEX_VALUE')
-        if any(v is None for v in (o,h,l,c)):
-            print(f'NIFTY index fetch: fallback missing OHLC values');return None
+        if any(v is None for v in (o,h,l,c)):return None
         return pd.DataFrame([{'SYMBOL':NIFTY_SYMBOL,'DATE':pd.Timestamp(d),'OPEN_PRICE':float(o),'HIGH_PRICE':float(h),'LOW_PRICE':float(l),'CLOSE_PRICE':float(c),'TTL_TRD_QNTY':0.0,'TURNOVER_LACS':0.0,'DELIV_QTY':0.0,'DELIV_PER':0.0}])
-    except Exception as e:
-        print('NIFTY index fetch warning (fallback)',d,e)
+    except Exception as e: print('NIFTY index fetch warning (fallback)',d,e)
     return None
-
 
 def d1_state():
     setup(); data=query('SELECT COUNT(*) AS n, COUNT(DISTINCT trade_date) AS sessions, MAX(trade_date) AS max_date FROM bhavcopy',required=True); row=(data.get('result',[{}])[0].get('results') or [{}])[0]; return int(row.get('n') or 0),int(row.get('sessions') or 0),row.get('max_date')
@@ -159,43 +126,30 @@ def _find_update_sheet():
     # Compatibility resolver: the engine can be launched from repo root, src/,
     # a GitHub Actions working directory, or another cwd. Prefer src/ but accept
     # a root copy for older layouts.
-    candidates = [
-        SRC / 'update_sheet.py',
-        ROOT / 'update_sheet.py',
-        Path.cwd() / 'src' / 'update_sheet.py',
-        Path.cwd() / 'update_sheet.py',
-    ]
+    candidates = [SRC / 'update_sheet.py', ROOT / 'update_sheet.py', Path.cwd() / 'src' / 'update_sheet.py', Path.cwd() / 'update_sheet.py']
     seen=set()
     for candidate in candidates:
         candidate=candidate.resolve()
         if candidate in seen: continue
         seen.add(candidate)
-        if candidate.is_file():
-            return candidate
+        if candidate.is_file(): return candidate
     raise FileNotFoundError('update_sheet.py not found. Checked: ' + ', '.join(str(x.resolve()) for x in candidates))
 
 def make_runner():
     update_sheet_path=_find_update_sheet()
     print(f'PERSISTENT RUNNER: using update_sheet.py = {update_sheet_path}')
     src=update_sheet_path.read_text(encoding='utf-8')
-    # Regex (not an exact string) so an unrelated refactor of the loader line
-    # (e.g. fetch_nifty500_symbols starting to also return sector_map) doesn't
-    # silently break this patch the way an exact-string match already has once.
     m=re.search(r"s=sess\(\);universe(?:\s*,\s*\w+)?\s*=\s*fetch_nifty500_symbols\(s\);hist=load_d1_history\(\);frames=\[\]",src)
     if not m:raise RuntimeError('Legacy history loader not found in update_sheet.py')
-    a=m.start()
-    end="if hist.empty:raise RuntimeError('No NIFTY 500 history available in D1 or NSE bhavcopy')"
-    b=src.find(end,a)
+    a=m.start(); end="if hist.empty:raise RuntimeError('No NIFTY 500 history available in D1 or NSE bhavcopy')"; b=src.find(end,a)
     if b<0:raise RuntimeError('Legacy history loader end-marker not found in update_sheet.py')
     b+=len(end)
-    # sector_map is used later in update_sheet.py (trade_manager.update_ledger) —
-    # the persistent path has no fresh NSE constituent fetch to source it from,
-    # so it degrades to empty (UNKNOWN sector for exposure caps) rather than
-    # leaving the name undefined and crashing further down.
     persistent_path=str((OUT/'persistent_history.csv').resolve()).replace('\\','/')
     safe=("import pandas as pd;"f"_persistent_hist=pd.read_csv(r'{persistent_path}',parse_dates=['DATE']);""universe=set(_persistent_hist['SYMBOL'].astype(str).str.upper())-{'"+NIFTY_SYMBOL+"'};""sector_map={};""hist=_persistent_hist.copy();""frames=[g.copy() for _,g in hist.groupby('DATE',sort=True)];""print(f'PERSISTENT D1 INPUT: {len(hist)} rows | {len(frames)} sessions');""del _persistent_hist")
     src=src[:a]+safe+src[b:]
-    src=src.replace("ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')","print('SAFE SHEET PATH: skipping legacy Early Hunter write; repair_sheet_output.py will publish flat rows')")
+    # IMPORTANT: do not replace the normal CSV writes. The scanner CSVs, including
+    # early_hunter.csv, must be created before finalization/validation.
+    src=src.replace("ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')","print('SAFE SHEET PATH: skipping legacy Early Hunter write; CSV outputs remain canonical')")
     return src
 
 def run():
@@ -214,8 +168,7 @@ def main():
             if d.weekday()<5:
                 x=fetch_bhav(s,d)
                 if x is not None:
-                    x=x[x.SYMBOL.isin(uni)].copy()
-                    ni=fetch_nifty_index(s,d)
+                    x=x[x.SYMBOL.isin(uni)].copy(); ni=fetch_nifty_index(s,d)
                     if ni is not None:x=pd.concat([x,ni],ignore_index=True)
                     if not x.empty:frames.append(x); print(f'Bootstrap load {d:%Y-%m-%d}: {len(x)} rows')
             d-=timedelta(days=1); attempts+=1
@@ -227,8 +180,7 @@ def main():
             if d.weekday()<5:
                 x=fetch_bhav(s,d)
                 if x is not None:
-                    x=x[x.SYMBOL.isin(uni)].copy()
-                    ni=fetch_nifty_index(s,d)
+                    x=x[x.SYMBOL.isin(uni)].copy(); ni=fetch_nifty_index(s,d)
                     if ni is not None:x=pd.concat([x,ni],ignore_index=True)
                     if not x.empty:frames.append(x); print(f'Incremental NSE load {d:%Y-%m-%d}: {len(x)} rows')
             d+=timedelta(days=1)
@@ -240,10 +192,6 @@ def main():
     print(f'PERSISTENT D1 READY: {len(hist)} rows | {hist.DATE.nunique()} sessions | latest={pd.to_datetime(hist.DATE).max():%Y-%m-%d}')
     rc=run()
     if rc:
-        # Return the code (don't raise SystemExit here) so callers like
-        # v3_runner.py that do `rc=pr.main()` inside a try/finally actually
-        # receive an int and can log/handle it, instead of the SystemExit
-        # silently unwinding the stack with no traceback printed.
         print(f'PERSISTENT RUNNER: update_sheet.py subprocess exited with code {rc}')
         return rc
     return 0
