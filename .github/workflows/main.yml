@@ -59,6 +59,13 @@ jobs:
           mkdir -p "$NSE_OUTPUT_DIR"
           echo "NSE_OUTPUT_DIR=$NSE_OUTPUT_DIR"
           test -d "$NSE_OUTPUT_DIR"
+      - name: Restore Persistent NSE History
+        uses: actions/cache/restore@v4
+        with:
+          path: output/persistent_history.csv
+          key: nse-persistent-history-v1
+          restore-keys: |
+            nse-persistent-history-v1
       - name: Verify Source Layout
         run: |
           test -f src/update_sheet.py
@@ -68,9 +75,6 @@ jobs:
           if [ -f update_sheet.py ]; then echo 'WARNING: legacy root update_sheet.py exists; src/ version will be used'; fi
       - name: Prepare Universal Source Compatibility
         run: |
-          # Keep a root compatibility copy for legacy launchers that still look
-          # for update_sheet.py beside the repository root. The runtime prefers
-          # src/update_sheet.py, so this does not change the canonical source.
           cp src/update_sheet.py update_sheet.py
           test -f update_sheet.py
           echo 'UNIVERSAL SOURCE COMPATIBILITY OK'
@@ -83,15 +87,10 @@ jobs:
           D1_DATABASE_ID: e6652e85-b927-4f11-b790-45fb6ee818f2
           HISTORY_DAYS: 480
           WATCH_MIN_SCORE: 75
-          PERSISTENT_D1: '1'
+          PERSISTENT_D1: '0'
           PYTHONUNBUFFERED: '1'
           PYTHONPATH: src
           NSE_OUTPUT_DIR: ${{ github.workspace }}/output
-          # Money-management defaults to SAFE (paper mode: signals are fully
-          # computed/sized/published as normal, but this is a visible marker
-          # that no real capital should be assumed committed automatically).
-          # Set the repo Variable PAPER_MODE=0 once you're ready to treat
-          # published signals as live guidance.
           PAPER_MODE: ${{ vars.PAPER_MODE || '1' }}
         run: python src/v3_runner.py
       - name: Validate Persistent History
@@ -105,6 +104,12 @@ jobs:
           if missing: raise SystemExit('Missing persistent history fields: '+','.join(sorted(missing)))
           print('PERSISTENT_HISTORY_ROWS=',len(p),'SESSIONS=',p['DATE'].nunique(),'SYMBOLS=',p['SYMBOL'].nunique())
           PY
+      - name: Save Persistent NSE History
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/persistent_history.csv
+          key: nse-persistent-history-v1-${{ github.run_id }}
       - name: Validate Decision Outputs
         run: |
           test -f output/early_hunter.csv
@@ -189,50 +194,40 @@ jobs:
           python - <<'PY'
           import pandas as pd
           df=pd.read_csv('output/master_buy_dashboard.csv')
-          if df.empty:
-              print('NO PUBLISHED BUYS FROM ANY SCANNER TODAY')
-          else:
-              print(df.head(30).to_string(index=False))
+          if df.empty: print('NO PUBLISHED BUYS FROM ANY SCANNER TODAY')
+          else: print(df.head(30).to_string(index=False))
           PY
       - name: Show APEX Matrix Candidates
         run: |
           python - <<'PY'
           import pandas as pd
           df=pd.read_csv('output/apex_matrix.csv')
-          if df.empty:
-              print('NO APEX MATRIX SETUPS TODAY')
-          else:
-              print(df.head(30).to_string(index=False))
+          if df.empty: print('NO APEX MATRIX SETUPS TODAY')
+          else: print(df.head(30).to_string(index=False))
           PY
       - name: Show 52-Week-Low Reversal Candidates
         run: |
           python - <<'PY'
           import pandas as pd
           df=pd.read_csv('output/low52_reversal.csv')
-          if df.empty:
-              print('NO STOCKS CURRENTLY NEAR 52-WEEK LOW WITH A REVERSAL SIGNAL')
-          else:
-              print(df.head(30).to_string(index=False))
+          if df.empty: print('NO STOCKS CURRENTLY NEAR 52-WEEK LOW WITH A REVERSAL SIGNAL')
+          else: print(df.head(30).to_string(index=False))
           PY
       - name: Show Stealth Accumulation Candidates
         run: |
           python - <<'PY'
           import pandas as pd
           df=pd.read_csv('output/stealth_accumulation.csv')
-          if df.empty:
-              print('NO STEALTH ACCUMULATION SETUPS TODAY')
-          else:
-              print(df.head(30).to_string(index=False))
+          if df.empty: print('NO STEALTH ACCUMULATION SETUPS TODAY')
+          else: print(df.head(30).to_string(index=False))
           PY
       - name: Show Trading Commands
         run: |
           python - <<'PY'
           import pandas as pd
           df=pd.read_csv('output/trading_commands.csv')
-          if df.empty:
-              print('NO CURRENT TRADING COMMANDS')
-          else:
-              print(df.head(30).to_string(index=False))
+          if df.empty: print('NO CURRENT TRADING COMMANDS')
+          else: print(df.head(30).to_string(index=False))
           PY
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
@@ -247,17 +242,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Opt-in: does nothing if TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets
-          # aren't set. Without this, a broken run before today just sat there
-          # producing no signals with nobody finding out until manually checked.
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
             echo "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — skipping failure alert. Add them as repo secrets to enable."
             exit 0
           fi
           MSG="NSE Auto Sheet run FAILED: ${{ github.repository }} @ ${{ github.sha }} — https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            --data-urlencode text="$MSG" || true
-
-
-# V2 master decision output is generated by the finalization stage.
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" || true
