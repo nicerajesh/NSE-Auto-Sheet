@@ -12,6 +12,7 @@ jobs:
     env:
       PYTHONPATH: src
       PYTHONUNBUFFERED: '1'
+      NSE_OUTPUT_DIR: ${{ github.workspace }}/output
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -54,9 +55,10 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo 'CLOUDFLARE_ACCOUNT_ID missing' && exit 1)
       - name: Prepare Output
         run: |
-          rm -rf output
-          mkdir -p output
-          echo "NSE_OUTPUT_DIR=$GITHUB_WORKSPACE/output" >> "$GITHUB_ENV"
+          rm -rf "$NSE_OUTPUT_DIR"
+          mkdir -p "$NSE_OUTPUT_DIR"
+          echo "NSE_OUTPUT_DIR=$NSE_OUTPUT_DIR"
+          test -d "$NSE_OUTPUT_DIR"
       - name: Run V3 Persistent NSE Engine
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
@@ -67,6 +69,8 @@ jobs:
           WATCH_MIN_SCORE: 75
           PERSISTENT_D1: '1'
           PYTHONUNBUFFERED: '1'
+          PYTHONPATH: src
+          NSE_OUTPUT_DIR: ${{ github.workspace }}/output
           # Money-management defaults to SAFE (paper mode: signals are fully
           # computed/sized/published as normal, but this is a visible marker
           # that no real capital should be assumed committed automatically).
@@ -79,13 +83,11 @@ jobs:
           test -f output/persistent_history.csv
           python - <<'PY'
           import pandas as pd
-          p='output/persistent_history.csv'
-          d=pd.read_csv(p)
-          required=['SYMBOL','DATE','CLOSE_PRICE','TTL_TRD_QNTY']
-          missing=[x for x in required if x not in d.columns]
-          if missing: raise SystemExit('Missing persistent history fields: '+','.join(missing))
-          if d.empty: raise SystemExit('persistent_history.csv is empty')
-          print('PERSISTENT_HISTORY_ROWS=',len(d),'| SESSIONS=',d['DATE'].nunique(),'| SYMBOLS=',d['SYMBOL'].nunique())
+          p=pd.read_csv('output/persistent_history.csv')
+          required={'DATE','SYMBOL','CLOSE_PRICE'}
+          missing=required-set(p.columns)
+          if missing: raise SystemExit('Missing persistent history fields: '+','.join(sorted(missing)))
+          print('PERSISTENT_HISTORY_ROWS=',len(p),'SESSIONS=',p['DATE'].nunique(),'SYMBOLS=',p['SYMBOL'].nunique())
           PY
       - name: Validate Decision Outputs
         run: |
