@@ -17,7 +17,7 @@ from d1_database import sync_latest, load_open_trades, setup, query
 from config import STRAT, BT, NIFTY_SYMBOL, RISK
 from csv_utils import safe_to_csv
 SPREADSHEET_ID=os.getenv('SPREADSHEET_ID','1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM'); STOCKS_SHEET='Top 500 Stocks'; HUNTER_SHEET='Early Hunter'
-HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','480')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('WATCH_MIN_SCORE','72')); OUT=Path('output'); OUT.mkdir(exist_ok=True)
+HISTORY_DAYS=int(os.getenv('HISTORY_DAYS','480')); MIN_TURNOVER_LACS=float(os.getenv('MIN_TURNOVER_LACS','1')); MIN_SCORE=int(os.getenv('WATCH_MIN_SCORE','72')); OUT=Path(os.getenv('NSE_OUTPUT_DIR', str(Path(__file__).resolve().parents[1]/'output'))).resolve(); OUT.mkdir(parents=True, exist_ok=True)
 creds_json=os.getenv('GCP_CREDENTIALS')
 if not creds_json: raise RuntimeError('GCP_CREDENTIALS secret missing')
 creds=ServiceAccountCredentials.from_json_keyfile_dict(json.loads(creds_json),['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']); book=gspread.authorize(creds).open_by_key(SPREADSHEET_ID)
