@@ -72,7 +72,13 @@ def batch(items,required=False):
     return _post(url,token,{'batch':clean},120)
 
 def setup():
-    schema=Path(__file__).with_name('d1_schema.sql').read_text(encoding='utf-8'); query(schema,required=True)
+    # NOTE (v-fix): d1_schema.sql intentionally lives at the REPO ROOT (see
+    # README_V2_REORG.md), not inside src/ alongside this file. The src/
+    # reorganization moved d1_database.py into src/ but never updated this
+    # path, so Path(__file__).with_name(...) looked for src/d1_schema.sql
+    # (never existed there) and crashed with FileNotFoundError on every run.
+    # Fix: look one directory up (repo root) from this file's location.
+    schema=(Path(__file__).parent.parent/'d1_schema.sql').read_text(encoding='utf-8'); query(schema,required=True)
     rows=query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",required=True)['result'][0].get('results',[])
     found={r['name'] for r in rows}; expected={'bhavcopy','indicators','signals','trades','backtest_results','daily_snapshots'}
     missing=expected-found
