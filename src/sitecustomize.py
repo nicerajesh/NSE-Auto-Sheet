@@ -47,8 +47,23 @@ try:
                 out['ACTION']='WATCH';out['CATEGORY']='WATCH';out['NEXT_DAY_ACTION']='WATCH';out['STAGE']='WATCH'
         p=_strict_probability(g,float(out.get('HUNTER_SCORE',0) or 0),out.get('ACTION'))
         out['MODEL_CONFIDENCE']=int(min(95,max(0,round(float(out.get('HUNTER_SCORE',0) or 0)))))
-        out['BREAKOUT_PROBABILITY']=p if p is not None else ''
-        out['PROBABILITY_METHOD']='PRE_SETUP_HISTORICAL_PRIOR' if p is not None else 'INSUFFICIENT_SETUP_HISTORY'
+        # NOTE (fix): _strict_probability only returns a value when called from
+        # inside scan_all() during a live daily run (it needs _LIVE_LATEST_DATE
+        # set, and >=230 bars of history, and action=='PRE-BREAKOUT BUY'). Every
+        # OTHER caller of analyze_stock -- tests/test_system.py, decision_engine's
+        # per-row enrichment, ad-hoc single-symbol checks -- calls it directly, so
+        # p is always None there. Previously that overwrote BREAKOUT_PROBABILITY
+        # with '' unconditionally, turning a numeric field into an empty string
+        # and crashing anything downstream that does float(BREAKOUT_PROBABILITY)
+        # (this is exactly what broke tests/test_system.py in CI). Fix: only
+        # override when the stricter historical estimate is actually available;
+        # otherwise keep the model-based confidence _orig_analyze already put
+        # there instead of blanking it out.
+        if p is not None:
+            out['BREAKOUT_PROBABILITY']=p
+            out['PROBABILITY_METHOD']='PRE_SETUP_HISTORICAL_PRIOR'
+        else:
+            out['PROBABILITY_METHOD']='MODEL_ESTIMATE'
         return out
 
     _s.analyze_stock=analyze_stock
