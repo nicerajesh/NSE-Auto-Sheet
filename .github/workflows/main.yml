@@ -83,7 +83,7 @@ jobs:
       - name: Validate Persistent History
         run: |
           test -s output/persistent_history.csv
-          python -c "import pandas as pd; p=pd.read_csv('output/persistent_history.csv'); required={'DATE','SYMBOL','CLOSE_PRICE'}; missing=required-set(p.columns); raise SystemExit('Missing persistent history fields: '+','.join(sorted(missing))) if missing else print('PERSISTENT_HISTORY_ROWS=',len(p),'SESSIONS=',p['DATE'].nunique(),'SYMBOLS=',p['SYMBOL'].nunique())"
+          python -c "import pandas as pd; p=pd.read_csv('output/persistent_history.csv'); required={'DATE','SYMBOL','CLOSE_PRICE'}; missing=required-set(p.columns); assert not missing, 'Missing persistent history fields: '+','.join(sorted(missing)); print('PERSISTENT_HISTORY_ROWS=',len(p),'SESSIONS=',p['DATE'].nunique(),'SYMBOLS=',p['SYMBOL'].nunique())"
       - name: Save Persistent NSE History
         if: always()
         uses: actions/cache/save@v4
@@ -109,7 +109,7 @@ jobs:
       - name: Guarantee V2 Master Schema
         run: |
           set -e
-          python -c "from pathlib import Path; import pandas as pd; p=Path('output/master_buy_decision_v2.csv'); required=['RANK','SYMBOL','FINAL_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','EDGE_CONFIDENCE','EDGE_CONFIDENCE_LABEL','POSITION_QTY','CAPITAL_ALLOCATED','RISK_AMOUNT','RISK_MANAGER_STATUS','QUALITY_GATE','ACTION','WHY','DECISION_REASON']; d=pd.read_csv(p) if p.exists() and p.stat().st_size else pd.DataFrame(); [d.__setitem__(c,'') for c in required if c not in d.columns]; d=d[required]; d.to_csv(p,index=False); missing=[c for c in required if c not in pd.read_csv(p).columns]; raise SystemExit('V2 schema repair failed: '+','.join(missing)) if missing else print('V2 SCHEMA OK:',','.join(required),'| ROWS=',len(d))"
+          python -c "from pathlib import Path; import pandas as pd; p=Path('output/master_buy_decision_v2.csv'); required=['RANK','SYMBOL','FINAL_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','EDGE_CONFIDENCE','EDGE_CONFIDENCE_LABEL','POSITION_QTY','CAPITAL_ALLOCATED','RISK_AMOUNT','RISK_MANAGER_STATUS','QUALITY_GATE','ACTION','WHY','DECISION_REASON']; d=pd.read_csv(p) if p.exists() and p.stat().st_size else pd.DataFrame(); [d.__setitem__(c,'') for c in required if c not in d.columns]; d=d[required]; d.to_csv(p,index=False); missing=[c for c in required if c not in d.columns]; assert not missing, 'V2 schema repair failed: '+','.join(missing); print('V2 SCHEMA OK:',','.join(required),'| ROWS=',len(d))"
           test -s output/master_buy_decision_v2.csv
       - name: Validate Decision Outputs
         run: |
@@ -118,11 +118,11 @@ jobs:
           for f in "${required_files[@]}"; do
             if [ ! -s "output/$f" ]; then echo "MISSING_OR_EMPTY: output/$f"; ls -lah output || true; exit 1; fi
           done
-          python -c "import pandas as pd; e=pd.read_csv('output/early_hunter.csv'); d=pd.read_csv('output/decision_candidates.csv'); c=pd.read_csv('output/trading_commands.csv'); m=pd.read_csv('output/master_buy_decision_v2.csv'); required=['V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT','USER_ACTION','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE']; missing=[x for x in required if x not in d.columns]; raise SystemExit('Missing decision fields: '+','.join(missing)) if missing else print('EARLY_HUNTER_ROWS=',len(e),'DECISION_ROWS=',len(d),'TRADING_COMMAND_ROWS=',len(c),'V2_MASTER_ROWS=',len(m))"
+          python -c "import pandas as pd; e=pd.read_csv('output/early_hunter.csv'); d=pd.read_csv('output/decision_candidates.csv'); c=pd.read_csv('output/trading_commands.csv'); m=pd.read_csv('output/master_buy_decision_v2.csv'); required=['V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT','USER_ACTION','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE']; missing=[x for x in required if x not in d.columns]; assert not missing, 'Missing decision fields: '+','.join(missing); print('EARLY_HUNTER_ROWS=',len(e),'DECISION_ROWS=',len(d),'TRADING_COMMAND_ROWS=',len(c),'V2_MASTER_ROWS=',len(m))"
       - name: Validate V2 Master Decision
         run: |
           test -s output/master_buy_decision_v2.csv
-          python -c "import pandas as pd; d=pd.read_csv('output/master_buy_decision_v2.csv'); required=['RANK','SYMBOL','FINAL_ACTION','QUALITY_GATE']; missing=[x for x in required if x not in d.columns]; raise SystemExit('Missing V2 master fields: '+','.join(missing)) if missing else None; bad=d[d.FINAL_ACTION.fillna('').str.contains('BUY',na=False) & ~d.FINAL_ACTION.fillna('').str.contains('BLOCKED',na=False)]; raise SystemExit('V2 master published BUY without PASS quality gate') if (not bad.empty and (d.loc[bad.index,'QUALITY_GATE'].astype(str)!='PASS').any()) else print('V2 MASTER ROWS=',len(d),'| RELEASED BUY=',len(bad))"
+          python -c "import pandas as pd; d=pd.read_csv('output/master_buy_decision_v2.csv'); required=['RANK','SYMBOL','FINAL_ACTION','QUALITY_GATE']; missing=[x for x in required if x not in d.columns]; assert not missing, 'Missing V2 master fields: '+','.join(missing); bad=d[d.FINAL_ACTION.fillna('').str.contains('BUY',na=False) & ~d.FINAL_ACTION.fillna('').str.contains('BLOCKED',na=False)]; assert bad.empty or (d.loc[bad.index,'QUALITY_GATE'].astype(str)=='PASS').all(), 'V2 master published BUY without PASS quality gate'; print('V2 MASTER ROWS=',len(d),'| RELEASED BUY=',len(bad))"
       - name: Repair Google Sheet Output
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
