@@ -4,6 +4,7 @@ from quality_gate import evaluate, evaluate_action, parse_action_stats, EDGE_REA
 from csv_utils import safe_to_csv, safe_read_csv
 from risk_manager import apply_risk_management
 from edge_monitor import compute_divergence
+from master_decision import build_master
 
 OUT=Path('output')
 
@@ -14,6 +15,27 @@ def _sector_map():
     df=safe_read_csv(p)
     if df.empty or 'SYMBOL' not in df.columns: return {}
     return dict(zip(df.SYMBOL.astype(str), df.SECTOR.astype(str)))
+
+
+def _write_v2_master():
+    """Always materialize the V2 master export during finalization.
+
+    The workflow validates this file immediately after finalize_outputs.py, so
+    generation must happen here rather than relying on a separate optional step.
+    """
+    src=OUT/'decision_candidates.csv'
+    if not src.exists():
+        raise RuntimeError('output/decision_candidates.csv missing; cannot build V2 master decision')
+    df=safe_read_csv(src)
+    regime=str(df.iloc[0].get('MARKET_REGIME','UNKNOWN')) if not df.empty else 'UNKNOWN'
+    master=build_master(df, regime)
+    cols=['RANK','SYMBOL','FINAL_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE',
+          'BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT',
+          'EDGE_CONFIDENCE','EDGE_CONFIDENCE_LABEL','POSITION_QTY','CAPITAL_ALLOCATED',
+          'RISK_AMOUNT','RISK_MANAGER_STATUS','QUALITY_GATE','ACTION','WHY','DECISION_REASON']
+    cols=[c for c in cols if c in master.columns]
+    safe_to_csv(master[cols],OUT/'master_buy_decision_v2.csv')
+    print('V2 MASTER READY:',len(master),'rows | output/master_buy_decision_v2.csv')
 
 
 def main():
@@ -92,6 +114,12 @@ def main():
     safe_to_csv(hunter[hunter.get('PUBLISHED_ACTION','WATCH').isin({'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'})],OUT/'buy_candidates.csv')
     stats['quality_gate']='PASS' if ok else reason
     safe_to_csv(pd.DataFrame([stats]),stats_path)
+
+    # This file is a required release artifact. Build it unconditionally from
+    # the canonical decision_candidates.csv so the validation step can never
+    # fail simply because run_v2_master.py was not invoked by the workflow.
+    _write_v2_master()
+
     print(f'FINAL QUALITY GATE={reason} | BUY PUBLISHED={int((hunter.PUBLISHED_ACTION.isin({"PRE-BREAKOUT BUY","BREAKOUT BUY","SWING BUY"})).sum()) if not hunter.empty else 0}')
 
 if __name__=='__main__': main()
