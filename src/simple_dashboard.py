@@ -1,19 +1,4 @@
-"""One single, plain-language sheet: "MERA ACTION PLAN".
-
-Every other tab in this project (Early Hunter, APEX Matrix, 52 Week Low
-Rocket, Stealth Accumulation, Dashboard...) is organised by SCANNER, in
-technical columns (DELIVERY_PCT, ATR_COMPRESSION, RESISTANCE_TESTS...). A
-non-technical user has no way to answer "so what do I actually DO today" from
-that without piecing together 5+ tabs themselves.
-
-This module builds exactly one table that answers that question directly:
-  - Naye BUY signals, from every scanner combined (not just Early Hunter)
-  - Currently open positions that should be HELD
-  - Positions that hit their stop-loss or target TODAY and should be SOLD/EXITED
-sorted so the most urgent thing (SELL/EXIT) is always at the top, in simple
-Hindi-English, with real position sizing (QTY / CAPITAL / RISK) reused from
-risk_manager.py so it's consistent with every other risk-aware output.
-"""
+"""User-facing action plan with BUY, WAIT/WATCH, HOLD and EXIT signals."""
 from __future__ import annotations
 from pathlib import Path
 import pandas as pd
@@ -24,6 +9,10 @@ from config import RISK
 OUT = Path("output")
 OPEN_STATUSES = {"OPEN", "HOLD", "T1 HIT / TRAIL", "T2 HIT / TRAIL"}
 EXIT_STATUSES = {"EXIT", "T3 HIT / EXIT"}
+BUY_LABELS = {
+    "PRE-BREAKOUT BUY", "BREAKOUT BUY", "SWING BUY", "APEX BUY", "TACTICAL BUY",
+    "BUY", "EARLY REVERSAL BUY", "STEALTH BUY"
+}
 
 
 def _read(name):
@@ -33,7 +22,7 @@ def _read(name):
 
 def _sector_map():
     df = _read("sector_map.csv")
-    if df.empty or "SYMBOL" not in df.columns:
+    if df.empty or "SYMBOL" not in df.columns or "SECTOR" not in df.columns:
         return {}
     return dict(zip(df.SYMBOL.astype(str), df.SECTOR.astype(str)))
 
@@ -46,129 +35,165 @@ def _num(v, default=0.0):
         return default
 
 
-def _sell_rows(ledger: pd.DataFrame, latest_date: str) -> pd.DataFrame:
-    """Positions whose STATUS just flipped to an exit state as of TODAY's
-    run -- these are new, actionable "sell now" alerts, not old history."""
+def _text(row, *cols, default=""):
+    for c in cols:
+        if c in row.index:
+            v = str(row[c]).strip()
+            if v and v.lower() not in {"nan", "none"}:
+                return v
+    return default
+
+
+def _sell_rows(ledger, latest_date):
     if ledger.empty or "STATUS" not in ledger.columns:
         return pd.DataFrame()
     exits = ledger[ledger.STATUS.astype(str).isin(EXIT_STATUSES)].copy()
-    if exits.empty:
-        return pd.DataFrame()
     if "EXIT_DATE" in exits.columns and latest_date:
         exits = exits[exits.EXIT_DATE.astype(str) == str(latest_date)]
     if exits.empty:
         return pd.DataFrame()
-    entry = exits["ENTRY"].apply(_num)
-    exitp = exits["EXIT_PRICE"].apply(_num)
-    pnl_pct = ((exitp - entry) / entry.replace(0, pd.NA) * 100).round(2)
+    entry = exits.get("ENTRY", 0).apply(_num)
+    exitp = exits.get("EXIT_PRICE", 0).apply(_num)
+    pnl = ((exitp - entry) / entry.replace(0, pd.NA) * 100).round(2)
     return pd.DataFrame({
-        "SYMBOL": exits["SYMBOL"],
-        "KYA KARU": "🔴 BECHO / EXIT KARO",
-        "PRIORITY": 1,
-        "PRICE": exitp,
-        "QTY": exits.get("POSITION_QTY", 0),
-        "STOP LOSS": exits.get("STOP_LOSS", ""),
-        "TARGET": "",
-        "PROFIT/LOSS %": pnl_pct,
-        "WHY": "Reason: " + exits.get("EXIT_REASON", "").astype(str),
+        "SYMBOL": exits["SYMBOL"], "KYA KARU": "🔴 BECHO / EXIT KARO", "PRIORITY": 1,
+        "PRICE": exitp, "QTY": exits.get("POSITION_QTY", 0),
+        "STOP LOSS": exits.get("STOP_LOSS", ""), "TARGET": "", "PROFIT/LOSS %": pnl,
+        "WHY": "Reason: " + exits.get("EXIT_REASON", "").astype(str)
     })
 
 
-def _hold_rows(ledger: pd.DataFrame) -> pd.DataFrame:
+def _hold_rows(ledger):
     if ledger.empty or "STATUS" not in ledger.columns:
         return pd.DataFrame()
     open_ = ledger[ledger.STATUS.astype(str).isin(OPEN_STATUSES)].copy()
     if open_.empty:
         return pd.DataFrame()
-    entry = open_["ENTRY"].apply(_num)
-    cmp_ = open_["LAST_CLOSE"].apply(_num)
-    pnl_pct = ((cmp_ - entry) / entry.replace(0, pd.NA) * 100).round(2)
-    status_label = open_["STATUS"].map({
+    entry = open_.get("ENTRY", 0).apply(_num)
+    cmp_ = open_.get("LAST_CLOSE", 0).apply(_num)
+    pnl = ((cmp_ - entry) / entry.replace(0, pd.NA) * 100).round(2)
+    labels = open_["STATUS"].map({
         "OPEN": "🟡 HOLD RAKHO (naya)", "HOLD": "🟡 HOLD RAKHO",
         "T1 HIT / TRAIL": "🟡 HOLD RAKHO (Target 1 ho gaya)",
-        "T2 HIT / TRAIL": "🟡 HOLD RAKHO (Target 2 ho gaya)",
+        "T2 HIT / TRAIL": "🟡 HOLD RAKHO (Target 2 ho gaya)"
     }).fillna("🟡 HOLD RAKHO")
     return pd.DataFrame({
-        "SYMBOL": open_["SYMBOL"],
-        "KYA KARU": status_label,
-        "PRIORITY": 3,
-        "PRICE": cmp_,
-        "QTY": open_.get("POSITION_QTY", 0),
-        "STOP LOSS": open_.get("STOP_LOSS", ""),
-        "TARGET": open_.get("TARGET_1", ""),
-        "PROFIT/LOSS %": pnl_pct,
-        "WHY": "Entry price tha " + entry.round(2).astype(str),
+        "SYMBOL": open_["SYMBOL"], "KYA KARU": labels, "PRIORITY": 3,
+        "PRICE": cmp_, "QTY": open_.get("POSITION_QTY", 0),
+        "STOP LOSS": open_.get("STOP_LOSS", ""), "TARGET": open_.get("TARGET_1", ""),
+        "PROFIT/LOSS %": pnl, "WHY": "Entry price tha " + entry.round(2).astype(str)
     })
 
 
-def _buy_rows(master: pd.DataFrame, ledger: pd.DataFrame, sector_map: dict) -> pd.DataFrame:
-    """Every scanner's PUBLISHED buy, combined, then sized through
-    risk_manager.py against whatever is ALREADY open in the ledger -- so this
-    is portfolio-aware across ALL scanners together, not just one at a time."""
-    if master.empty:
+def _buy_rows(master, ledger, sector_map):
+    if master.empty or "SYMBOL" not in master.columns:
         return pd.DataFrame()
-    already_open = set(ledger[ledger.STATUS.astype(str).isin(OPEN_STATUSES)].SYMBOL.astype(str)) if not ledger.empty and "STATUS" in ledger.columns else set()
-    m = master[~master.SYMBOL.astype(str).isin(already_open)].copy()  # don't suggest buying something you already hold
+    already = set(ledger[ledger.STATUS.astype(str).isin(OPEN_STATUSES)].SYMBOL.astype(str)) if not ledger.empty and "STATUS" in ledger.columns and "SYMBOL" in ledger.columns else set()
+    m = master.copy()
+    signal_col = next((c for c in ("SIGNAL_TYPE", "PUBLISHED_ACTION", "ACTION", "SIGNAL", "FINAL_ACTION") if c in m.columns), None)
+    if signal_col:
+        m = m[m[signal_col].astype(str).str.upper().isin(BUY_LABELS)].copy()
     if m.empty:
         return pd.DataFrame()
-    # master_buy_dashboard.csv has one row PER SOURCE (Early Hunter, APEX
-    # Matrix, ...) for confluence tracking -- dedupe to one row per SYMBOL
-    # here, or a stock with 2+ agreeing scanners would get sized/suggested
-    # as two separate "buy" rows and silently eat the portfolio risk budget
-    # twice for the same position.
-    m = m.sort_values("CONFLUENCE_COUNT", ascending=False).drop_duplicates("SYMBOL", keep="first")
+    m = m[~m.SYMBOL.astype(str).isin(already)].copy()
+    if m.empty:
+        return pd.DataFrame()
+    if "CONFLUENCE_COUNT" in m.columns:
+        m = m.sort_values("CONFLUENCE_COUNT", ascending=False)
+    m = m.drop_duplicates("SYMBOL", keep="first")
+    entry_col = "ENTRY" if "ENTRY" in m.columns else "IDEAL_ENTRY"
     sizing_input = pd.DataFrame({
         "SYMBOL": m["SYMBOL"], "ACTION": "PRE-BREAKOUT BUY", "QUALITY_GATE": "PASS",
-        "IDEAL_ENTRY": m["ENTRY"].apply(_num), "STOP_LOSS": m["STOP_LOSS"].apply(_num),
+        "IDEAL_ENTRY": m[entry_col].apply(_num), "STOP_LOSS": m.get("STOP_LOSS", 0).apply(_num)
     })
     sized = apply_risk_management(sizing_input, ledger, sector_map)
-    sized = sized.merge(m[["SYMBOL", "SOURCE", "TARGET_1", "CONFLUENCE_COUNT", "ALL_SOURCES"]], on="SYMBOL", how="left")
-    label = sized["RISK_MANAGER_STATUS"].apply(
-        lambda s: "🟢 KHARIDO" if s == "PASS" else "⚪ WAIT (risk limit ke wajah se)")
-    why = "Signal: " + sized["ALL_SOURCES"].astype(str)
-    conf = sized["CONFLUENCE_COUNT"].fillna(1).astype(int)
-    why = why.where(conf <= 1, why + " (" + conf.astype(str) + " scanners agree)")
+    keep = [c for c in ("SYMBOL", "SOURCE", "TARGET_1", "CONFLUENCE_COUNT", "ALL_SOURCES") if c in m.columns]
+    if keep:
+        sized = sized.merge(m[keep], on="SYMBOL", how="left")
+    label = sized["RISK_MANAGER_STATUS"].apply(lambda s: "🟢 KHARIDO" if s == "PASS" else "⚪ WAIT (risk limit)")
+    sources = sized.get("ALL_SOURCES", pd.Series("BUY SIGNAL", index=sized.index)).astype(str)
     return pd.DataFrame({
-        "SYMBOL": sized["SYMBOL"],
-        "KYA KARU": label,
+        "SYMBOL": sized["SYMBOL"], "KYA KARU": label,
         "PRIORITY": sized["RISK_MANAGER_STATUS"].apply(lambda s: 2 if s == "PASS" else 4),
-        "PRICE": sized["IDEAL_ENTRY"],
-        "QTY": sized["POSITION_QTY"],
-        "STOP LOSS": sized["STOP_LOSS"],
-        "TARGET": sized["TARGET_1"],
-        "PROFIT/LOSS %": "",
-        "WHY": why,
+        "PRICE": sized["IDEAL_ENTRY"], "QTY": sized["POSITION_QTY"],
+        "STOP LOSS": sized["STOP_LOSS"], "TARGET": sized.get("TARGET_1", ""),
+        "PROFIT/LOSS %": "", "WHY": "Signal: " + sources
     })
 
 
-def build_action_plan() -> pd.DataFrame:
+def _watch_rows(master, decision, ledger):
+    """Show useful candidates even when there are no confirmed BUYs.
+    WATCH/WAIT rows never receive position sizing and are never relabeled BUY.
+    """
+    src = decision if not decision.empty else master
+    if src.empty or "SYMBOL" not in src.columns:
+        return pd.DataFrame()
+    already = set(ledger[ledger.STATUS.astype(str).isin(OPEN_STATUSES)].SYMBOL.astype(str)) if not ledger.empty and "STATUS" in ledger.columns and "SYMBOL" in ledger.columns else set()
+    rows = src[~src.SYMBOL.astype(str).isin(already)].copy()
+    action_col = next((c for c in ("FINAL_ACTION", "ACTION", "PUBLISHED_ACTION", "SIGNAL", "USER_ACTION") if c in rows.columns), None)
+    if action_col:
+        actions = rows[action_col].astype(str).str.upper()
+        rows = rows[~actions.isin(BUY_LABELS)].copy()
+    if rows.empty:
+        return pd.DataFrame()
+    score_cols = [c for c in ("V3_OPPORTUNITY_SCORE", "V3_TIMING_SCORE", "NEXT_DAY_SETUP_SCORE", "HUNTER_SCORE", "SCORE") if c in rows.columns]
+    if score_cols:
+        rows["_score"] = rows[score_cols].apply(pd.to_numeric, errors="coerce").max(axis=1).fillna(0)
+        rows = rows.sort_values("_score", ascending=False)
+    rows = rows.drop_duplicates("SYMBOL", keep="first").head(15)
+    out = []
+    for _, r in rows.iterrows():
+        action = _text(r, "USER_ACTION", "FINAL_ACTION", "ACTION", "PUBLISHED_ACTION", "SIGNAL", default="WATCH")
+        upper = action.upper()
+        if "WAIT" in upper or "TRIGGER" in upper or "READY" in upper:
+            label = "🟡 WAIT / TRIGGER KA WAIT"
+        else:
+            label = "🔵 WATCH"
+        price = _text(r, "CMP", "CURRENT_PRICE", "LTP", "CLOSE", "ENTRY", "IDEAL_ENTRY", default="")
+        entry = _text(r, "IDEAL_ENTRY", "ENTRY", default=price)
+        stop = _text(r, "STOP_LOSS", "STOP", default="")
+        target = _text(r, "TARGET_1", "TARGET", default="")
+        score = _text(r, *score_cols, default="") if score_cols else ""
+        why = "Action: " + action
+        if score:
+            why += " | Score: " + score
+        trigger = _text(r, "BREAKOUT_TRIGGER", "TRIGGER_PRICE", default="")
+        if trigger:
+            why += " | Trigger: " + trigger
+        out.append({"SYMBOL": str(r["SYMBOL"]), "KYA KARU": label, "PRIORITY": 4 if label.startswith("🟡") else 5,
+                    "PRICE": _num(price, default=0) if price else "", "QTY": "", "STOP LOSS": stop,
+                    "TARGET": target, "PROFIT/LOSS %": "", "WHY": why})
+    return pd.DataFrame(out)
+
+
+def build_action_plan():
     ledger = _read("trade_ledger.csv")
     master = _read("master_buy_dashboard.csv")
+    decision = _read("decision_candidates.csv")
     latest = _read("latest_market.csv")
     latest_date = str(latest["DATE"].iloc[0]) if not latest.empty and "DATE" in latest.columns else ""
     sector_map = _sector_map()
-
     sell = _sell_rows(ledger, latest_date)
-    hold = _hold_rows(ledger)
     buy = _buy_rows(master, ledger, sector_map)
-
-    parts = [p for p in (sell, buy, hold) if not p.empty]
+    watch = _watch_rows(master, decision, ledger)
+    hold = _hold_rows(ledger)
+    parts = [p for p in (sell, buy, watch, hold) if not p.empty]
+    columns = ["SYMBOL", "KYA KARU", "PRICE", "QTY", "STOP LOSS", "TARGET", "PROFIT/LOSS %", "WHY", "MODE"]
     if not parts:
-        return pd.DataFrame(columns=["SYMBOL", "KYA KARU", "PRICE", "QTY", "STOP LOSS", "TARGET", "PROFIT/LOSS %", "WHY", "MODE"])
+        return pd.DataFrame(columns=columns)
     plan = pd.concat(parts, ignore_index=True)
     plan = plan.sort_values(["PRIORITY", "SYMBOL"]).reset_index(drop=True)
     plan["MODE"] = "PAPER" if RISK.paper_mode else "LIVE"
     plan = plan.drop(columns=["PRIORITY"])
     for c in ("PRICE", "STOP LOSS", "TARGET", "QTY"):
         plan[c] = pd.to_numeric(plan[c], errors="coerce").round(2)
-    return plan
+    return plan[columns]
 
 
 def main():
     plan = build_action_plan()
     safe_to_csv(plan, OUT / "mera_action_plan.csv")
-    counts = plan["KYA KARU"].value_counts().to_dict() if not plan.empty else {}
-    print(f"MERA ACTION PLAN ready: {len(plan)} rows | {counts}")
+    print(f"MERA ACTION PLAN ready: {len(plan)} rows")
     if not plan.empty:
         print(plan.to_string(index=False))
 
