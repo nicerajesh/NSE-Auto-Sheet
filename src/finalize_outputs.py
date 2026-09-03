@@ -8,6 +8,13 @@ from master_decision import build_master
 
 OUT=Path('output')
 
+V2_COLUMNS = [
+    'RANK','SYMBOL','FINAL_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE',
+    'BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT',
+    'EDGE_CONFIDENCE','EDGE_CONFIDENCE_LABEL','POSITION_QTY','CAPITAL_ALLOCATED',
+    'RISK_AMOUNT','RISK_MANAGER_STATUS','QUALITY_GATE','ACTION','WHY','DECISION_REASON'
+]
+
 
 def _sector_map():
     p=OUT/'sector_map.csv'
@@ -18,24 +25,28 @@ def _sector_map():
 
 
 def _write_v2_master():
-    """Always materialize the V2 master export during finalization.
-
-    The workflow validates this file immediately after finalize_outputs.py, so
-    generation must happen here rather than relying on a separate optional step.
-    """
+    """Always materialize the V2 master export with the complete release schema."""
     src=OUT/'decision_candidates.csv'
     if not src.exists():
         raise RuntimeError('output/decision_candidates.csv missing; cannot build V2 master decision')
     df=safe_read_csv(src)
     regime=str(df.iloc[0].get('MARKET_REGIME','UNKNOWN')) if not df.empty else 'UNKNOWN'
     master=build_master(df, regime)
-    cols=['RANK','SYMBOL','FINAL_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE',
-          'BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT',
-          'EDGE_CONFIDENCE','EDGE_CONFIDENCE_LABEL','POSITION_QTY','CAPITAL_ALLOCATED',
-          'RISK_AMOUNT','RISK_MANAGER_STATUS','QUALITY_GATE','ACTION','WHY','DECISION_REASON']
-    cols=[c for c in cols if c in master.columns]
-    safe_to_csv(master[cols],OUT/'master_buy_decision_v2.csv')
-    print('V2 MASTER READY:',len(master),'rows | output/master_buy_decision_v2.csv')
+    for col in V2_COLUMNS:
+        if col not in master.columns:
+            if col == 'QUALITY_GATE':
+                master[col] = 'PASS' if master.empty else 'BLOCK'
+            elif col == 'FINAL_ACTION':
+                master[col] = 'NO SETUP'
+            elif col == 'ACTION':
+                master[col] = 'WATCH'
+            elif col == 'EDGE_CONFIDENCE_LABEL':
+                master[col] = 'UNKNOWN'
+            else:
+                master[col] = pd.NA
+    master=master[V2_COLUMNS]
+    safe_to_csv(master,OUT/'master_buy_decision_v2.csv')
+    print('V2 MASTER READY:',len(master),'rows | output/master_buy_decision_v2.csv | QUALITY_GATE=',master['QUALITY_GATE'].value_counts(dropna=False).to_dict())
 
 
 def main():
@@ -49,7 +60,6 @@ def main():
     cal=safe_read_csv(cal_path) if cal_path.exists() else pd.DataFrame()
     ok,reason=evaluate(stats,cal)
     hunter['QUALITY_GATE']='PASS' if ok else reason
-    # Historical event confidence is used only when a bucket has enough observations.
     def confidence(r):
         try: score=float(r.get('PRE_BREAKOUT_SCORE',r.get('HUNTER_SCORE',0)))
         except Exception: score=0
@@ -62,13 +72,6 @@ def main():
         try:return min(90.0,max(0.0,float(r.get('BREAKOUT_PROBABILITY',0))))
         except Exception:return 0.0
     hunter['BREAKOUT_CONFIDENCE']=hunter.apply(confidence,axis=1) if not hunter.empty else pd.Series(dtype=float)
-    # Never publish a model BUY when the historical quality gate fails — but a
-    # systemic-vs-edge distinction matters: if the aggregate fails because the
-    # blended profit-factor/win-rate/median is weak (usually the high-volume SWING
-    # BUY category dragging the average down), gate PRE-BREAKOUT/BREAKOUT/SWING
-    # independently on their own trade samples instead of blocking all three
-    # together. A data-integrity failure (bad calibration, too few total trades)
-    # still blocks everything, since that's a systemic problem, not one action's.
     action_stats={a.get('ACTION'):a for a in parse_action_stats(stats)}
     per_action_verdict={}
     if not ok and reason in EDGE_REASONS:
@@ -91,9 +94,6 @@ def main():
     else:
         hunter['QUALITY_GATE']=pd.Series(dtype=object);hunter['PUBLISHED_ACTION']=pd.Series(dtype=object)
 
-    # Money-management overlay: sizes every published BUY against real
-    # capital/risk caps and the live drawdown kill-switch (risk_manager.py).
-    # Purely additive -- never un-blocks anything quality_gate blocked above.
     ledger=safe_read_csv(OUT/'trade_ledger.csv') if (OUT/'trade_ledger.csv').exists() else pd.DataFrame()
     hunter=apply_risk_management(hunter,ledger,_sector_map())
     if not hunter.empty and 'RISK_MANAGER_STATUS' in hunter.columns:
@@ -102,8 +102,6 @@ def main():
             print(f"RISK MANAGER: {int(rblocked.sum())} signal(s) cleared the quality gate but were blocked on money-management grounds (position caps / drawdown kill-switch) — see RISK_MANAGER_STATUS")
             hunter.loc[rblocked,'PUBLISHED_ACTION']='RISK BLOCKED (' + hunter.loc[rblocked,'RISK_MANAGER_STATUS'].astype(str) + ')'
 
-    # Live-vs-backtest edge monitor: does real, realised performance still
-    # match what the backtest promised? Purely diagnostic, blocks nothing.
     edge=compute_divergence(ledger,stats)
     safe_to_csv(edge,OUT/'edge_monitor.csv')
     decaying=edge[edge.get('EDGE_STATUS','')=='EDGE_DECAY_WARNING'] if not edge.empty else pd.DataFrame()
@@ -114,12 +112,7 @@ def main():
     safe_to_csv(hunter[hunter.get('PUBLISHED_ACTION','WATCH').isin({'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'})],OUT/'buy_candidates.csv')
     stats['quality_gate']='PASS' if ok else reason
     safe_to_csv(pd.DataFrame([stats]),stats_path)
-
-    # This file is a required release artifact. Build it unconditionally from
-    # the canonical decision_candidates.csv so the validation step can never
-    # fail simply because run_v2_master.py was not invoked by the workflow.
     _write_v2_master()
-
     print(f'FINAL QUALITY GATE={reason} | BUY PUBLISHED={int((hunter.PUBLISHED_ACTION.isin({"PRE-BREAKOUT BUY","BREAKOUT BUY","SWING BUY"})).sum()) if not hunter.empty else 0}')
 
 if __name__=='__main__': main()
