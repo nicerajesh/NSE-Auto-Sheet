@@ -47,12 +47,8 @@ jobs:
       - name: Validate Secrets
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           test -n "$GCP_CREDENTIALS" || (echo 'GCP_CREDENTIALS missing' && exit 1)
-          test -n "$CLOUDFLARE_API_TOKEN" || (echo 'CLOUDFLARE_API_TOKEN missing' && exit 1)
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo 'CLOUDFLARE_ACCOUNT_ID missing' && exit 1)
       - name: Prepare Output
         run: |
           rm -rf "$NSE_OUTPUT_DIR"
@@ -81,9 +77,6 @@ jobs:
       - name: Run V3 Persistent NSE Engine
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          D1_DATABASE_ID: e6652e85-b927-4f11-b790-45fb6ee818f2
           HISTORY_DAYS: 480
           WATCH_MIN_SCORE: 75
           PERSISTENT_D1: '0'
@@ -95,12 +88,20 @@ jobs:
       - name: Guarantee Early Hunter CSV
         run: |
           mkdir -p output
-          if [ ! -f output/early_hunter.csv ]; then
-            echo 'WARNING: early_hunter.csv missing after engine; creating canonical empty CSV.'
-            printf '%s\n' 'SYMBOL,DATE,CMP,ACTION,CATEGORY,NEXT_DAY_ACTION,BUY_DATE,STAGE,PRE_BREAKOUT_SCORE,BREAKOUT_SCORE,SWING_SCORE,HUNTER_SCORE,NEXT_DAY_SETUP_SCORE,BREAKOUT_PROBABILITY,MARKET_REGIME,MARKET_BREADTH,TREND,RS_VS_UNIVERSE,RS_RANK,ENTRY_PRICE,ENTRY_ZONE,BREAKOUT_TRIGGER,STOP_LOSS,TARGET_1,TARGET_2,TARGET_3,RISK_PCT,RISK_MANAGER_STATUS,REASONS' > output/early_hunter.csv
+          if [ ! -s output/early_hunter.csv ]; then
+            echo 'WARNING: early_hunter.csv missing/empty after engine.'
+            if [ -s output/decision_candidates.csv ]; then
+              echo 'Using decision_candidates.csv as the emergency Early Hunter export.'
+              cp output/decision_candidates.csv output/early_hunter.csv
+            else
+              echo 'No decision_candidates.csv available; creating canonical empty Early Hunter CSV.'
+              printf '%s\n' 'SYMBOL,DATE,CMP,ACTION,CATEGORY,NEXT_DAY_ACTION,BUY_DATE,STAGE,PRE_BREAKOUT_SCORE,BREAKOUT_SCORE,SWING_SCORE,HUNTER_SCORE,NEXT_DAY_SETUP_SCORE,BREAKOUT_PROBABILITY,MARKET_REGIME,MARKET_BREADTH,TREND,RS_VS_UNIVERSE,RS_RANK,ENTRY_PRICE,ENTRY_ZONE,BREAKOUT_TRIGGER,STOP_LOSS,TARGET_1,TARGET_2,TARGET_3,RISK_PCT,RISK_MANAGER_STATUS,REASONS' > output/early_hunter.csv
+            fi
           fi
           test -s output/early_hunter.csv
           echo "EARLY_HUNTER_OUTPUT=$(realpath output/early_hunter.csv)"
+          echo '=== OUTPUT FILES AFTER ENGINE ==='
+          find output -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
       - name: Validate Persistent History
         run: |
           test -f output/persistent_history.csv
@@ -120,17 +121,16 @@ jobs:
           key: nse-persistent-history-v1-${{ github.run_id }}
       - name: Validate Decision Outputs
         run: |
-          test -f output/early_hunter.csv
-          test -f output/buy_candidates.csv
-          test -f output/decision_candidates.csv
-          test -f output/trading_commands.csv
-          test -f output/master_buy_decision_v2.csv
-          test -f output/low52_reversal.csv
-          test -f output/apex_matrix.csv
-          test -f output/stealth_accumulation.csv
-          test -f output/low52_backtest_summary.csv
-          test -f output/apex_backtest_summary.csv
-          test -f output/stealth_backtest_summary.csv
+          set -e
+          required_files=(early_hunter.csv buy_candidates.csv decision_candidates.csv trading_commands.csv master_buy_decision_v2.csv low52_reversal.csv apex_matrix.csv stealth_accumulation.csv low52_backtest_summary.csv apex_backtest_summary.csv stealth_backtest_summary.csv)
+          for f in "${required_files[@]}"; do
+            if [ ! -s "output/$f" ]; then
+              echo "MISSING_OR_EMPTY: output/$f"
+              echo '=== OUTPUT DIRECTORY ==='
+              ls -lah output || true
+              exit 1
+            fi
+          done
           python - <<'PY'
           import pandas as pd
           e=pd.read_csv('output/early_hunter.csv')
@@ -180,23 +180,8 @@ jobs:
         run: python src/dashboard.py
       - name: Verify Outputs
         run: |
-          test -f output/early_hunter.csv
-          test -f output/buy_candidates.csv
-          test -f output/dashboard.csv
-          test -f output/trade_ledger.csv
-          test -f output/decision_candidates.csv
-          test -f output/trading_commands.csv
-          test -f output/low52_reversal.csv
-          test -f output/apex_matrix.csv
-          test -f output/stealth_accumulation.csv
-          test -f output/master_buy_dashboard.csv
-          test -f output/low52_backtest_summary.csv
-          test -f output/apex_backtest_summary.csv
-          test -f output/stealth_backtest_summary.csv
-          test -f output/edge_monitor.csv
-          test -f output/walk_forward_summary.csv
-          test -f output/corporate_actions_detected.csv
-          test -f output/mera_action_plan.csv
+          required_files=(early_hunter.csv buy_candidates.csv dashboard.csv trade_ledger.csv decision_candidates.csv trading_commands.csv low52_reversal.csv apex_matrix.csv stealth_accumulation.csv master_buy_dashboard.csv low52_backtest_summary.csv apex_backtest_summary.csv stealth_backtest_summary.csv edge_monitor.csv walk_forward_summary.csv corporate_actions_detected.csv mera_action_plan.csv)
+          for f in "${required_files[@]}"; do test -s "output/$f" || { echo "MISSING_OR_EMPTY: output/$f"; ls -lah output || true; exit 1; }; done
       - name: Show Master Buy Dashboard
         run: |
           python - <<'PY'
@@ -251,8 +236,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — skipping failure alert. Add them as repo secrets to enable."
+            echo "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — skipping failure alert."
             exit 0
           fi
           MSG="NSE Auto Sheet run FAILED: ${{ github.repository }} @ ${{ github.sha }} — https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" || true
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$MSG" || true
