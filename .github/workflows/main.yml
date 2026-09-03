@@ -37,7 +37,7 @@ jobs:
       - name: Verify Engine
         run: |
           echo "COMMIT=$(git rev-parse HEAD)"
-          PYTHONPATH=src python -m py_compile src/config.py src/indicator.py src/strategy.py src/backtest.py src/quality_gate.py src/d1_database.py src/trade_manager.py src/persistent_runner.py src/persistent_runner_safe.py src/v3_engine.py src/v3_runner.py src/decision_engine.py src/v3_dashboard.py src/update_sheet.py src/finalize_outputs.py src/dashboard.py src/repair_sheet_output.py src/fast_model_cache.py tests/test_system.py src/csv_utils.py src/risk_manager.py src/corporate_actions.py src/edge_monitor.py src/master_decision.py src/run_v2_master.py src/simple_dashboard.py
+          PYTHONPATH=src python -m py_compile src/config.py src/indicator.py src/strategy.py src/backtest.py src/quality_gate.py src/d1_database.py src/trade_manager.py src/persistent_runner.py src/persistent_runner_safe.py src/v3_engine.py src/v3_runner.py src/decision_engine.py src/v3_dashboard.py src/update_sheet.py src/finalize_outputs.py src/dashboard.py src/repair_sheet_output.py src/fast_model_cache.py src/apply_fast_mode.py src/ensure_action_plan.py tests/test_system.py src/csv_utils.py src/risk_manager.py src/corporate_actions.py src/edge_monitor.py src/master_decision.py src/run_v2_master.py src/simple_dashboard.py
       - name: Unit Tests
         run: PYTHONPATH=src pytest -q tests/test_system.py
       - name: Validate Secrets
@@ -71,6 +71,8 @@ jobs:
           test -f src/repair_sheet_output.py
           test -f src/simple_dashboard.py
           test -f src/fast_model_cache.py
+          test -f src/apply_fast_mode.py
+          test -f src/ensure_action_plan.py
       - name: Prepare Universal Source Compatibility
         run: cp src/update_sheet.py update_sheet.py
       - name: Select Daily Fast Mode
@@ -161,6 +163,11 @@ jobs:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           PYTHONUNBUFFERED: '1'
         run: python src/repair_sheet_output.py
+      - name: Ensure Actionable Sheet When Main Plan Is Empty
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          PYTHONUNBUFFERED: '1'
+        run: python src/ensure_action_plan.py
       - name: Build Trading Dashboard
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
