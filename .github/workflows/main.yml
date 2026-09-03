@@ -119,6 +119,8 @@ jobs:
         with:
           path: output/persistent_history.csv
           key: nse-persistent-history-v1-${{ github.run_id }}
+      - name: Finalize Quality Gate and Outputs
+        run: python src/finalize_outputs.py
       - name: Validate Decision Outputs
         run: |
           set -e
@@ -140,9 +142,11 @@ jobs:
           lb=pd.read_csv('output/low52_backtest_summary.csv')
           ab=pd.read_csv('output/apex_backtest_summary.csv')
           sb=pd.read_csv('output/stealth_backtest_summary.csv')
+          m=pd.read_csv('output/master_buy_decision_v2.csv')
           print('EARLY_HUNTER_ROWS=',len(e))
           print('DECISION_ROWS=',len(d))
           print('TRADING_COMMAND_ROWS=',len(c))
+          print('V2_MASTER_ROWS=',len(m))
           print('LOW52_REVERSAL_ROWS=',len(l))
           print('LOW52_BACKTEST_TRADES=',lb.get('trades',[0])[0] if not lb.empty else 0, '| PF=',lb.get('profit_factor',[None])[0] if not lb.empty else None)
           print('APEX_BACKTEST_TRADES=',ab.get('trades',[0])[0] if not ab.empty else 0, '| PF=',ab.get('profit_factor',[None])[0] if not ab.empty else None)
@@ -152,8 +156,6 @@ jobs:
           if missing: raise SystemExit('Missing decision fields: '+','.join(missing))
           if not c.empty: print(c.head(15).to_string(index=False))
           PY
-      - name: Finalize Quality Gate and Outputs
-        run: python src/finalize_outputs.py
       - name: Validate V2 Master Decision
         run: |
           test -f output/master_buy_decision_v2.csv
