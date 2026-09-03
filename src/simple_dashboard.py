@@ -9,7 +9,7 @@ from config import RISK
 OUT = Path("output")
 OPEN_STATUSES = {"OPEN", "HOLD", "T1 HIT / TRAIL", "T2 HIT / TRAIL"}
 EXIT_STATUSES = {"EXIT", "T3 HIT / EXIT"}
-BUY_LABELS = {"PRE-BREAKOUT BUY", "BREAKOUT BUY", "SWING BUY", "APEX BUY", "TACTICAL BUY", "BUY", "EARLY REVERSAL BUY", "STEALTH BUY"}
+BUY_SETUP_TYPES = {"BUY"}
 
 
 def _read(name):
@@ -45,6 +45,12 @@ def _col(df, name, default=""):
     return df[name] if name in df.columns else pd.Series(default, index=df.index)
 
 
+def _open_symbols(ledger):
+    if ledger.empty or "STATUS" not in ledger.columns or "SYMBOL" not in ledger.columns:
+        return set()
+    return set(ledger[ledger.STATUS.astype(str).isin(OPEN_STATUSES)].SYMBOL.astype(str))
+
+
 def _sell_rows(ledger, latest_date):
     if ledger.empty or "STATUS" not in ledger.columns:
         return pd.DataFrame()
@@ -78,66 +84,65 @@ def _hold_rows(ledger):
 
 
 def _buy_rows(master, ledger, sector_map):
-    if master.empty or "SYMBOL" not in master.columns:
+    if master.empty or "SYMBOL" not in master.columns or "SIGNAL_TYPE" not in master.columns:
         return pd.DataFrame()
-    already = set(ledger[ledger.STATUS.astype(str).isin(OPEN_STATUSES)].SYMBOL.astype(str)) if not ledger.empty and "STATUS" in ledger.columns and "SYMBOL" in ledger.columns else set()
-    m = master.copy()
-    signal_col = next((c for c in ("SIGNAL_TYPE", "PUBLISHED_ACTION", "ACTION", "SIGNAL", "FINAL_ACTION") if c in m.columns), None)
-    if signal_col:
-        m = m[m[signal_col].astype(str).str.upper().isin(BUY_LABELS)].copy()
+    already = _open_symbols(ledger)
+    m = master[master["SIGNAL_TYPE"].astype(str).str.upper().eq("BUY")].copy()
     if m.empty:
         return pd.DataFrame()
     m = m[~m.SYMBOL.astype(str).isin(already)].copy()
     if m.empty:
         return pd.DataFrame()
-    if "CONFLUENCE_COUNT" in m.columns:
-        m = m.sort_values("CONFLUENCE_COUNT", ascending=False)
+    if "RANK" in m.columns:
+        m = m.sort_values("RANK")
     m = m.drop_duplicates("SYMBOL", keep="first")
-    entry_col = "ENTRY" if "ENTRY" in m.columns else "IDEAL_ENTRY"
+    entry = _col(m, "IDEAL_ENTRY", 0).apply(_num)
     stop = _col(m, "STOP_LOSS", 0).apply(_num)
     sizing_input = pd.DataFrame({"SYMBOL": m["SYMBOL"], "ACTION": "PRE-BREAKOUT BUY", "QUALITY_GATE": "PASS",
-        "IDEAL_ENTRY": _col(m, entry_col, 0).apply(_num), "STOP_LOSS": stop})
+        "IDEAL_ENTRY": entry, "STOP_LOSS": stop})
     sized = apply_risk_management(sizing_input, ledger, sector_map)
-    keep = [c for c in ("SYMBOL", "SOURCE", "TARGET_1", "CONFLUENCE_COUNT", "ALL_SOURCES") if c in m.columns]
+    keep = [c for c in ("SOURCE", "TARGET_1", "CONFLUENCE_COUNT", "ALL_SOURCES", "FINAL_ACTION", "DECISION_REASON") if c in m.columns]
     if keep:
-        sized = sized.merge(m[keep], on="SYMBOL", how="left")
+        sized = sized.merge(m[["SYMBOL"] + keep], on="SYMBOL", how="left")
     label = sized["RISK_MANAGER_STATUS"].apply(lambda s: "🟢 KHARIDO" if s == "PASS" else "⚪ WAIT (risk limit)")
-    sources = sized["ALL_SOURCES"].astype(str) if "ALL_SOURCES" in sized.columns else pd.Series("BUY SIGNAL", index=sized.index)
+    reason = sized.get("DECISION_REASON", pd.Series("V2 BUY decision", index=sized.index)).astype(str)
     return pd.DataFrame({"SYMBOL": sized["SYMBOL"], "KYA KARU": label,
         "PRIORITY": sized["RISK_MANAGER_STATUS"].apply(lambda s: 2 if s == "PASS" else 4),
         "PRICE": sized["IDEAL_ENTRY"], "QTY": sized["POSITION_QTY"], "STOP LOSS": sized["STOP_LOSS"],
-        "TARGET": _col(sized, "TARGET_1", ""), "PROFIT/LOSS %": "", "WHY": "Signal: " + sources})
+        "TARGET": _col(sized, "TARGET_1", ""), "PROFIT/LOSS %": "", "WHY": reason})
 
 
 def _watch_rows(master, decision, ledger):
-    src = decision if not decision.empty else master
+    src = master if not master.empty else decision
     if src.empty or "SYMBOL" not in src.columns:
         return pd.DataFrame()
-    already = set(ledger[ledger.STATUS.astype(str).isin(OPEN_STATUSES)].SYMBOL.astype(str)) if not ledger.empty and "STATUS" in ledger.columns and "SYMBOL" in ledger.columns else set()
+    already = _open_symbols(ledger)
     rows = src[~src.SYMBOL.astype(str).isin(already)].copy()
-    action_col = next((c for c in ("FINAL_ACTION", "ACTION", "PUBLISHED_ACTION", "SIGNAL", "USER_ACTION") if c in rows.columns), None)
-    if action_col:
-        rows = rows[~rows[action_col].astype(str).str.upper().isin(BUY_LABELS)].copy()
+    if "SIGNAL_TYPE" in rows.columns:
+        rows = rows[rows["SIGNAL_TYPE"].astype(str).str.upper().isin({"WAIT", "WATCH"})].copy()
+    else:
+        action_col = next((c for c in ("FINAL_ACTION", "ACTION", "PUBLISHED_ACTION", "SIGNAL", "USER_ACTION") if c in rows.columns), None)
+        if action_col:
+            action = rows[action_col].astype(str).str.upper()
+            rows = rows[~action.str.contains("BUY ON BREAKOUT|BUY ON PULLBACK|BUY ON TRIGGER", regex=True, na=False)].copy()
     if rows.empty:
         return pd.DataFrame()
-    score_cols = [c for c in ("V3_OPPORTUNITY_SCORE", "V3_TIMING_SCORE", "NEXT_DAY_SETUP_SCORE", "HUNTER_SCORE", "SCORE") if c in rows.columns]
+    score_cols = [c for c in ("HUNTER_SCORE", "V3_OPPORTUNITY_SCORE", "V3_TIMING_SCORE", "NEXT_DAY_SETUP_SCORE", "SCORE") if c in rows.columns]
     if score_cols:
         rows["_score"] = rows[score_cols].apply(pd.to_numeric, errors="coerce").max(axis=1).fillna(0)
         rows = rows.sort_values("_score", ascending=False)
     rows = rows.drop_duplicates("SYMBOL", keep="first").head(15)
     out = []
     for _, r in rows.iterrows():
-        action = _text(r, "USER_ACTION", "FINAL_ACTION", "ACTION", "PUBLISHED_ACTION", "SIGNAL", default="WATCH")
+        action = _text(r, "FINAL_ACTION", "USER_ACTION", "ACTION", "PUBLISHED_ACTION", "SIGNAL", default="WATCH")
         upper = action.upper()
         label = "🟡 WAIT / TRIGGER KA WAIT" if ("WAIT" in upper or "TRIGGER" in upper or "READY" in upper) else "🔵 WATCH"
-        price = _text(r, "CMP", "CURRENT_PRICE", "LTP", "CLOSE", "ENTRY", "IDEAL_ENTRY", default="")
+        price = _text(r, "CMP", "CURRENT_PRICE", "LTP", "CLOSE", "IDEAL_ENTRY", default="")
         stop = _text(r, "STOP_LOSS", "STOP", default="")
         target = _text(r, "TARGET_1", "TARGET", default="")
         score = _text(r, *score_cols, default="") if score_cols else ""
-        why = "Action: " + action + ((" | Score: " + score) if score else "")
         trigger = _text(r, "BREAKOUT_TRIGGER", "TRIGGER_PRICE", default="")
-        if trigger:
-            why += " | Trigger: " + trigger
+        why = "Decision: " + action + ((" | Score: " + score) if score else "") + ((" | Trigger: " + trigger) if trigger else "")
         out.append({"SYMBOL": str(r["SYMBOL"]), "KYA KARU": label, "PRIORITY": 4 if label.startswith("🟡") else 5,
             "PRICE": _num(price) if price else "", "QTY": "", "STOP LOSS": stop, "TARGET": target,
             "PROFIT/LOSS %": "", "WHY": why})
