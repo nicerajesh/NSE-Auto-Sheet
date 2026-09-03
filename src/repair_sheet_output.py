@@ -39,7 +39,6 @@ def _write(ws,df):
     except Exception as e: print(f'{ws.title}: grid expansion warning: {e}')
     try: ws.clear()
     except Exception as e: print(f'{ws.title}: clear warning: {e}')
-    # Re-resolve by title before writing to avoid stale worksheet IDs.
     ws2=ws.spreadsheet.worksheet(ws.title)
     ws2.update(range_name='A1',values=matrix,value_input_option='USER_ENTERED')
     try: ws2.freeze(rows=1)
@@ -56,9 +55,6 @@ def _read(name,default=None):
     return safe_read_csv(p)
 
 def _extract(df,pub_col,action_col,buy_labels,source_name):
-    """Normalize one scanner's finalized output into common columns, keeping
-    only rows whose PUBLISHED action (i.e. quality-gate-passed, not blocked)
-    is an actual buy-tier label — never a row the gate blocked."""
     if df is None or df.empty or pub_col not in df.columns:return pd.DataFrame()
     d=df[df[pub_col].isin(buy_labels)]
     if d.empty:return pd.DataFrame()
@@ -70,11 +66,6 @@ def _extract(df,pub_col,action_col,buy_labels,source_name):
         'ENTRY':col('ENTRY_PRICE'),'STOP_LOSS':col('STOP_LOSS','INITIAL_SL'),'TARGET_1':col('TARGET_1'),'TARGET_2':col('TARGET_2')})
 
 def build_master_buy_dashboard():
-    """Consolidates every scanner's PUBLISHED (quality-gate-passed) buys into
-    one sheet, tagged by source, so a stock that multiple independent scanners
-    agree on (different logic, different data angles) stands out via
-    CONFLUENCE_COUNT — genuinely higher conviction than any single scanner
-    alone. Blocked/unpublished rows never make it in here."""
     hunter=_read('early_hunter.csv');low52=_read('low52_reversal.csv');apex=_read('apex_matrix.csv');stealth=_read('stealth_accumulation.csv')
     parts=[
         _extract(hunter,'PUBLISHED_ACTION','ACTION',{'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'},'Early Hunter'),
@@ -102,19 +93,23 @@ def main():
     stealth=_read('stealth_accumulation.csv')
     master=build_master_buy_dashboard(); safe_to_csv(master,OUT/'master_buy_dashboard.csv')
     plan=build_action_plan(); safe_to_csv(plan,OUT/'mera_action_plan.csv')
-    if hunter.empty and commands.empty: raise RuntimeError('No scanner output available')
+
+    # An empty scanner day is a valid release: publish the available empty/NO DATA
+    # tables to Google Sheets instead of failing the entire workflow. This is
+    # especially important when the engine intentionally produces zero actionable
+    # candidates while all required CSV artifacts remain valid.
+    if hunter.empty and commands.empty:
+        print('No actionable scanner rows available; publishing valid empty release to Google Sheets.')
+
     gc=gspread.authorize(_credentials()); sh=_open_sheet(gc)
     def get_or_create(title,rows=3000,cols=100):
         try:return sh.worksheet(title)
         except gspread.WorksheetNotFound:return sh.add_worksheet(title=title,rows=rows,cols=cols)
-    # This is THE sheet: one simple table, Buy/Sell/Hold all together, plain
-    # language, most-urgent-first. Placed as the very first tab on purpose.
     ws_plan=get_or_create('MERA ACTION PLAN',max(100,len(plan)+10),12)
     _write(ws_plan,plan)
     try:
         ws_plan.format('A1:Z1',{'textFormat':{'bold':True,'fontSize':12},'backgroundColor':{'red':0.85,'green':0.85,'blue':0.85}})
         if not plan.empty and 'KYA KARU' in plan.columns:
-            n=len(plan)
             for i,val in enumerate(plan['KYA KARU'].astype(str),start=2):
                 if 'BECHO' in val or 'EXIT' in val: color={'red':1.0,'green':0.85,'blue':0.85}
                 elif 'KHARIDO' in val: color={'red':0.83,'green':0.96,'blue':0.83}
@@ -123,9 +118,8 @@ def main():
                 ws_plan.format(f'A{i}:Z{i}',{'backgroundColor':color})
         ws_plan.freeze(rows=1)
     except Exception as e:print('MERA ACTION PLAN format warning:',e)
-    try:ws_plan.update_index(0)  # force it to be the first (leftmost) tab every run
+    try:ws_plan.update_index(0)
     except Exception as e:print('MERA ACTION PLAN reorder warning:',e)
-    # User-facing command sheet is intentionally first and simple.
     _write(get_or_create('Aaj Kya Karna Hai',max(100,len(commands)+10),30),commands)
     _write(get_or_create('Master Buy Dashboard',max(100,len(master)+10),max(20,len(master.columns)+2 if not master.empty else 20)),master)
     _write(get_or_create('Buy Candidates',max(100,len(buy)+10),max(30,len(buy.columns)+2)),buy)
