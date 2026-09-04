@@ -5,11 +5,9 @@ import pandas as pd
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    g = df.copy()
-    rename = {}
+    g = df.copy(); rename = {}
     for c in g.columns:
-        clean = str(c).replace("\ufeff", "").strip().upper().replace(" ", "_")
-        rename[c] = clean
+        rename[c] = str(c).replace("\ufeff", "").strip().upper().replace(" ", "_")
     g = g.rename(columns=rename)
     aliases = {"SYMBOL_NAME":"SYMBOL","SECURITY_SYMBOL":"SYMBOL","TRADE_DATE":"DATE","TIMESTAMP":"DATE","OPEN":"OPEN_PRICE","HIGH":"HIGH_PRICE","LOW":"LOW_PRICE","CLOSE":"CLOSE_PRICE","VOLUME":"TTL_TRD_QNTY","DELIVERY_PERCENT":"DELIV_PER","DELIVERY_PCT":"DELIV_PER","DELIVERY_QUANTITY":"DELIV_QTY"}
     for old,new in aliases.items():
@@ -37,12 +35,9 @@ def add_indicators(df):
     g["ATR14"]=atr(g); g["ATR_PCT"]=g.ATR14/c.replace(0,np.nan)*100; g["ATR_PCT_AVG30"]=g.ATR_PCT.rolling(30,min_periods=15).mean(); g["ATR_COMPRESSION"]=g.ATR_PCT<g.ATR_PCT_AVG30*.92
     g["VOL_AVG20"]=v.rolling(20,min_periods=10).mean(); g["VOL_RATIO"]=v/g.VOL_AVG20.replace(0,np.nan); g["DELIV_AVG10"]=d.rolling(10,min_periods=5).mean(); g["DELIV_AVG20"]=d.rolling(20,min_periods=10).mean(); g["DELIV_TREND"]=g.DELIV_AVG10-g.DELIV_AVG20
     for n in [5,10,20,50]: g[f"RET_{n}D"]=c.pct_change(n)*100
-    # Price-location levels must use actual intraday extremes, not closes.
-    # Shift first to keep every level causal and avoid look-ahead leakage.
-    g["HIGH_52W"]=h.rolling(252,min_periods=40).max(); g["LOW_52W"]=l.rolling(252,min_periods=40).min(); g["DIST_52W_HIGH_PCT"]=(c/g.HIGH_52W-1)*100; g["DIST_52W_LOW_PCT"]=(c/g.LOW_52W-1)*100; g["DIST_EMA200_PCT"]=(c/g.EMA200-1)*100
+    # All price-location levels are causal: today's row only sees completed prior bars.
+    g["HIGH_52W"]=h.shift(1).rolling(252,min_periods=40).max(); g["LOW_52W"]=l.shift(1).rolling(252,min_periods=40).min(); g["DIST_52W_HIGH_PCT"]=(c/g.HIGH_52W-1)*100; g["DIST_52W_LOW_PCT"]=(c/g.LOW_52W-1)*100; g["DIST_EMA200_PCT"]=(c/g.EMA200-1)*100
     g["ADX14"],g["PLUS_DI14"],g["MINUS_DI14"]=adx(g); g["DI_SPREAD"]=g.PLUS_DI14-g.MINUS_DI14
-    # Prior resistance/support are based on prior bars' highs/lows.  The
-    # current bar is excluded so today's breakout cannot define its own level.
     g["PRIOR_HIGH20"]=h.shift(1).rolling(20,min_periods=10).max(); g["PRIOR_LOW20"]=l.shift(1).rolling(20,min_periods=10).min(); g["PRIOR_HIGH55"]=h.shift(1).rolling(55,min_periods=20).max(); g["PRIOR_LOW55"]=l.shift(1).rolling(55,min_periods=20).min(); g["DIST_PRIOR_HIGH_PCT"]=(g.PRIOR_HIGH20/c-1)*100; g["DIST_PRIOR_LOW_PCT"]=(c/g.PRIOR_LOW20-1)*100
     o=_num(g["OPEN_PRICE"]); rng=(h-l).replace(0,np.nan); g["BODY_PCT"]=(c-o).abs()/c*100; g["CLOSE_LOCATION"]=(c-l)/rng; g["UPPER_WICK"]=(h-np.maximum(o,c))/rng; g["LOWER_WICK"]=(np.minimum(o,c)-l)/rng; g["RANGE_ATR"]=rng/g.ATR14.replace(0,np.nan); g["BULL_CANDLE"]=c>o
     return g
@@ -53,8 +48,6 @@ def add_indicators_all(hist):
     g["SYMBOL"]=g["SYMBOL"].astype(str).str.strip().str.upper(); g["DATE"]=pd.to_datetime(g["DATE"],errors="coerce"); g=g.dropna(subset=["SYMBOL","DATE"]).copy(); parts=[]
     for symbol,group in g.groupby("SYMBOL",sort=False):
         if len(group)<2: continue
-        result=add_indicators(group.copy())
-        result["SYMBOL"]=str(symbol).strip().upper()
-        parts.append(result)
+        result=add_indicators(group.copy()); result["SYMBOL"]=str(symbol).strip().upper(); parts.append(result)
     if not parts: raise ValueError("No valid SYMBOL groups available for indicator calculation")
     out=pd.concat(parts,ignore_index=True); out["SYMBOL"]=out["SYMBOL"].astype(str).str.strip().str.upper(); return out
