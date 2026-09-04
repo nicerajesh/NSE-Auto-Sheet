@@ -8,7 +8,6 @@ from csv_utils import safe_to_csv, safe_read_csv
 SPREADSHEET_ID=os.getenv('SPREADSHEET_ID','1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM')
 OUT=Path(os.getenv('NSE_OUTPUT_DIR','output'))
 MAX_ROWS=60
-BUY_WORDS=('BUY','BREAKOUT BUY','SWING BUY','PRE-BREAKOUT BUY','APEX BUY','TACTICAL BUY','STEALTH BUY','EARLY REVERSAL BUY')
 
 
 def book():
@@ -51,12 +50,16 @@ def _confidence(row,cal):
 def _status(r):
     gate=_text(r,'QUALITY_GATE',default='UNKNOWN').upper()
     action=_text(r,'PUBLISHED_ACTION','ACTION','SIGNAL',default='WATCH').upper()
+    # BUY ON TRIGGER means the setup is waiting for the trigger; it is NOT a live BUY.
+    if 'BUY ON TRIGGER' in action:return '🟡 WATCH / WAIT'
     if 'RISK BLOCKED' in action:return '⛔ RISK BLOCKED'
-    if any(w in action for w in BUY_WORDS):
+    live_buy=('BUY ON BREAKOUT' in action) or ('BUY ON PULLBACK' in action)
+    legacy_buy=('BREAKOUT BUY' in action) or ('SWING BUY' in action) or ('PRE-BREAKOUT BUY' in action) or ('APEX BUY' in action) or ('TACTICAL BUY' in action) or ('STEALTH BUY' in action) or ('EARLY REVERSAL BUY' in action)
+    if live_buy or legacy_buy:
         if gate=='PASS':return '🟢 BUY CANDIDATE'
         if 'BLOCK' in gate or 'LOW_PROFIT' in gate:return '⛔ QUALITY BLOCKED'
         return '🟠 NOT RELEASED'
-    if 'READY' in action or 'PRE-BREAKOUT' in action or 'WATCH' in action:return '🟡 WATCH / WAIT'
+    if 'READY' in action or 'PRE-BREAKOUT' in action or 'WATCH' in action or 'WAIT' in action or 'REVERSAL' in action or 'STEALTH' in action:return '🟡 WATCH / WAIT'
     return '⚪ WATCH'
 
 
@@ -66,9 +69,11 @@ def _normalize(df,source,cal):
     for _,r in df.iterrows():
         action=_text(r,'PUBLISHED_ACTION','ACTION','SIGNAL',default='WATCH')
         score=_num(_text(r,'PRE_BREAKOUT_SCORE','HUNTER_SCORE','APEX_SCORE','STEALTH_SCORE',default='0')) or 0
-        rows.append({'SOURCE':source,'SYMBOL':str(r.get('SYMBOL','')),'SIGNAL':action,'STATUS':_status(r),'SCORE':score,'CONFIDENCE %':_confidence(r,cal),'CMP':_text(r,'CMP','CURRENT_PRICE','LTP','CLOSE'),'ENTRY':_text(r,'IDEAL_ENTRY','ENTRY_PRICE','ENTRY'),'BUY ZONE':_text(r,'BUY_ZONE','ENTRY_ZONE'),'TRIGGER':_text(r,'BREAKOUT_TRIGGER','TRIGGER_PRICE'),'STOP LOSS':_text(r,'STOP_LOSS','INITIAL_SL','STOP'),'TARGET 1':_text(r,'TARGET_1','TARGET'),'TARGET 2':_text(r,'TARGET_2'),'REASON':_text(r,'DECISION_REASON','REASONS','WHY',default='Scanner setup — confirmation required')})
+        rows.append({'SOURCE':source,'SYMBOL':str(r.get('SYMBOL','')),'SIGNAL':action,'STATUS':_status(r),'SCORE':score,'CONFIDENCE %':_confidence(r,cal),'CMP':_text(r,'CMP','CURRENT_PRICE','LTP','CLOSE'),'ENTRY':_text(r,'IDEAL_ENTRY','ENTRY_PRICE','ENTRY'),'BUY ZONE':_text(r,'BUY_ZONE','ENTRY_ZONE'),'TRIGGER':_text(r,'BREAKOUT_TRIGGER','TRIGGER_PRICE','TRIGGER'),'STOP LOSS':_text(r,'STOP_LOSS','INITIAL_SL','STOP'),'TARGET 1':_text(r,'TARGET_1','TARGET'),'TARGET 2':_text(r,'TARGET_2'),'REASON':_text(r,'DECISION_REASON','REASONS','WHY',default='Scanner setup — confirmation required')})
     out=pd.DataFrame(rows)
-    return out.sort_values(['SCORE','CONFIDENCE %'],ascending=False).drop_duplicates('SYMBOL').head(MAX_ROWS) if not out.empty else out
+    if out.empty:return out
+    # Keep the strongest setup per symbol so the dashboard stays concise.
+    return out.sort_values(['SCORE','CONFIDENCE %'],ascending=False).drop_duplicates('SYMBOL').head(MAX_ROWS)
 
 
 def main():
@@ -91,7 +96,7 @@ def main():
     for _,df in sources:
         if not df.empty and 'DATE' in df.columns:dates.extend(df['DATE'].dropna().astype(str).tolist())
     date=max(dates) if dates else ''
-    rows=[['NSE MASTER TRADING DASHBOARD'],['DATA DATE',date],['CONFIRMED BUY CANDIDATES',buys],['QUALITY / RISK BLOCKED OR NOT RELEASED',blocked],['WATCH / WAIT',watch],['RULE','Blocked/not-released setups are shown for audit visibility but are NOT live BUY signals.'],['RULE','A BUY is actionable only when the V2 quality/risk gates pass.'],[],c.columns.tolist()]
+    rows=[['NSE MASTER TRADING DASHBOARD'],['DATA DATE',date],['CONFIRMED BUY CANDIDATES',buys],['QUALITY / RISK BLOCKED OR NOT RELEASED',blocked],['WATCH / WAIT',watch],['RULE','Blocked/not-released setups are shown for audit visibility but are NOT live BUY signals.'],['RULE','A BUY is actionable only when the V2 quality/risk gates pass.'],['RULE','BUY ON TRIGGER is WAIT until the breakout trigger is confirmed.'],[],c.columns.tolist()]
     rows += [[('' if pd.isna(v) else v) for v in r] for r in c.itertuples(index=False,name=None)]
     w=book()
     try:ws=w.worksheet('Dashboard')
@@ -101,7 +106,7 @@ def main():
     if ws.col_count<needed_cols:ws.add_cols(needed_cols-ws.col_count)
     ws.clear();ws.update(range_name='A1',values=rows,value_input_option='USER_ENTERED')
     try:
-        ws.freeze(rows=9);ws.format('A1:Z1',{'textFormat':{'bold':True,'fontSize':14}});ws.format('A2:B7',{'textFormat':{'bold':True}});ws.format('A9:Z9',{'textFormat':{'bold':True}});ws.format('A1:Z200',{'wrapStrategy':'WRAP'})
+        ws.freeze(rows=10);ws.format('A1:Z1',{'textFormat':{'bold':True,'fontSize':14}});ws.format('A2:B8',{'textFormat':{'bold':True}});ws.format('A10:Z10',{'textFormat':{'bold':True}});ws.format('A1:Z200',{'wrapStrategy':'WRAP'})
     except Exception as e:print('Dashboard format warning:',e)
     print(f'Dashboard updated: displayed={len(c)} | buy={buys} blocked_or_not_released={blocked} watch_wait={watch} | date={date}')
 
