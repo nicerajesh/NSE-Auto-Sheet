@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 from pathlib import Path
 import pandas as pd
 
@@ -12,20 +13,45 @@ FAST_MODE = os.getenv("FAST_MODE", "0").strip().lower() in {"1", "true", "yes", 
 
 
 def _restore_nested(value):
-    """Restore list/dict fields that were stringified by CSV serialization."""
+    """Restore list/dict fields stringified by CSV serialization.
+
+    Older cache files may contain Python reprs with NaN/Infinity tokens,
+    which ast.literal_eval cannot parse. Normalize those tokens before the
+    literal parser and never return a bare string for fields expected to be
+    iterable records.
+    """
+    if isinstance(value, (list, dict)):
+        return value
     if not isinstance(value, str):
         return value
     text = value.strip()
-    if not text or text.lower() in {"nan", "none", "null"}:
-        return [] if text.lower() in {"nan", "none", "null"} else value
-    for parser in (json.loads, ast.literal_eval):
+    if not text:
+        return []
+    if text.lower() in {"nan", "none", "null"}:
+        return []
+
+    candidates = [text]
+    # JSON-compatible cache representation first.
+    candidates.append(re.sub(r"\b(?:NaN|nan|Infinity|-Infinity)\b", "null", text))
+    # Python-repr-compatible representation for legacy files.
+    candidates.append(re.sub(r"\b(?:NaN|nan|Infinity|-Infinity)\b", "None", text))
+
+    for candidate in candidates:
         try:
-            parsed = parser(text)
+            parsed = json.loads(candidate)
             if isinstance(parsed, (list, dict)):
                 return parsed
         except Exception:
             pass
-    return value
+        try:
+            parsed = ast.literal_eval(candidate)
+            if isinstance(parsed, (list, dict)):
+                return parsed
+        except Exception:
+            pass
+
+    # A malformed legacy cache must not masquerade as an iterable of records.
+    return []
 
 
 def _summary(name: str) -> tuple[pd.DataFrame, dict]:
@@ -36,7 +62,6 @@ def _summary(name: str) -> tuple[pd.DataFrame, dict]:
     if d.empty:
         raise RuntimeError(f"FAST MODEL CACHE EMPTY: {p}")
     stats = d.iloc[0].to_dict()
-    # CSV cannot preserve nested Python structures such as action_stats.
     for key in ("action_stats", "metrics", "by_action"):
         if key in stats:
             stats[key] = _restore_nested(stats[key])
