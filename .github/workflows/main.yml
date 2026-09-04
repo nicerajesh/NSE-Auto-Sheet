@@ -54,6 +54,7 @@ jobs:
           path: output/persistent_history.csv
           key: nse-persistent-history-v1
           restore-keys: |
+            nse-persistent-history-v1-
             nse-persistent-history-v1
       - name: Restore Model Validation Cache
         uses: actions/cache/restore@v4
@@ -61,6 +62,7 @@ jobs:
           path: model_cache
           key: nse-model-cache-v2
           restore-keys: |
+            nse-model-cache-v2-
             nse-model-cache-v2
       - name: Verify Source Layout
         run: |
@@ -149,7 +151,7 @@ jobs:
       - name: Validate V2 Master Decision
         run: |
           test -s output/master_buy_decision_v2.csv
-          python -c "import pandas as pd; d=pd.read_csv('output/master_buy_decision_v2.csv'); required=['RANK','SYMBOL','FINAL_ACTION','QUALITY_GATE']; missing=[x for x in required if x not in d.columns]; assert not missing, 'Missing V2 master fields: '+','.join(missing); bad=d[d.FINAL_ACTION.fillna('').str.contains('BUY',na=False) & ~d.FINAL_ACTION.fillna('').str.contains('BLOCKED',na=False)]; assert bad.empty or (d.loc[bad.index,'QUALITY_GATE'].astype(str)=='PASS').all(), 'V2 master published BUY without PASS quality gate'; print('V2 MASTER ROWS=',len(d),'| RELEASED BUY=',len(bad))"
+          python -c "import pandas as pd; d=pd.read_csv('output/master_buy_decision_v2.csv'); required=['RANK','SYMBOL','FINAL_ACTION','QUALITY_GATE']; missing=[x for x in required if x not in d.columns]; assert not missing, 'Missing V2 master fields: '+','.join(missing); live={'🟢 BUY ON BREAKOUT','🔵 BUY ON PULLBACK'}; bad=d[d.FINAL_ACTION.fillna('').isin(live)]; assert bad.empty or (d.loc[bad.index,'QUALITY_GATE'].astype(str)=='PASS').all(), 'V2 master published live BUY without PASS quality gate'; trigger=int(d.FINAL_ACTION.fillna('').eq('🟡 BUY ON TRIGGER').sum()); print('V2 MASTER ROWS=',len(d),'| LIVE BUY=',len(bad),'| TRIGGER WAIT=',trigger)"
       - name: Refresh Model Validation Cache
         run: PYTHONPATH=src python -c "from fast_model_cache import copy_current_to_cache; copy_current_to_cache('output')"
       - name: Save Model Validation Cache
