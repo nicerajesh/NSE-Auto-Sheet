@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import json
 import os
 from pathlib import Path
 import pandas as pd
@@ -9,6 +11,23 @@ CACHE = Path(os.getenv("NSE_MODEL_CACHE_DIR", str(ROOT / "model_cache"))).resolv
 FAST_MODE = os.getenv("FAST_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _restore_nested(value):
+    """Restore list/dict fields that were stringified by CSV serialization."""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return [] if text.lower() in {"nan", "none", "null"} else value
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            parsed = parser(text)
+            if isinstance(parsed, (list, dict)):
+                return parsed
+        except Exception:
+            pass
+    return value
+
+
 def _summary(name: str) -> tuple[pd.DataFrame, dict]:
     p = CACHE / name
     if not p.is_file() or p.stat().st_size == 0:
@@ -16,7 +35,12 @@ def _summary(name: str) -> tuple[pd.DataFrame, dict]:
     d = pd.read_csv(p)
     if d.empty:
         raise RuntimeError(f"FAST MODEL CACHE EMPTY: {p}")
-    return d, d.iloc[0].to_dict()
+    stats = d.iloc[0].to_dict()
+    # CSV cannot preserve nested Python structures such as action_stats.
+    for key in ("action_stats", "metrics", "by_action"):
+        if key in stats:
+            stats[key] = _restore_nested(stats[key])
+    return d, stats
 
 
 def _trades(name: str) -> pd.DataFrame:
