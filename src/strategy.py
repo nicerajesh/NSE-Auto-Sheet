@@ -283,7 +283,7 @@ def _stealth_features(g,i):
     if i>=lb:base_high=_f(h.iloc[i-lb:i+1].max());base_low=_f(l.iloc[i-lb:i+1].min());base_range_pct=((base_high-base_low)/close*100) if np.isfinite(base_high) and np.isfinite(base_low) and close else np.nan
     else:base_high=base_low=base_range_pct=np.nan
     tight_base=np.isfinite(base_range_pct) and base_range_pct<=STRAT.stealth_max_base_range_pct;not_breaking_out=not(np.isfinite(prior20) and np.isfinite(close) and close>=prior20*0.995);uptrend_intact=np.isfinite(close) and np.isfinite(e100) and close>=e100*0.97
-    score=int(min(100,20*int(calm)+20*int(obv_rising)+15*int(deliv_high)+15*int(deliv_rising)+10*int(stable_above_ema)+10*int(healthy_not_hot)+10*int(tight_base));gate_ok=(not_breaking_out and uptrend_intact);entry=close;stop=np.nan
+    score=int(min(100,20*int(calm)+20*int(obv_rising)+15*int(deliv_high)+15*int(deliv_rising)+10*int(stable_above_ema)+10*int(healthy_not_hot)+10*int(tight_base)));gate_ok=(not_breaking_out and uptrend_intact);entry=close;stop=np.nan
     if np.isfinite(base_low):stop=base_low*0.98;stop=min(stop,entry-1.5*atr) if np.isfinite(entry) and np.isfinite(atr) and atr>0 else stop
     risk=(entry-stop) if np.isfinite(entry) and np.isfinite(stop) else np.nan;risk_pct=(risk/entry*100) if np.isfinite(risk) and entry else np.nan;t1=entry+risk*STRAT.min_rr1 if np.isfinite(risk) and risk>0 else np.nan;t2=entry+risk*STRAT.min_rr2 if np.isfinite(risk) and risk>0 else np.nan;t3=entry+risk*STRAT.min_rr3 if np.isfinite(risk) and risk>0 else np.nan
     if gate_ok and score>=STRAT.stealth_buy_score:action='STEALTH BUY'
