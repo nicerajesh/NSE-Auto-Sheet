@@ -6,9 +6,9 @@ from oauth2client.service_account import ServiceAccountCredentials
 from csv_utils import safe_to_csv, safe_read_csv
 
 SPREADSHEET_ID=os.getenv('SPREADSHEET_ID','1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM')
-OUT=Path('output')
-PRE_MAX=10; BREAKOUT_MAX=5; SWING_MAX=5
-BUY_ACTIONS={'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}
+OUT=Path(os.getenv('NSE_OUTPUT_DIR','output'))
+MAX_ROWS=60
+BUY_WORDS=('BUY','BREAKOUT BUY','SWING BUY','PRE-BREAKOUT BUY','APEX BUY','TACTICAL BUY','STEALTH BUY','EARLY REVERSAL BUY')
 
 
 def book():
@@ -18,80 +18,89 @@ def book():
     return gspread.authorize(creds).open_by_key(SPREADSHEET_ID)
 
 
-def _calibration():
-    p=OUT/'score_calibration.csv'
-    if not p.exists(): return pd.DataFrame()
-    try:return safe_read_csv(p)
+def _read(name):
+    p=OUT/name
+    try:return safe_read_csv(p) if p.exists() else pd.DataFrame()
     except Exception:return pd.DataFrame()
 
 
+def _text(r,*cols,default=''):
+    for c in cols:
+        if c in r.index:
+            v=str(r.get(c,'')).strip()
+            if v and v.lower() not in {'nan','none'}: return v
+    return default
+
+
+def _num(v):
+    try:return float(v)
+    except Exception:return None
+
+
 def _confidence(row,cal):
-    # Prefer historical event calibration. Fall back to the capped model confidence only when no bucket has enough data.
-    score=pd.to_numeric(pd.Series([row.get('PRE_BREAKOUT_SCORE',row.get('HUNTER_SCORE',0))]),errors='coerce').iloc[0]
-    action=str(row.get('ACTION',''))
-    if pd.notna(score) and not cal.empty and {'ANALYSIS','ACTION','SCORE_BUCKET','BREAKOUT_RATE','TRADES'}.issubset(cal.columns):
-        q=cal[(cal.ANALYSIS=='BREAKOUT_EVENT') & (cal.ACTION==action)].copy()
-        if not q.empty:
-            if score>=90:bucket='90+'
-            elif score>=82:bucket='82-89'
-            elif score>=75:bucket='75-81'
-            elif score>=68:bucket='68-74'
-            else:bucket='<68'
-            z=q[(q.SCORE_BUCKET.astype(str)==bucket) & (q.TRADES>=5)]
-            if not z.empty and pd.notna(z.BREAKOUT_RATE.iloc[0]): return round(float(z.BREAKOUT_RATE.iloc[0]),1)
-    try:return min(90.0,max(0.0,float(row.get('BREAKOUT_PROBABILITY',0))))
-    except Exception:return 0.0
+    score=_num(row.get('PRE_BREAKOUT_SCORE',row.get('HUNTER_SCORE',row.get('APEX_SCORE',row.get('STEALTH_SCORE',0)))))
+    action=_text(row,'ACTION','SIGNAL')
+    if score is not None and not cal.empty and {'ANALYSIS','ACTION','SCORE_BUCKET','BREAKOUT_RATE','TRADES'}.issubset(cal.columns):
+        bucket='90+' if score>=90 else '82-89' if score>=82 else '75-81' if score>=75 else '68-74' if score>=68 else '<68'
+        q=cal[(cal.ANALYSIS=='BREAKOUT_EVENT') & (cal.ACTION.astype(str)==action) & (cal.SCORE_BUCKET.astype(str)==bucket) & (pd.to_numeric(cal.TRADES,errors='coerce')>=5)]
+        if not q.empty and pd.notna(q.BREAKOUT_RATE.iloc[0]): return round(float(q.BREAKOUT_RATE.iloc[0]),1)
+    p=_num(row.get('BREAKOUT_PROBABILITY',0))
+    return round(max(0,min(90,p or 0)),1)
+
+
+def _status(r):
+    gate=_text(r,'QUALITY_GATE',default='UNKNOWN').upper()
+    action=_text(r,'PUBLISHED_ACTION','ACTION','SIGNAL',default='WATCH').upper()
+    if 'BLOCK' in gate or 'QUALITY BLOCKED' in action:return '⛔ QUALITY BLOCKED'
+    if 'RISK BLOCKED' in action:return '⛔ RISK BLOCKED'
+    if any(w in action for w in BUY_WORDS):return '🟢 BUY CANDIDATE'
+    if 'READY' in action or 'PRE-BREAKOUT' in action or 'WATCH' in action:return '🟡 WATCH / WAIT'
+    return '⚪ WATCH'
+
+
+def _normalize(df,source,cal):
+    if df.empty or 'SYMBOL' not in df.columns:return pd.DataFrame()
+    rows=[]
+    for _,r in df.iterrows():
+        action=_text(r,'PUBLISHED_ACTION','ACTION','SIGNAL',default='WATCH')
+        score=_num(_text(r,'PRE_BREAKOUT_SCORE','HUNTER_SCORE','APEX_SCORE','STEALTH_SCORE',default='0')) or 0
+        rows.append({'SOURCE':source,'SYMBOL':str(r.get('SYMBOL','')),'SIGNAL':action,'STATUS':_status(r),'SCORE':score,'CONFIDENCE %':_confidence(r,cal),'CMP':_text(r,'CMP','CURRENT_PRICE','LTP','CLOSE'),'ENTRY':_text(r,'IDEAL_ENTRY','ENTRY_PRICE','ENTRY'),'BUY ZONE':_text(r,'BUY_ZONE','ENTRY_ZONE'),'TRIGGER':_text(r,'BREAKOUT_TRIGGER','TRIGGER_PRICE'),'STOP LOSS':_text(r,'STOP_LOSS','INITIAL_SL','STOP'),'TARGET 1':_text(r,'TARGET_1','TARGET'),'TARGET 2':_text(r,'TARGET_2'),'REASON':_text(r,'DECISION_REASON','REASONS','WHY',default='Scanner setup — confirmation required')})
+    out=pd.DataFrame(rows)
+    return out.sort_values(['SCORE','CONFIDENCE %'],ascending=False).drop_duplicates('SYMBOL').head(MAX_ROWS) if not out.empty else out
 
 
 def main():
-    hf=OUT/'early_hunter.csv'
-    if not hf.exists(): raise RuntimeError('output/early_hunter.csv not found')
-    df=safe_read_csv(hf); cal=_calibration()
-    if df.empty:c=df.copy()
-    else:
-        for col in ('PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_PROBABILITY','RISK_PCT','RESISTANCE_DISTANCE_PCT'):
-            if col in df.columns:df[col]=pd.to_numeric(df[col],errors='coerce')
-        gate_pass=('QUALITY_GATE' not in df.columns) or df.QUALITY_GATE.astype(str).eq('PASS')
-        eligible=df[gate_pass & df.ACTION.isin(BUY_ACTIONS)].copy()
-        if not eligible.empty:eligible['BREAKOUT_CONFIDENCE']=eligible.apply(lambda r:_confidence(r,cal),axis=1)
-        pre=eligible[eligible.ACTION.eq('PRE-BREAKOUT BUY')].sort_values(['BREAKOUT_CONFIDENCE','PRE_BREAKOUT_SCORE'],ascending=False).head(PRE_MAX)
-        brk=eligible[eligible.ACTION.eq('BREAKOUT BUY')].sort_values(['BREAKOUT_CONFIDENCE','BREAKOUT_SCORE'],ascending=False).head(BREAKOUT_MAX)
-        sw=eligible[eligible.ACTION.eq('SWING BUY')].sort_values(['SWING_SCORE','BREAKOUT_CONFIDENCE'],ascending=False).head(SWING_MAX)
-        c=pd.concat([pre,brk,sw],ignore_index=True)
-    safe_to_csv(c,OUT/'buy_candidates.csv')
+    cal=_read('score_calibration.csv')
+    sources=[('Early Hunter',_read('early_hunter.csv')),('52 Week Low',_read('low52_reversal.csv')),('APEX',_read('apex_matrix.csv')),('Stealth',_read('stealth_accumulation.csv')),('Decision Engine',_read('decision_candidates.csv'))]
+    parts=[_normalize(df,name,cal) for name,df in sources]
+    parts=[p for p in parts if not p.empty]
+    c=pd.concat(parts,ignore_index=True) if parts else pd.DataFrame()
     if not c.empty:
-        c['CATEGORY']=c['ACTION'].map({'PRE-BREAKOUT BUY':'PRE-BREAKOUT','BREAKOUT BUY':'BREAKOUT','SWING BUY':'SWING'})
-        c['BREAKOUT_CONFIDENCE']=c.apply(lambda r:_confidence(r,cal),axis=1)
-        if 'RANK' in c.columns:c['RANK']=range(1,len(c)+1)
-        else:c.insert(0,'RANK',range(1,len(c)+1))
-    cols=['RANK','SYMBOL','ACTION','CATEGORY','DATE','BUY_DATE','CMP','ENTRY_PRICE','ENTRY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','R_R','PRE_BREAKOUT_SCORE','BREAKOUT_SCORE','SWING_SCORE','BREAKOUT_CONFIDENCE','TREND','ACCUMULATION','DELIVERY','VOLUME_RATIO','RESISTANCE','RESISTANCE_DISTANCE_PCT','RESISTANCE_TESTS','RELATIVE_STRENGTH','BREAKOUT_STATUS','REASONS']
-    cols=[x for x in cols if x in c.columns]
-    t=c[cols].copy() if not c.empty else pd.DataFrame(columns=cols)
-    pre_n=int((df.ACTION=='PRE-BREAKOUT BUY').sum()) if not df.empty and 'ACTION' in df.columns else 0
-    brk_n=int((df.ACTION=='BREAKOUT BUY').sum()) if not df.empty and 'ACTION' in df.columns else 0
-    sw_n=int((df.ACTION=='SWING BUY').sum()) if not df.empty and 'ACTION' in df.columns else 0
-    gate=str(df.QUALITY_GATE.iloc[0]) if not df.empty and 'QUALITY_GATE' in df.columns else 'UNKNOWN';date=str(df.DATE.iloc[0]) if 'DATE' in df.columns and len(df) else ''
-    event_rate='N/A'; pre_event='N/A'
-    if not cal.empty and 'ANALYSIS' in cal.columns and 'BREAKOUT_RATE' in cal.columns:
-        ev=cal[cal.ANALYSIS.eq('BREAKOUT_EVENT')]
-        if not ev.empty:
-            event_rate=f"{ev.BREAKOUT_RATE.mul(ev.TRADES).sum()/max(1,ev.TRADES.sum()):.1f}%"
-            pe=ev[ev.ACTION.astype(str).str.contains('PRE-BREAKOUT',na=False)]
-            if not pe.empty:pre_event=f"{pe.BREAKOUT_RATE.mul(pe.TRADES).sum()/max(1,pe.TRADES.sum()):.1f}%"
-    rows=[['NSE EARLY HUNTER — TRADING DASHBOARD'],['DATA DATE',date],['QUALITY GATE',gate],['MODEL PRE-BREAKOUT',pre_n],['MODEL BREAKOUT',brk_n],['MODEL SWING',sw_n],['HISTORICAL EVENT BREAKOUT RATE',event_rate],['HISTORICAL PRE-BREAKOUT HIT RATE',pre_event],['DISPLAYED',f'{PRE_MAX} pre + {BREAKOUT_MAX} breakout + {SWING_MAX} swing maximum'],['NOTE','BREAKOUT_CONFIDENCE is historical event calibration when enough samples exist; otherwise it is capped model confidence.'],[],t.columns.tolist()]
-    rows += [[('' if pd.isna(v) else v) for v in r] for r in t.itertuples(index=False,name=None)]
+        priority=c['STATUS'].map({'🟢 BUY CANDIDATE':1,'🟡 WATCH / WAIT':2,'⛔ QUALITY BLOCKED':3,'⛔ RISK BLOCKED':4,'⚪ WATCH':5}).fillna(9)
+        c=c.assign(_P=priority).sort_values(['_P','SCORE','CONFIDENCE %'],ascending=[True,False,False]).drop(columns='_P').head(MAX_ROWS).reset_index(drop=True)
+        c.insert(0,'RANK',range(1,len(c)+1))
+    else:
+        c=pd.DataFrame([{'RANK':1,'SOURCE':'SYSTEM','SYMBOL':'—','SIGNAL':'NO SCANNER ROWS','STATUS':'⚠️ DATA PIPELINE CHECK','SCORE':'','CONFIDENCE %':'','CMP':'','ENTRY':'','BUY ZONE':'','TRIGGER':'','STOP LOSS':'','TARGET 1':'','TARGET 2':'','REASON':'No scanner output was available.'}])
+    safe_to_csv(c,OUT/'dashboard.csv')
+    buys=int((c['STATUS']=='🟢 BUY CANDIDATE').sum())
+    blocked=int(c['STATUS'].astype(str).str.contains('BLOCKED',na=False).sum())
+    watch=int(c['STATUS'].astype(str).str.contains('WATCH|WAIT',regex=True,na=False).sum())
+    dates=[]
+    for _,df in sources:
+        if not df.empty and 'DATE' in df.columns:dates.extend(df['DATE'].dropna().astype(str).tolist())
+    date=max(dates) if dates else ''
+    rows=[['NSE MASTER TRADING DASHBOARD'],['DATA DATE',date],['CONFIRMED BUY CANDIDATES',buys],['QUALITY / RISK BLOCKED',blocked],['WATCH / WAIT',watch],['RULE','Blocked setups are shown for audit visibility but are NOT live BUY signals.'],['RULE','A BUY is actionable only when the V2 quality/risk gates pass.'],[],c.columns.tolist()]
+    rows += [[('' if pd.isna(v) else v) for v in r] for r in c.itertuples(index=False,name=None)]
     w=book()
     try:ws=w.worksheet('Dashboard')
-    except gspread.WorksheetNotFound:ws=w.add_worksheet(title='Dashboard',rows=3000,cols=max(40,len(t.columns)+2))
-    rows_ct,cols_ct=max(1,ws.row_count),max(1,ws.col_count)
+    except gspread.WorksheetNotFound:ws=w.add_worksheet(title='Dashboard',rows=3000,cols=max(30,len(c.columns)+2))
+    needed_rows=max(100,len(rows)+10);needed_cols=max(30,len(c.columns)+2)
+    if ws.row_count<needed_rows:ws.add_rows(needed_rows-ws.row_count)
+    if ws.col_count<needed_cols:ws.add_cols(needed_cols-ws.col_count)
+    ws.clear();ws.update(range_name='A1',values=rows,value_input_option='USER_ENTERED')
     try:
-        ws.resize(rows=1,cols=1); ws.resize(rows=rows_ct,cols=cols_ct)
-    except Exception as e:print(f'Dashboard resize-clear warning: {e}')
-    ws.update('A1',rows,value_input_option='USER_ENTERED')
-    try:
-        ws.freeze(rows=12);ws.format('A1:Z1',{'textFormat':{'bold':True,'fontSize':14}});ws.format('A12:Z12',{'textFormat':{'bold':True}});ws.format('A1:B10',{'textFormat':{'bold':True}});ws.format('A1:Z200',{'wrapStrategy':'WRAP'})
+        ws.freeze(rows=9);ws.format('A1:Z1',{'textFormat':{'bold':True,'fontSize':14}});ws.format('A2:B7',{'textFormat':{'bold':True}});ws.format('A9:Z9',{'textFormat':{'bold':True}});ws.format('A1:Z200',{'wrapStrategy':'WRAP'})
     except Exception as e:print('Dashboard format warning:',e)
-    safe_to_csv(t,OUT/'dashboard.csv')
-    print(f'Dashboard updated: displayed={len(t)} | pre={pre_n} breakout={brk_n} swing={sw_n} | gate={gate} | event={event_rate} | pre_event={pre_event}')
+    print(f'Dashboard updated: displayed={len(c)} | buy={buys} blocked={blocked} watch_wait={watch} | date={date}')
 
 if __name__=='__main__':main()
