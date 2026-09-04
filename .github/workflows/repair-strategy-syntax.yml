@@ -1,0 +1,41 @@
+name: Repair Strategy Syntax
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Repair and commit if needed
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/strategy.py')
+          s=p.read_text()
+          old='int(tight_base));gate_ok='
+          new='int(tight_base)));gate_ok='
+          if old not in s:
+              print('No known strategy syntax defect found.')
+              raise SystemExit(0)
+          p.write_text(s.replace(old,new,1))
+          print('Repaired missing closing parenthesis in _stealth_features.')
+          PY
+          python -m py_compile src/strategy.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet; then
+            echo 'Strategy already clean.'
+          else
+            git add src/strategy.py
+            git commit -m 'fix: repair strategy syntax'
+            git push origin main
+          fi
