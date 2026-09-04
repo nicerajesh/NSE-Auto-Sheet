@@ -51,9 +51,11 @@ def _confidence(row,cal):
 def _status(r):
     gate=_text(r,'QUALITY_GATE',default='UNKNOWN').upper()
     action=_text(r,'PUBLISHED_ACTION','ACTION','SIGNAL',default='WATCH').upper()
-    if 'BLOCK' in gate or 'QUALITY BLOCKED' in action:return '⛔ QUALITY BLOCKED'
     if 'RISK BLOCKED' in action:return '⛔ RISK BLOCKED'
-    if any(w in action for w in BUY_WORDS):return '🟢 BUY CANDIDATE'
+    if any(w in action for w in BUY_WORDS):
+        if gate=='PASS':return '🟢 BUY CANDIDATE'
+        if 'BLOCK' in gate or 'LOW_PROFIT' in gate:return '⛔ QUALITY BLOCKED'
+        return '🟠 NOT RELEASED'
     if 'READY' in action or 'PRE-BREAKOUT' in action or 'WATCH' in action:return '🟡 WATCH / WAIT'
     return '⚪ WATCH'
 
@@ -76,20 +78,20 @@ def main():
     parts=[p for p in parts if not p.empty]
     c=pd.concat(parts,ignore_index=True) if parts else pd.DataFrame()
     if not c.empty:
-        priority=c['STATUS'].map({'🟢 BUY CANDIDATE':1,'🟡 WATCH / WAIT':2,'⛔ QUALITY BLOCKED':3,'⛔ RISK BLOCKED':4,'⚪ WATCH':5}).fillna(9)
+        priority=c['STATUS'].map({'🟢 BUY CANDIDATE':1,'🟡 WATCH / WAIT':2,'🟠 NOT RELEASED':3,'⛔ QUALITY BLOCKED':4,'⛔ RISK BLOCKED':5,'⚪ WATCH':6}).fillna(9)
         c=c.assign(_P=priority).sort_values(['_P','SCORE','CONFIDENCE %'],ascending=[True,False,False]).drop(columns='_P').head(MAX_ROWS).reset_index(drop=True)
         c.insert(0,'RANK',range(1,len(c)+1))
     else:
         c=pd.DataFrame([{'RANK':1,'SOURCE':'SYSTEM','SYMBOL':'—','SIGNAL':'NO SCANNER ROWS','STATUS':'⚠️ DATA PIPELINE CHECK','SCORE':'','CONFIDENCE %':'','CMP':'','ENTRY':'','BUY ZONE':'','TRIGGER':'','STOP LOSS':'','TARGET 1':'','TARGET 2':'','REASON':'No scanner output was available.'}])
     safe_to_csv(c,OUT/'dashboard.csv')
     buys=int((c['STATUS']=='🟢 BUY CANDIDATE').sum())
-    blocked=int(c['STATUS'].astype(str).str.contains('BLOCKED',na=False).sum())
+    blocked=int(c['STATUS'].astype(str).str.contains('BLOCKED|NOT RELEASED',regex=True,na=False).sum())
     watch=int(c['STATUS'].astype(str).str.contains('WATCH|WAIT',regex=True,na=False).sum())
     dates=[]
     for _,df in sources:
         if not df.empty and 'DATE' in df.columns:dates.extend(df['DATE'].dropna().astype(str).tolist())
     date=max(dates) if dates else ''
-    rows=[['NSE MASTER TRADING DASHBOARD'],['DATA DATE',date],['CONFIRMED BUY CANDIDATES',buys],['QUALITY / RISK BLOCKED',blocked],['WATCH / WAIT',watch],['RULE','Blocked setups are shown for audit visibility but are NOT live BUY signals.'],['RULE','A BUY is actionable only when the V2 quality/risk gates pass.'],[],c.columns.tolist()]
+    rows=[['NSE MASTER TRADING DASHBOARD'],['DATA DATE',date],['CONFIRMED BUY CANDIDATES',buys],['QUALITY / RISK BLOCKED OR NOT RELEASED',blocked],['WATCH / WAIT',watch],['RULE','Blocked/not-released setups are shown for audit visibility but are NOT live BUY signals.'],['RULE','A BUY is actionable only when the V2 quality/risk gates pass.'],[],c.columns.tolist()]
     rows += [[('' if pd.isna(v) else v) for v in r] for r in c.itertuples(index=False,name=None)]
     w=book()
     try:ws=w.worksheet('Dashboard')
@@ -101,6 +103,6 @@ def main():
     try:
         ws.freeze(rows=9);ws.format('A1:Z1',{'textFormat':{'bold':True,'fontSize':14}});ws.format('A2:B7',{'textFormat':{'bold':True}});ws.format('A9:Z9',{'textFormat':{'bold':True}});ws.format('A1:Z200',{'wrapStrategy':'WRAP'})
     except Exception as e:print('Dashboard format warning:',e)
-    print(f'Dashboard updated: displayed={len(c)} | buy={buys} blocked={blocked} watch_wait={watch} | date={date}')
+    print(f'Dashboard updated: displayed={len(c)} | buy={buys} blocked_or_not_released={blocked} watch_wait={watch} | date={date}')
 
 if __name__=='__main__':main()
