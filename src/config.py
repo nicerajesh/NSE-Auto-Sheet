@@ -39,7 +39,12 @@ class StrategyConfig:
     max_fall_20d_pct:float=-22.0
     max_fall_50d_pct:float=-35.0
     min_recovery_5d_pct:float=-1.5
-    min_rs_spread_pct:float=0.0
+    # A stock must have genuinely positive relative strength before it can
+    # qualify for a PRE-BREAKOUT/BUY route.  Zero was too permissive: weak
+    # negative-RS stocks could still accumulate enough unrelated score points
+    # to cross buy_score.  Keep this as a small positive spread rather than
+    # requiring extreme RS, so the gate remains useful without over-filtering.
+    min_rs_spread_pct:float=1.0
     min_regime_score:int=4
     min_adx:float=15.0
     late_ret20_pct:float=15.0
@@ -130,17 +135,16 @@ class RiskConfig:
     trading losses actually come from even when the signal itself is good.
     All overridable via env vars so paper vs live capital can differ without
     a code change."""
-    capital_base:float=float(__import__('os').getenv('CAPITAL_BASE','1000000'))          # total trading capital (₹)
-    risk_per_trade_pct:float=float(__import__('os').getenv('RISK_PER_TRADE_PCT','0.5'))  # % of capital risked per trade (entry→stop)
+    capital_base:float=float(__import__('os').getenv('CAPITAL_BASE','1000000'))
+    risk_per_trade_pct:float=float(__import__('os').getenv('RISK_PER_TRADE_PCT','0.5'))
     max_concurrent_positions:int=int(__import__('os').getenv('MAX_CONCURRENT_POSITIONS','12'))
-    max_sector_exposure_pct:float=float(__import__('os').getenv('MAX_SECTOR_EXPOSURE_PCT','25'))   # % of capital in one sector
-    max_portfolio_risk_pct:float=float(__import__('os').getenv('MAX_PORTFOLIO_RISK_PCT','6'))      # sum of all open positions' risk, % of capital
-    max_single_position_pct:float=float(__import__('os').getenv('MAX_SINGLE_POSITION_PCT','15'))   # % of capital in one stock
+    max_sector_exposure_pct:float=float(__import__('os').getenv('MAX_SECTOR_EXPOSURE_PCT','25'))
+    max_portfolio_risk_pct:float=float(__import__('os').getenv('MAX_PORTFOLIO_RISK_PCT','6'))
+    max_single_position_pct:float=float(__import__('os').getenv('MAX_SINGLE_POSITION_PCT','15'))
     drawdown_lookback_trades:int=int(__import__('os').getenv('DRAWDOWN_LOOKBACK_TRADES','10'))
     drawdown_max_consecutive_losses:int=int(__import__('os').getenv('DRAWDOWN_MAX_CONSECUTIVE_LOSSES','5'))
-    drawdown_max_recent_loss_pct:float=float(__import__('os').getenv('DRAWDOWN_MAX_RECENT_LOSS_PCT','-8'))  # sum of realized % over lookback window
-    paper_mode:bool=__import__('os').getenv('PAPER_MODE','1')=='1'   # defaults ON (safe) — must be explicitly set to '0' to go live
+    drawdown_max_recent_loss_pct:float=float(__import__('os').getenv('DRAWDOWN_MAX_RECENT_LOSS_PCT','-8'))
+    paper_mode:bool=__import__('os').getenv('PAPER_MODE','1')=='1'
 
 
 RISK=RiskConfig()
-
