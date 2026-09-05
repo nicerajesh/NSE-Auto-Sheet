@@ -1,19 +1,39 @@
 import ast
+import json
+import re
 import pandas as pd
 from config import BT
 
 
 def parse_action_stats(stats):
-    """stats['action_stats'] is a list of dicts in memory, but after a CSV
-    round-trip (backtest_summary.csv) pandas stores it as a stringified repr.
-    Always go through this before iterating action_stats."""
+    """Restore action_stats after CSV serialization.
+
+    backtest_summary.csv can contain JSON/Python representations of nested
+    action_stats, including legacy NaN/Infinity tokens.  A failed parse must
+    never silently turn a real action sample into an empty list, because that
+    makes every action look like INSUFFICIENT_ACTION_TRADES and can suppress
+    otherwise valid releases.
+    """
     v=(stats or {}).get('action_stats')
-    if isinstance(v,list):return v
-    if isinstance(v,str) and v.strip():
-        try:
-            parsed=ast.literal_eval(v)
-            return parsed if isinstance(parsed,list) else []
-        except Exception:return []
+    if isinstance(v,list):
+        return v
+    if not isinstance(v,str):
+        return []
+    text=v.strip()
+    if not text or text.lower() in {'nan','none','null'}:
+        return []
+
+    candidates=[text]
+    candidates.append(re.sub(r'\b(?:NaN|nan|Infinity|-Infinity)\b','null',text))
+    candidates.append(re.sub(r'\b(?:NaN|nan|Infinity|-Infinity)\b','None',text))
+    for candidate in candidates:
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed=parser(candidate)
+                if isinstance(parsed,list) and all(isinstance(x,dict) for x in parsed):
+                    return parsed
+            except Exception:
+                pass
     return []
 
 
@@ -55,8 +75,6 @@ def evaluate(stats,calibration=None,min_trades=None):
     if not trade_q.empty and {'ACTION','SCORE_BUCKET','AVG_RETURN'}.issubset(trade_q.columns):
         core=trade_q[trade_q.SCORE_BUCKET.astype(str).eq('82-89')]
         if not core.empty and float(core.AVG_RETURN.mean())<=0:return False,'CORE_SCORE_BAND_NEGATIVE'
-    # V2: if a walk-forward summary is present, aggregate in-sample quality is
-    # not enough. Require positive OOS expectancy and minimum OOS PF/win-rate.
     try:
         from pathlib import Path
         wf_path=Path('output')/'walk_forward_summary.csv'
