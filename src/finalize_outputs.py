@@ -25,11 +25,26 @@ def _sector_map():
 
 
 def _write_v2_master():
-    """Always materialize the V2 master export with the complete release schema."""
-    src=OUT/'decision_candidates.csv'
-    if not src.exists():
-        raise RuntimeError('output/decision_candidates.csv missing; cannot build V2 master decision')
-    df=safe_read_csv(src)
+    """Always materialize V2 from the best available user-facing candidate source.
+
+    decision_candidates is the preferred BUY-decision source, but it can be
+    legitimately empty when the quality gate blocks all buys.  In that case,
+    use the scanner's early_hunter output so the Master tab still exposes
+    current WATCH/WAIT/QUALITY-BLOCKED context instead of appearing as NO DATA.
+    This never bypasses the quality gate: build_master receives each row's
+    QUALITY_GATE and converts blocked BUY setups to QUALITY BLOCKED.
+    """
+    preferred=OUT/'decision_candidates.csv'
+    fallback=OUT/'early_hunter.csv'
+    if preferred.exists():
+        df=safe_read_csv(preferred)
+        if df.empty and fallback.exists():
+            df=safe_read_csv(fallback)
+    elif fallback.exists():
+        df=safe_read_csv(fallback)
+    else:
+        raise RuntimeError('Neither decision_candidates.csv nor early_hunter.csv is available')
+
     regime=str(df.iloc[0].get('MARKET_REGIME','UNKNOWN')) if not df.empty else 'UNKNOWN'
     master=build_master(df, regime)
     for col in V2_COLUMNS:
@@ -63,9 +78,8 @@ def main():
     def confidence(r):
         try: score=float(r.get('PRE_BREAKOUT_SCORE',r.get('HUNTER_SCORE',0)))
         except Exception: score=0
-        action=str(r.get('ACTION',''))
         if not cal.empty and {'ANALYSIS','ACTION','SCORE_BUCKET','BREAKOUT_RATE','TRADES'}.issubset(cal.columns):
-            q=cal[(cal.ANALYSIS=='BREAKOUT_EVENT') & (cal.ACTION==action)].copy()
+            q=cal[(cal.ANALYSIS=='BREAKOUT_EVENT') & (cal.ACTION==r.get('ACTION'))].copy()
             bucket='90+' if score>=90 else '82-89' if score>=82 else '75-81' if score>=75 else '68-74' if score>=68 else '<68'
             q=q[(q.SCORE_BUCKET.astype(str)==bucket)&(q.TRADES>=5)]
             if not q.empty and pd.notna(q.BREAKOUT_RATE.iloc[0]): return round(float(q.BREAKOUT_RATE.iloc[0]),1)
