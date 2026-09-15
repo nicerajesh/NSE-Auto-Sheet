@@ -107,6 +107,9 @@ jobs:
           import pandas as pd, os
           out='output'; h=pd.read_csv(f'{out}/early_hunter.csv'); core=pd.read_csv(f'{out}/core_trend_matrix.csv')
           rows=[]
+          def _int_or_zero(v):
+              x=pd.to_numeric(v,errors='coerce')
+              return int(x) if pd.notna(x) else 0
           for name,d in [('Early Hunter',h),('Core Trend Matrix',core)]:
               act=d['ACTION'].value_counts().to_dict() if 'ACTION' in d else {}
               rows.append({'REPORT':name,'STATUS':'OK' if not d.empty else 'NO DATA','ROWS':len(d),'DETAIL':str(act)})
@@ -117,11 +120,11 @@ jobs:
               q=pd.read_csv(aq)
               for _,r in q.iterrows():
                   ok=str(r.get('ok','')).strip().lower()=='true'
-                  rows.append({'REPORT':'V6 Action OOS','STATUS':'PASS' if ok else 'BLOCKED','ROWS':int(r.get('windows',0) or 0),'DETAIL':str(r.to_dict())})
+                  rows.append({'REPORT':'V6 Action OOS','STATUS':'PASS' if ok else 'BLOCKED','ROWS':_int_or_zero(r.get('windows',0)),'DETAIL':str(r.to_dict())})
           v7=f'{out}/v7_false_breakout_validation.csv'
           if os.path.exists(v7):
               q=pd.read_csv(v7)
-              for _,r in q.iterrows(): rows.append({'REPORT':'V7 Breakout','STATUS':'RESEARCH','ROWS':int(r.get('TRADES',0) or 0),'DETAIL':str(r.to_dict())})
+              for _,r in q.iterrows(): rows.append({'REPORT':'V7 Breakout','STATUS':'RESEARCH','ROWS':_int_or_zero(r.get('TRADES',0)),'DETAIL':str(r.to_dict())})
           pd.DataFrame(rows).to_csv(f'{out}/decision_diagnostic_report.csv',index=False); print(pd.DataFrame(rows).to_string(index=False))
           PY
       - name: Validate Decision Outputs
