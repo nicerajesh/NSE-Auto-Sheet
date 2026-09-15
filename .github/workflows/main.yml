@@ -35,7 +35,7 @@ jobs:
       - name: Verify Engine
         run: |
           echo "COMMIT=$(git rev-parse HEAD)"
-          PYTHONPATH=src python -m py_compile src/config.py src/indicator.py src/strategy.py src/backtest.py src/quality_gate.py src/persistent_runner.py src/v3_engine.py src/v3_runner.py src/decision_engine.py src/v3_dashboard.py src/update_sheet.py src/finalize_outputs.py src/dashboard.py src/repair_sheet_output.py src/fast_model_cache.py src/apply_fast_mode.py src/ensure_action_plan.py src/csv_utils.py src/risk_manager.py src/corporate_actions.py src/edge_monitor.py src/master_decision.py src/run_v2_master.py src/simple_dashboard.py src/core_trend_matrix.py src/publish_diagnostics.py
+          PYTHONPATH=src python -m py_compile src/config.py src/indicator.py src/strategy.py src/backtest.py src/quality_gate.py src/v6_quality_validation.py src/persistent_runner.py src/v3_engine.py src/v3_runner.py src/decision_engine.py src/v3_dashboard.py src/update_sheet.py src/finalize_outputs.py src/dashboard.py src/repair_sheet_output.py src/fast_model_cache.py src/apply_fast_mode.py src/ensure_action_plan.py src/csv_utils.py src/risk_manager.py src/corporate_actions.py src/edge_monitor.py src/master_decision.py src/run_v2_master.py src/simple_dashboard.py src/core_trend_matrix.py src/publish_diagnostics.py
       - name: Unit Tests
         run: PYTHONPATH=src pytest -q tests/test_system.py tests/test_core_trend_matrix.py
       - name: Validate Secrets
@@ -85,6 +85,8 @@ jobs:
           key: nse-persistent-history-v1-${{ github.run_id }}
       - name: Finalize Quality Gate and Outputs
         run: PYTHONPATH=src python src/finalize_outputs.py
+      - name: Build V6 Action OOS Validation
+        run: PYTHONPATH=src python src/v6_quality_validation.py
       - name: Rebuild V2 Master Decision
         run: PYTHONPATH=src python src/run_v2_master.py
       - name: Guarantee V2 Master Schema
@@ -108,11 +110,15 @@ jobs:
               rows.append({'REPORT':name,'STATUS':'OK' if not d.empty else 'NO DATA','ROWS':len(d),'DETAIL':str(act)})
           if 'PUBLISHED_ACTION' in h:
               for k,v in h.PUBLISHED_ACTION.value_counts(dropna=False).items(): rows.append({'REPORT':'Final Action','STATUS':'OK','ROWS':int(v),'DETAIL':str(k)})
+          aq=f'{out}/action_quality_summary.csv'
+          if os.path.exists(aq):
+              q=pd.read_csv(aq)
+              for _,r in q.iterrows(): rows.append({'REPORT':'V6 Action OOS','STATUS':'PASS' if bool(r.get('ok',False)) else 'BLOCKED','ROWS':int(r.get('windows',0) or 0),'DETAIL':str(r.to_dict())})
           pd.DataFrame(rows).to_csv(f'{out}/decision_diagnostic_report.csv',index=False); print(pd.DataFrame(rows).to_string(index=False))
           PY
       - name: Validate Decision Outputs
         run: |
-          for f in early_hunter.csv buy_candidates.csv master_buy_decision_v2.csv low52_reversal.csv apex_matrix.csv stealth_accumulation.csv walk_forward_summary.csv core_trend_matrix.csv core_trend_matrix_summary.csv decision_diagnostic_report.csv; do test -s "output/$f" || { echo "MISSING_OR_EMPTY $f"; exit 1; }; done
+          for f in early_hunter.csv buy_candidates.csv master_buy_decision_v2.csv low52_reversal.csv apex_matrix.csv stealth_accumulation.csv walk_forward_summary.csv core_trend_matrix.csv core_trend_matrix_summary.csv decision_diagnostic_report.csv action_walk_forward_summary.csv action_quality_summary.csv; do test -s "output/$f" || { echo "MISSING_OR_EMPTY $f"; exit 1; }; done
           python -c "import pandas as pd; h=pd.read_csv('output/early_hunter.csv'); b=pd.read_csv('output/buy_candidates.csv'); print('FINAL hunter=',len(h),'published_buy=',len(b)); print(h.PUBLISHED_ACTION.value_counts().to_dict() if 'PUBLISHED_ACTION' in h else {})"
       - name: Refresh Model Validation Cache
         run: PYTHONPATH=src python -c "from fast_model_cache import copy_current_to_cache; copy_current_to_cache('output')"
