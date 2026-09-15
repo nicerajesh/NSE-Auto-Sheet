@@ -6,14 +6,7 @@ from config import BT
 
 
 def parse_action_stats(stats):
-    """Restore action_stats after CSV serialization.
-
-    backtest_summary.csv can contain JSON/Python representations of nested
-    action_stats, including legacy NaN/Infinity tokens.  A failed parse must
-    never silently turn a real action sample into an empty list, because that
-    makes every action look like INSUFFICIENT_ACTION_TRADES and can suppress
-    otherwise valid releases.
-    """
+    """Restore action_stats after CSV serialization, including legacy NaN tokens."""
     v=(stats or {}).get('action_stats')
     if isinstance(v,list):
         return v
@@ -22,10 +15,9 @@ def parse_action_stats(stats):
     text=v.strip()
     if not text or text.lower() in {'nan','none','null'}:
         return []
-
-    candidates=[text]
-    candidates.append(re.sub(r'\b(?:NaN|nan|Infinity|-Infinity)\b','null',text))
-    candidates.append(re.sub(r'\b(?:NaN|nan|Infinity|-Infinity)\b','None',text))
+    candidates=[text,
+                re.sub(r'\b(?:NaN|nan|Infinity|-Infinity)\b','null',text),
+                re.sub(r'\b(?:NaN|nan|Infinity|-Infinity)\b','None',text)]
     for candidate in candidates:
         for parser in (json.loads, ast.literal_eval):
             try:
@@ -41,21 +33,60 @@ EDGE_REASONS={'LOW_PROFIT_FACTOR','NEGATIVE_MEDIAN_RETURN','LOW_WIN_RATE'}
 
 
 def evaluate_action(row,min_trades=None):
-    """Core numeric gate (trades/PF/median/win-rate) scoped to ONE action's own trade
-    sample. Used only as a fallback when the aggregate gate fails for an edge-quality
-    reason — lets a genuinely edge-positive action publish even if a different,
-    higher-volume action (typically SWING BUY) is dragging the blended average down."""
+    """Evaluate one action using its own historical sample; never lower thresholds."""
     required=BT.min_quality_trades if min_trades is None else int(min_trades)
     if not row or int(row.get('trades',0) or 0)<required:return False,'INSUFFICIENT_ACTION_TRADES'
-    pf=float(row.get('profit_factor',0) or 0);median=float(row.get('median_return_pct',0) or 0);win=float(row.get('win_rate_pct',0) or 0)
+    pf=float(row.get('profit_factor',0) or 0)
+    median=float(row.get('median_return_pct',0) or 0)
+    win=float(row.get('win_rate_pct',0) or 0)
     if pf<BT.min_quality_profit_factor:return False,'LOW_PROFIT_FACTOR'
     if median<=0:return False,'NEGATIVE_MEDIAN_RETURN'
     if win<BT.min_quality_win_rate:return False,'LOW_WIN_RATE'
     return True,'PASS'
 
 
+def _validate_walk_forward():
+    """Require real walk-forward evidence before any BUY release.
+
+    A missing/empty summary is a hard failure.  At least 60% of judgeable
+    windows must meet the core edge thresholds, and the most recent judgeable
+    window must also pass.  This prevents a strong old period from masking a
+    current regime failure.
+    """
+    from pathlib import Path
+    wf_path=Path('output')/'walk_forward_summary.csv'
+    if not wf_path.exists():
+        return False,'MISSING_WALK_FORWARD_SUMMARY'
+    try:
+        wf=pd.read_csv(wf_path)
+        required={'trades','profit_factor','median_return_pct','win_rate_pct','expectancy_pct'}
+        if wf.empty or not required.issubset(wf.columns):
+            return False,'MISSING_WALK_FORWARD_METRICS'
+        for c in required:
+            wf[c]=pd.to_numeric(wf[c],errors='coerce')
+        eligible=wf[wf['trades']>=max(5,BT.min_oos_trades//10)].dropna(subset=['profit_factor','median_return_pct','win_rate_pct','expectancy_pct'])
+        if eligible.empty:
+            return False,'ALL_WALK_FORWARD_WINDOWS_TOO_THIN'
+        passing=eligible[(eligible.profit_factor>=BT.min_quality_profit_factor)&
+                         (eligible.median_return_pct>0)&
+                         (eligible.win_rate_pct>=BT.min_oos_win_rate)&
+                         (eligible.expectancy_pct>BT.min_oos_expectancy_pct)]
+        pass_frac=len(passing)/len(eligible)
+        if pass_frac<0.60:
+            return False,f'INCONSISTENT_ACROSS_WINDOWS_{round(pass_frac*100,0)}PCT'
+        latest=eligible.iloc[-1]
+        if not (latest.profit_factor>=BT.min_oos_profit_factor and
+                latest.median_return_pct>0 and
+                latest.win_rate_pct>=BT.min_oos_win_rate and
+                latest.expectancy_pct>BT.min_oos_expectancy_pct):
+            return False,'LATEST_WALK_FORWARD_WINDOW_FAILED'
+        return True,'PASS'
+    except Exception:
+        return False,'WALK_FORWARD_VALIDATION_ERROR'
+
+
 def evaluate(stats,calibration=None,min_trades=None):
-    """Release BUYs only when overall trading performance and pre-breakout event calibration pass."""
+    """Release BUYs only when aggregate edge, calibration and OOS consistency pass."""
     required_trades=BT.min_quality_trades if min_trades is None else int(min_trades)
     if not stats or int(stats.get('trades',0) or 0)<required_trades:return False,'INSUFFICIENT_BACKTEST'
     pf=float(stats.get('profit_factor',0) or 0);median=float(stats.get('median_return_pct',0) or 0);win=float(stats.get('win_rate_pct',0) or 0)
@@ -65,30 +96,19 @@ def evaluate(stats,calibration=None,min_trades=None):
     if median<=0:return False,'NEGATIVE_MEDIAN_RETURN'
     if win<BT.min_quality_win_rate:return False,'LOW_WIN_RATE'
     if calibration is None or calibration.empty:return False,'MISSING_CALIBRATION'
-    q=calibration.copy();event=q[q['ANALYSIS'].eq('BREAKOUT_EVENT')] if 'ANALYSIS' in q.columns else pd.DataFrame()
-    if event.empty or int(event.TRADES.sum())<BT.probability_min_samples:return False,'INSUFFICIENT_BREAKOUT_EVENT_SAMPLES'
+    if 'ANALYSIS' not in calibration.columns:return False,'MISSING_CALIBRATION_ANALYSIS'
+    q=calibration.copy();event=q[q['ANALYSIS'].eq('BREAKOUT_EVENT')]
+    if event.empty or int(pd.to_numeric(event.TRADES,errors='coerce').fillna(0).sum())<BT.probability_min_samples:return False,'INSUFFICIENT_BREAKOUT_EVENT_SAMPLES'
     pre=event[event.ACTION.astype(str).str.contains('PRE-BREAKOUT',na=False)].copy()
-    if pre.empty or int(pre.TRADES.sum())<BT.probability_min_samples:return False,'INSUFFICIENT_PRE_BREAKOUT_SAMPLES'
+    if pre.empty or int(pd.to_numeric(pre.TRADES,errors='coerce').fillna(0).sum())<BT.probability_min_samples:return False,'INSUFFICIENT_PRE_BREAKOUT_SAMPLES'
     weighted=float(pre.BREAKOUT_RATE.mul(pre.TRADES).sum()/max(1,pre.TRADES.sum()))
     if weighted<35:return False,'LOW_PRE_BREAKOUT_HIT_RATE'
-    trade_q=q[q['ANALYSIS'].eq('TRADE_SCORE')] if 'ANALYSIS' in q.columns else pd.DataFrame();trade_q=trade_q[trade_q.TRADES>=5].copy()
-    if not trade_q.empty and {'ACTION','SCORE_BUCKET','AVG_RETURN'}.issubset(trade_q.columns):
-        core=trade_q[trade_q.SCORE_BUCKET.astype(str).eq('82-89')]
+    trade_q=q[q['ANALYSIS'].eq('TRADE_SCORE')].copy()
+    if not trade_q.empty:
+        trade_q['TRADES']=pd.to_numeric(trade_q['TRADES'],errors='coerce')
+        trade_q['AVG_RETURN']=pd.to_numeric(trade_q['AVG_RETURN'],errors='coerce')
+        core=trade_q[(trade_q.TRADES>=5)&trade_q.SCORE_BUCKET.astype(str).eq('82-89')]
         if not core.empty and float(core.AVG_RETURN.mean())<=0:return False,'CORE_SCORE_BAND_NEGATIVE'
-    try:
-        from pathlib import Path
-        wf_path=Path('output')/'walk_forward_summary.csv'
-        if wf_path.exists():
-            wf=pd.read_csv(wf_path)
-            if not wf.empty:
-                numeric=lambda c: pd.to_numeric(wf[c],errors='coerce') if c in wf.columns else pd.Series(dtype=float)
-                pf=numeric('profit_factor').dropna()
-                wr=numeric('win_rate_pct').dropna()
-                ex=numeric('expectancy_pct').dropna()
-                if pf.empty or wr.empty or ex.empty:return False,'MISSING_OOS_METRICS'
-                if float(pf.median())<BT.min_oos_profit_factor:return False,'LOW_OOS_PROFIT_FACTOR'
-                if float(wr.median())<BT.min_oos_win_rate:return False,'LOW_OOS_WIN_RATE'
-                if float(ex.median())<=BT.min_oos_expectancy_pct:return False,'NON_POSITIVE_OOS_EXPECTANCY'
-    except Exception:
-        return False,'OOS_VALIDATION_ERROR'
+    wf_ok,wf_reason=_validate_walk_forward()
+    if not wf_ok:return False,wf_reason
     return True,'PASS'
