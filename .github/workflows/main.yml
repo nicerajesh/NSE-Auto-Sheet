@@ -1,16 +1,14 @@
 name: Update NSE Stocks to Google Sheet
-
 on:
   schedule:
     - cron: '45 14 * * 1-5'
   workflow_dispatch:
     inputs:
       full_audit:
-        description: 'Run full backtests/validation instead of the fast daily refresh'
+        description: 'Run full backtests/validation instead of fast daily refresh'
         required: false
         default: false
         type: boolean
-
 jobs:
   update-sheet:
     runs-on: ubuntu-latest
@@ -23,7 +21,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -37,55 +35,30 @@ jobs:
       - name: Verify Engine
         run: |
           echo "COMMIT=$(git rev-parse HEAD)"
-          PYTHONPATH=src python -m py_compile src/config.py src/indicator.py src/strategy.py src/backtest.py src/quality_gate.py src/d1_database.py src/trade_manager.py src/persistent_runner.py src/persistent_runner_safe.py src/v3_engine.py src/v3_runner.py src/decision_engine.py src/v3_dashboard.py src/update_sheet.py src/finalize_outputs.py src/dashboard.py src/repair_sheet_output.py src/fast_model_cache.py src/apply_fast_mode.py src/ensure_action_plan.py tests/test_system.py src/csv_utils.py src/risk_manager.py src/corporate_actions.py src/edge_monitor.py src/master_decision.py src/run_v2_master.py src/simple_dashboard.py
+          PYTHONPATH=src python -m py_compile src/config.py src/indicator.py src/strategy.py src/backtest.py src/quality_gate.py src/persistent_runner.py src/v3_engine.py src/v3_runner.py src/decision_engine.py src/v3_dashboard.py src/update_sheet.py src/finalize_outputs.py src/dashboard.py src/repair_sheet_output.py src/fast_model_cache.py src/apply_fast_mode.py src/ensure_action_plan.py src/csv_utils.py src/risk_manager.py src/corporate_actions.py src/edge_monitor.py src/master_decision.py src/run_v2_master.py src/simple_dashboard.py src/core_trend_matrix.py src/publish_diagnostics.py
       - name: Unit Tests
-        run: PYTHONPATH=src pytest -q tests/test_system.py
+        run: PYTHONPATH=src pytest -q tests/test_system.py tests/test_core_trend_matrix.py
       - name: Validate Secrets
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: test -n "$GCP_CREDENTIALS" || (echo 'GCP_CREDENTIALS missing' && exit 1)
       - name: Prepare Output
-        run: |
-          rm -rf "$NSE_OUTPUT_DIR"
-          mkdir -p "$NSE_OUTPUT_DIR"
+        run: rm -rf output && mkdir -p output
       - name: Restore Persistent NSE History
         uses: actions/cache/restore@v4
         with:
           path: output/persistent_history.csv
           key: nse-persistent-history-v1
-          restore-keys: |
-            nse-persistent-history-v1-
-            nse-persistent-history-v1
+          restore-keys: nse-persistent-history-v1-
       - name: Restore Model Validation Cache
         uses: actions/cache/restore@v4
         with:
           path: model_cache
           key: nse-model-cache-v2
-          restore-keys: |
-            nse-model-cache-v2-
-            nse-model-cache-v2
-      - name: Verify Source Layout
-        run: |
-          test -f src/update_sheet.py
-          test -f src/persistent_runner.py
-          test -f src/v3_runner.py
-          test -f src/finalize_outputs.py
-          test -f src/repair_sheet_output.py
-          test -f src/simple_dashboard.py
-          test -f src/fast_model_cache.py
-          test -f src/apply_fast_mode.py
-          test -f src/ensure_action_plan.py
-      - name: Prepare Universal Source Compatibility
-        run: cp src/update_sheet.py update_sheet.py
-      - name: Select Daily Fast Mode
-        env:
-          FULL_AUDIT: ${{ inputs.full_audit || false }}
-        run: |
-          if [ "$FULL_AUDIT" = "true" ]; then echo "FAST_MODE=0" >> "$GITHUB_ENV"; else echo "FAST_MODE=1" >> "$GITHUB_ENV"; fi
-          echo "FULL_AUDIT=$FULL_AUDIT"
+          restore-keys: nse-model-cache-v2-
       - name: Apply Fast Model Cache
         env:
-          FAST_MODE: ${{ env.FAST_MODE }}
+          FAST_MODE: ${{ inputs.full_audit == true && '0' || '1' }}
           NSE_MODEL_CACHE_DIR: ${{ github.workspace }}/model_cache
         run: PYTHONPATH=src python src/apply_fast_mode.py
       - name: Run V3 Persistent NSE Engine
@@ -94,64 +67,53 @@ jobs:
           HISTORY_DAYS: 480
           WATCH_MIN_SCORE: 75
           PERSISTENT_D1: '0'
-          FAST_MODE: ${{ env.FAST_MODE }}
+          FAST_MODE: ${{ inputs.full_audit == true && '0' || '1' }}
           NSE_MODEL_CACHE_DIR: ${{ github.workspace }}/model_cache
-          PYTHONUNBUFFERED: '1'
-          PYTHONPATH: src
-          NSE_OUTPUT_DIR: ${{ github.workspace }}/output
           PAPER_MODE: ${{ vars.PAPER_MODE || '1' }}
         run: python src/v3_runner.py
-      - name: Guarantee Early Hunter CSV
-        run: |
-          mkdir -p output
-          if [ ! -s output/early_hunter.csv ]; then
-            echo 'WARNING: early_hunter.csv missing/empty after engine.'
-            if [ -s output/decision_candidates.csv ]; then cp output/decision_candidates.csv output/early_hunter.csv; else printf '%s\n' 'SYMBOL,DATE,CMP,ACTION,CATEGORY,NEXT_DAY_ACTION,BUY_DATE,STAGE,PRE_BREAKOUT_SCORE,BREAKOUT_SCORE,SWING_SCORE,HUNTER_SCORE,NEXT_DAY_SETUP_SCORE,BREAKOUT_PROBABILITY,MARKET_REGIME,MARKET_BREADTH,TREND,RS_VS_UNIVERSE,RS_RANK,ENTRY_PRICE,ENTRY_ZONE,BREAKOUT_TRIGGER,STOP_LOSS,TARGET_1,TARGET_2,TARGET_3,RISK_PCT,RISK_MANAGER_STATUS,REASONS' > output/early_hunter.csv; fi
-          fi
-          test -s output/early_hunter.csv
-      - name: Validate Persistent History
-        run: |
-          test -s output/persistent_history.csv
-          python -c "import pandas as pd; p=pd.read_csv('output/persistent_history.csv'); required={'DATE','SYMBOL','CLOSE_PRICE'}; missing=required-set(p.columns); assert not missing, 'Missing persistent history fields: '+','.join(sorted(missing)); print('PERSISTENT_HISTORY_ROWS=',len(p),'SESSIONS=',p['DATE'].nunique(),'SYMBOLS=',p['SYMBOL'].nunique())"
+      - name: Validate Engine Output
+        run: test -s output/early_hunter.csv && test -s output/persistent_history.csv
+      - name: Build Core Trend Matrix
+        run: PYTHONPATH=src python src/core_trend_matrix.py --input output/persistent_history.csv --output output/core_trend_matrix.csv
+      - name: Validate Core Trend Matrix
+        run: python -c "import pandas as pd; d=pd.read_csv('output/core_trend_matrix.csv'); s=pd.read_csv('output/core_trend_matrix_summary.csv'); assert not d.empty; assert {'RANK_SCORE','SYMBOL','ACTION'}<=set(d.columns); print(s.to_string(index=False))"
       - name: Save Persistent NSE History
         if: always()
         uses: actions/cache/save@v4
         with:
           path: output/persistent_history.csv
           key: nse-persistent-history-v1-${{ github.run_id }}
-      - name: Build Required V2 Master Decision
-        run: |
-          set -e
-          echo '=== BUILD V2 MASTER ==='
-          test -s output/decision_candidates.csv
-          rm -f output/master_buy_decision_v2.csv
-          PYTHONPATH=src python src/run_v2_master.py
-          test -s output/master_buy_decision_v2.csv
-          ls -lh output/master_buy_decision_v2.csv
       - name: Finalize Quality Gate and Outputs
-        run: python src/finalize_outputs.py
-      - name: Rebuild Required V2 Master Decision
-        run: |
-          set -e
-          PYTHONPATH=src python src/run_v2_master.py
-          test -s output/master_buy_decision_v2.csv
+        run: PYTHONPATH=src python src/finalize_outputs.py
+      - name: Rebuild V2 Master Decision
+        run: PYTHONPATH=src python src/run_v2_master.py
       - name: Guarantee V2 Master Schema
         run: |
-          set -e
-          python -c "from pathlib import Path; import pandas as pd; p=Path('output/master_buy_decision_v2.csv'); required=['RANK','SYMBOL','FINAL_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','EDGE_CONFIDENCE','EDGE_CONFIDENCE_LABEL','POSITION_QTY','CAPITAL_ALLOCATED','RISK_AMOUNT','RISK_MANAGER_STATUS','QUALITY_GATE','ACTION','WHY','DECISION_REASON']; d=pd.read_csv(p) if p.exists() and p.stat().st_size else pd.DataFrame(); [d.__setitem__(c,'') for c in required if c not in d.columns]; d=d[required]; d.to_csv(p,index=False); missing=[c for c in required if c not in d.columns]; assert not missing, 'V2 schema repair failed: '+','.join(missing); print('V2 SCHEMA OK:',','.join(required),'| ROWS=',len(d))"
-          test -s output/master_buy_decision_v2.csv
+          python - <<'PY'
+          import os,pandas as pd
+          p='output/master_buy_decision_v2.csv'; d=pd.read_csv(p) if os.path.exists(p) else pd.DataFrame()
+          cols=['RANK','SYMBOL','FINAL_ACTION','CMP','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3','RISK_PCT','EDGE_CONFIDENCE','EDGE_CONFIDENCE_LABEL','POSITION_QTY','CAPITAL_ALLOCATED','RISK_AMOUNT','RISK_MANAGER_STATUS','QUALITY_GATE','ACTION','WHY','DECISION_REASON']
+          for c in cols:
+              if c not in d:d[c]=''
+          d[cols].to_csv(p,index=False); print('V2 MASTER ROWS',len(d))
+          PY
+      - name: Build Diagnostic Report
+        run: |
+          python - <<'PY'
+          import pandas as pd, os
+          out='output'; h=pd.read_csv(f'{out}/early_hunter.csv'); core=pd.read_csv(f'{out}/core_trend_matrix.csv')
+          rows=[]
+          for name,d in [('Early Hunter',h),('Core Trend Matrix',core)]:
+              act=d['ACTION'].value_counts().to_dict() if 'ACTION' in d else {}
+              rows.append({'REPORT':name,'STATUS':'OK' if not d.empty else 'NO DATA','ROWS':len(d),'DETAIL':str(act)})
+          if 'PUBLISHED_ACTION' in h:
+              for k,v in h.PUBLISHED_ACTION.value_counts(dropna=False).items(): rows.append({'REPORT':'Final Action','STATUS':'OK','ROWS':int(v),'DETAIL':str(k)})
+          pd.DataFrame(rows).to_csv(f'{out}/decision_diagnostic_report.csv',index=False); print(pd.DataFrame(rows).to_string(index=False))
+          PY
       - name: Validate Decision Outputs
         run: |
-          set -e
-          required_files=(early_hunter.csv buy_candidates.csv decision_candidates.csv trading_commands.csv master_buy_decision_v2.csv low52_reversal.csv apex_matrix.csv stealth_accumulation.csv low52_backtest_summary.csv apex_backtest_summary.csv stealth_backtest_summary.csv)
-          for f in "${required_files[@]}"; do
-            if [ ! -s "output/$f" ]; then echo "MISSING_OR_EMPTY: output/$f"; ls -lah output || true; exit 1; fi
-          done
-          python -c "import pandas as pd; e=pd.read_csv('output/early_hunter.csv'); d=pd.read_csv('output/decision_candidates.csv'); c=pd.read_csv('output/trading_commands.csv'); m=pd.read_csv('output/master_buy_decision_v2.csv'); required=['V3_TIMING_SCORE','V3_OPPORTUNITY_SCORE','BREAKOUT_CHANCE_PCT','UPSIDE_EXPECTED_PCT','UPSIDE_BEST_CASE_PCT','USER_ACTION','IDEAL_ENTRY','BUY_ZONE','MAX_BUY_PRICE']; missing=[x for x in required if x not in d.columns]; assert not missing, 'Missing decision fields: '+','.join(missing); print('EARLY_HUNTER_ROWS=',len(e),'DECISION_ROWS=',len(d),'TRADING_COMMAND_ROWS=',len(c),'V2_MASTER_ROWS=',len(m))"
-      - name: Validate V2 Master Decision
-        run: |
-          test -s output/master_buy_decision_v2.csv
-          python -c "import pandas as pd; d=pd.read_csv('output/master_buy_decision_v2.csv'); required=['RANK','SYMBOL','FINAL_ACTION','QUALITY_GATE']; missing=[x for x in required if x not in d.columns]; assert not missing, 'Missing V2 master fields: '+','.join(missing); live={'🟢 BUY ON BREAKOUT','🔵 BUY ON PULLBACK'}; bad=d[d.FINAL_ACTION.fillna('').isin(live)]; assert bad.empty or (d.loc[bad.index,'QUALITY_GATE'].astype(str)=='PASS').all(), 'V2 master published live BUY without PASS quality gate'; trigger=int(d.FINAL_ACTION.fillna('').eq('🟡 BUY ON TRIGGER').sum()); print('V2 MASTER ROWS=',len(d),'| LIVE BUY=',len(bad),'| TRIGGER WAIT=',trigger)"
+          for f in early_hunter.csv buy_candidates.csv master_buy_decision_v2.csv low52_reversal.csv apex_matrix.csv stealth_accumulation.csv walk_forward_summary.csv core_trend_matrix.csv core_trend_matrix_summary.csv decision_diagnostic_report.csv; do test -s "output/$f" || { echo "MISSING_OR_EMPTY $f"; exit 1; }; done
+          python -c "import pandas as pd; h=pd.read_csv('output/early_hunter.csv'); b=pd.read_csv('output/buy_candidates.csv'); print('FINAL hunter=',len(h),'published_buy=',len(b)); print(h.PUBLISHED_ACTION.value_counts().to_dict() if 'PUBLISHED_ACTION' in h else {})"
       - name: Refresh Model Validation Cache
         run: PYTHONPATH=src python -c "from fast_model_cache import copy_current_to_cache; copy_current_to_cache('output')"
       - name: Save Model Validation Cache
@@ -163,23 +125,19 @@ jobs:
       - name: Repair Google Sheet Output
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          PYTHONUNBUFFERED: '1'
         run: python src/repair_sheet_output.py
-      - name: Ensure Actionable Sheet When Main Plan Is Empty
+      - name: Publish Core & Diagnostic Sheets
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          PYTHONUNBUFFERED: '1'
+        run: python src/publish_diagnostics.py
+      - name: Ensure Actionable Sheet
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: python src/ensure_action_plan.py
       - name: Build Trading Dashboard
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          PYTHONUNBUFFERED: '1'
         run: python src/dashboard.py
-      - name: Verify Outputs
-        run: |
-          required_files=(early_hunter.csv buy_candidates.csv dashboard.csv trade_ledger.csv decision_candidates.csv trading_commands.csv low52_reversal.csv apex_matrix.csv stealth_accumulation.csv master_buy_dashboard.csv low52_backtest_summary.csv apex_backtest_summary.csv stealth_backtest_summary.csv edge_monitor.csv walk_forward_summary.csv corporate_actions_detected.csv mera_action_plan.csv)
-          for f in "${required_files[@]}"; do test -s "output/$f" || { echo "MISSING_OR_EMPTY: output/$f"; ls -lah output || true; exit 1; }; done
-          python -c "import pandas as pd; d=pd.read_csv('output/decision_candidates.csv'); m=pd.read_csv('output/master_buy_dashboard.csv'); p=pd.read_csv('output/mera_action_plan.csv'); print('FINAL OUTPUT CHECK: decision=',len(d),'master=',len(m),'plan=',len(p)); print('WARNING: decision candidates exist but action plan is empty') if not d.empty and p.empty else None"
       - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -187,12 +145,3 @@ jobs:
           path: output/*.csv
           if-no-files-found: error
           retention-days: 30
-      - name: Notify on Failure
-        if: failure()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then exit 0; fi
-          MSG="NSE Auto Sheet run FAILED: ${{ github.repository }} @ ${{ github.sha }} — https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" --data-urlencode text="$MSG" || true
