@@ -113,7 +113,9 @@ jobs:
           aq=f'{out}/action_quality_summary.csv'
           if os.path.exists(aq):
               q=pd.read_csv(aq)
-              for _,r in q.iterrows(): rows.append({'REPORT':'V6 Action OOS','STATUS':'PASS' if bool(r.get('ok',False)) else 'BLOCKED','ROWS':int(r.get('windows',0) or 0),'DETAIL':str(r.to_dict())})
+              for _,r in q.iterrows():
+                  ok=str(r.get('ok','')).strip().lower()=='true'
+                  rows.append({'REPORT':'V6 Action OOS','STATUS':'PASS' if ok else 'BLOCKED','ROWS':int(r.get('windows',0) or 0),'DETAIL':str(r.to_dict())})
           pd.DataFrame(rows).to_csv(f'{out}/decision_diagnostic_report.csv',index=False); print(pd.DataFrame(rows).to_string(index=False))
           PY
       - name: Validate Decision Outputs
