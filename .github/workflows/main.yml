@@ -129,8 +129,44 @@ jobs:
           PY
       - name: Validate Decision Outputs
         run: |
-          for f in early_hunter.csv buy_candidates.csv master_buy_decision_v2.csv low52_reversal.csv apex_matrix.csv stealth_accumulation.csv walk_forward_summary.csv core_trend_matrix.csv core_trend_matrix_summary.csv decision_diagnostic_report.csv action_walk_forward_summary.csv action_quality_summary.csv v7_false_breakout_validation.csv; do test -s "output/$f" || { echo "MISSING_OR_EMPTY $f"; exit 1; }; done
-          python -c "import pandas as pd; h=pd.read_csv('output/early_hunter.csv'); b=pd.read_csv('output/buy_candidates.csv'); print('FINAL hunter=',len(h),'published_buy=',len(b)); print(h.PUBLISHED_ACTION.value_counts().to_dict() if 'PUBLISHED_ACTION' in h else {})"
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+          out=Path('output')
+          required_files=[
+            'early_hunter.csv','master_buy_decision_v2.csv','low52_reversal.csv',
+            'apex_matrix.csv','stealth_accumulation.csv','walk_forward_summary.csv',
+            'core_trend_matrix.csv','core_trend_matrix_summary.csv','decision_diagnostic_report.csv',
+            'action_walk_forward_summary.csv','action_quality_summary.csv','v7_false_breakout_validation.csv'
+          ]
+          for name in required_files:
+              p=out/name
+              if not p.exists() or p.stat().st_size==0:
+                  raise SystemExit(f'MISSING_OR_EMPTY_REQUIRED {name}')
+          h=pd.read_csv(out/'early_hunter.csv')
+          m=pd.read_csv(out/'master_buy_decision_v2.csv')
+          b=pd.read_csv(out/'buy_candidates.csv') if (out/'buy_candidates.csv').exists() else pd.DataFrame()
+          if h.empty:
+              raise SystemExit('INVALID_TRADING_OUTPUT: early_hunter.csv has no rows')
+          if m.empty:
+              raise SystemExit('INVALID_TRADING_OUTPUT: master_buy_decision_v2.csv has no rows')
+          for name,df,cols in [
+              ('Early Hunter',h,{'SYMBOL','ACTION','QUALITY_GATE','PUBLISHED_ACTION'}),
+              ('Master Buy Decision V2',m,{'SYMBOL','FINAL_ACTION','QUALITY_GATE','ACTION'}),
+          ]:
+              missing=cols-set(df.columns)
+              if missing: raise SystemExit(f'INVALID_SCHEMA {name}: missing {sorted(missing)}')
+          confirmed={'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}
+          published=int(h['PUBLISHED_ACTION'].isin(confirmed).sum())
+          buy_rows=int(len(b))
+          if buy_rows != published:
+              raise SystemExit(f'OUTPUT_MISMATCH: buy_candidates={buy_rows} but published_confirmed={published}')
+          blocked=int(h['PUBLISHED_ACTION'].astype(str).str.contains('BLOCKED',case=False,na=False).sum())
+          no_signal=(published==0)
+          print(f'VALIDATION OK | hunter={len(h)} | master={len(m)} | published_buy={published} | buy_candidates={buy_rows} | blocked={blocked} | no_signal={no_signal}')
+          if no_signal:
+              print('NO-SIGNAL DAY: valid output; not a data failure. Scanner context remains available in Early Hunter/Master Decision.')
+          PY
       - name: Refresh Model Validation Cache
         run: PYTHONPATH=src python -c "from fast_model_cache import copy_current_to_cache; copy_current_to_cache('output')"
       - name: Save Model Validation Cache
