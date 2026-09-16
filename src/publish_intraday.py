@@ -20,7 +20,7 @@ def clean(v):
 
 def write(ws, df):
     if df.empty:
-        values = [['NO INTRADAY BUY SIGNALS']] 
+        values = [['RY APEX MATRIX — INTRADAY BUY'], ['NO CURRENT VALIDATED INTRADAY BUY SIGNALS']]
     else:
         preferred = [
             'INTRADAY_RANK','SYMBOL','INTRADAY_ACTION','CMP','IDEAL_ENTRY',
@@ -31,14 +31,14 @@ def write(ws, df):
         cols = [c for c in preferred if c in df.columns]
         cols += [c for c in df.columns if c not in cols]
         df = df[cols]
-        values = [list(df.columns)] + [[clean(v) for v in row] for row in df.itertuples(index=False, name=None)]
+        values = [['RY APEX MATRIX — INTRADAY BUY'], ['UPDATED_CURRENT_RUN_ONLY'], list(df.columns)] + [[clean(v) for v in row] for row in df.itertuples(index=False, name=None)]
     if ws.row_count < len(values) + 3:
         ws.add_rows(len(values) + 3 - ws.row_count)
     if ws.col_count < max(20, len(values[0]) + 2):
         ws.add_cols(max(20, len(values[0]) + 2) - ws.col_count)
     ws.clear()
     ws.update('A1', values, value_input_option='USER_ENTERED')
-    ws.freeze(rows=1)
+    ws.freeze(rows=3 if not df.empty else 1)
 
 
 def main():
@@ -60,10 +60,22 @@ def main():
             return sh.add_worksheet(title=title, rows=500, cols=50)
 
     buy = safe_read_csv(OUT / 'intraday_buy_signals.csv')
-    watch = safe_read_csv(OUT / 'intraday_watchlist.csv')
-    write(worksheet('INTRADAY BUY SIGNALS'), buy)
-    write(worksheet('INTRADAY WATCHLIST'), watch)
-    print('INTRADAY SHEETS PUBLISHED | BUY=', len(buy), '| WATCHLIST=', len(watch))
+    if 'INTRADAY_ACTION' in buy.columns:
+        buy = buy[buy['INTRADAY_ACTION'].astype(str).str.upper().eq('INTRADAY BUY')].copy()
+    if 'SYMBOL' in buy.columns:
+        buy['SYMBOL'] = buy['SYMBOL'].astype(str).str.upper().str.strip()
+        buy = buy.drop_duplicates('SYMBOL', keep='first').reset_index(drop=True)
+    write(worksheet('INTRADAY BUY'), buy)
+
+    # Remove the old intraday watchlist only. Core sheets and the Swing/Delivery
+    # outputs are never touched here.
+    try:
+        sh.del_worksheet(sh.worksheet('INTRADAY WATCHLIST'))
+        print('REMOVED LEGACY SHEET | INTRADAY WATCHLIST')
+    except gspread.WorksheetNotFound:
+        pass
+
+    print('INTRADAY BUY PUBLISHED | BUY=', len(buy))
 
 
 if __name__ == '__main__':
