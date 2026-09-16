@@ -1,6 +1,7 @@
 name: Update NSE Stocks to Google Sheet
 on:
   schedule:
+    # 20:15 IST (14:45 UTC), Monday-Friday; after the daily NSE data pipeline window.
     - cron: '45 14 * * 1-5'
   workflow_dispatch:
     inputs:
@@ -35,7 +36,7 @@ jobs:
       - name: Verify Engine
         run: |
           echo "COMMIT=$(git rev-parse HEAD)"
-          PYTHONPATH=src python -m py_compile src/config.py src/indicator.py src/strategy.py src/backtest.py src/quality_gate.py src/v6_quality_validation.py src/v7_false_breakout_validation.py src/persistent_runner.py src/v3_engine.py src/v3_runner.py src/decision_engine.py src/v3_dashboard.py src/update_sheet.py src/finalize_outputs.py src/dashboard.py src/repair_sheet_output.py src/fast_model_cache.py src/apply_fast_mode.py src/ensure_action_plan.py src/csv_utils.py src/risk_manager.py src/corporate_actions.py src/edge_monitor.py src/master_decision.py src/run_v2_master.py src/simple_dashboard.py src/core_trend_matrix.py src/publish_diagnostics.py
+          PYTHONPATH=src python -m py_compile src/config.py src/indicator.py src/strategy.py src/backtest.py src/quality_gate.py src/v6_quality_validation.py src/v7_false_breakout_validation.py src/persistent_runner.py src/v3_engine.py src/v3_runner.py src/decision_engine.py src/v3_dashboard.py src/update_sheet.py src/finalize_outputs.py src/dashboard.py src/repair_sheet_output.py src/fast_model_cache.py src/apply_fast_mode.py src/ensure_action_plan.py src/csv_utils.py src/risk_manager.py src/corporate_actions.py src/edge_monitor.py src/master_decision.py src/run_v2_master.py src/simple_dashboard.py src/core_trend_matrix.py src/publish_diagnostics.py src/publish_strategy_sheets.py
       - name: Unit Tests
         run: PYTHONPATH=src pytest -q tests/test_system.py tests/test_core_trend_matrix.py tests/test_v6_quality_validation.py tests/test_v7_false_breakout_validation.py
       - name: Validate Secrets
@@ -133,39 +134,21 @@ jobs:
           import pandas as pd
           from pathlib import Path
           out=Path('output')
-          required_files=[
-            'early_hunter.csv','master_buy_decision_v2.csv','low52_reversal.csv',
-            'apex_matrix.csv','stealth_accumulation.csv','walk_forward_summary.csv',
-            'core_trend_matrix.csv','core_trend_matrix_summary.csv','decision_diagnostic_report.csv',
-            'action_walk_forward_summary.csv','action_quality_summary.csv','v7_false_breakout_validation.csv'
-          ]
+          required_files=['early_hunter.csv','master_buy_decision_v2.csv','low52_reversal.csv','apex_matrix.csv','stealth_accumulation.csv','walk_forward_summary.csv','core_trend_matrix.csv','core_trend_matrix_summary.csv','decision_diagnostic_report.csv','action_walk_forward_summary.csv','action_quality_summary.csv','v7_false_breakout_validation.csv']
           for name in required_files:
               p=out/name
-              if not p.exists() or p.stat().st_size==0:
-                  raise SystemExit(f'MISSING_OR_EMPTY_REQUIRED {name}')
-          h=pd.read_csv(out/'early_hunter.csv')
-          m=pd.read_csv(out/'master_buy_decision_v2.csv')
-          b=pd.read_csv(out/'buy_candidates.csv') if (out/'buy_candidates.csv').exists() else pd.DataFrame()
-          if h.empty:
-              raise SystemExit('INVALID_TRADING_OUTPUT: early_hunter.csv has no rows')
-          if m.empty:
-              raise SystemExit('INVALID_TRADING_OUTPUT: master_buy_decision_v2.csv has no rows')
-          for name,df,cols in [
-              ('Early Hunter',h,{'SYMBOL','ACTION','QUALITY_GATE','PUBLISHED_ACTION'}),
-              ('Master Buy Decision V2',m,{'SYMBOL','FINAL_ACTION','QUALITY_GATE','ACTION'}),
-          ]:
+              if not p.exists() or p.stat().st_size==0: raise SystemExit(f'MISSING_OR_EMPTY_REQUIRED {name}')
+          h=pd.read_csv(out/'early_hunter.csv'); m=pd.read_csv(out/'master_buy_decision_v2.csv'); b=pd.read_csv(out/'buy_candidates.csv') if (out/'buy_candidates.csv').exists() else pd.DataFrame()
+          if h.empty: raise SystemExit('INVALID_TRADING_OUTPUT: early_hunter.csv has no rows')
+          if m.empty: raise SystemExit('INVALID_TRADING_OUTPUT: master_buy_decision_v2.csv has no rows')
+          for name,df,cols in [('Early Hunter',h,{'SYMBOL','ACTION','QUALITY_GATE','PUBLISHED_ACTION'}),('Master Buy Decision V2',m,{'SYMBOL','FINAL_ACTION','QUALITY_GATE','ACTION'})]:
               missing=cols-set(df.columns)
               if missing: raise SystemExit(f'INVALID_SCHEMA {name}: missing {sorted(missing)}')
-          confirmed={'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}
-          published=int(h['PUBLISHED_ACTION'].isin(confirmed).sum())
-          buy_rows=int(len(b))
-          if buy_rows != published:
-              raise SystemExit(f'OUTPUT_MISMATCH: buy_candidates={buy_rows} but published_confirmed={published}')
-          blocked=int(h['PUBLISHED_ACTION'].astype(str).str.contains('BLOCKED',case=False,na=False).sum())
-          no_signal=(published==0)
+          confirmed={'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}; published=int(h['PUBLISHED_ACTION'].isin(confirmed).sum()); buy_rows=int(len(b))
+          if buy_rows != published: raise SystemExit(f'OUTPUT_MISMATCH: buy_candidates={buy_rows} but published_confirmed={published}')
+          blocked=int(h['PUBLISHED_ACTION'].astype(str).str.contains('BLOCKED',case=False,na=False).sum()); no_signal=(published==0)
           print(f'VALIDATION OK | hunter={len(h)} | master={len(m)} | published_buy={published} | buy_candidates={buy_rows} | blocked={blocked} | no_signal={no_signal}')
-          if no_signal:
-              print('NO-SIGNAL DAY: valid output; not a data failure. Scanner context remains available in Early Hunter/Master Decision.')
+          if no_signal: print('NO-SIGNAL DAY: valid output; not a data failure. Scanner context remains available in Early Hunter/Master Decision.')
           PY
       - name: Refresh Model Validation Cache
         run: PYTHONPATH=src python -c "from fast_model_cache import copy_current_to_cache; copy_current_to_cache('output')"
@@ -183,6 +166,10 @@ jobs:
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: python src/publish_diagnostics.py
+      - name: Publish Clean Strategy Sheets
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: python src/publish_strategy_sheets.py
       - name: Ensure Actionable Sheet
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
