@@ -15,6 +15,8 @@ V2_COLUMNS = [
     'RISK_AMOUNT','RISK_MANAGER_STATUS','QUALITY_GATE','ACTION','WHY','DECISION_REASON'
 ]
 
+BUY_ACTIONS={'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}
+
 
 def _sector_map():
     p=OUT/'sector_map.csv'
@@ -25,10 +27,7 @@ def _sector_map():
 
 
 def _load_hunter():
-    """Load Early Hunter; on a legitimate zero-signal day use Core Trend as
-    context so downstream user-facing outputs are not blank. This fallback
-    never grants a BUY: all BUY actions still pass through the quality gate.
-    """
+    """Load candidate context without converting a failed quality gate into BUY."""
     p=OUT/'early_hunter.csv'
     hunter=safe_read_csv(p) if p.exists() else pd.DataFrame()
     if not hunter.empty:
@@ -49,7 +48,7 @@ def _load_hunter():
 
 
 def _write_v2_master():
-    """Materialize V2 from the best available current candidate/context source."""
+    """Materialize the master from the best current candidate/context source."""
     preferred=OUT/'decision_candidates.csv'
     fallback=OUT/'early_hunter.csv'
     if preferred.exists():
@@ -72,6 +71,45 @@ def _write_v2_master():
     master=master[V2_COLUMNS]
     safe_to_csv(master,OUT/'master_buy_decision_v2.csv')
     print('V2 MASTER READY:',len(master),'rows | output/master_buy_decision_v2.csv | QUALITY_GATE=',master['QUALITY_GATE'].value_counts(dropna=False).to_dict())
+
+
+def _safe_bool(v):
+    if isinstance(v,bool): return v
+    return str(v).strip().lower() in {'true','1','yes','y','pass'}
+
+
+def _buy_quality_ok(row):
+    """Second-stage candidate safety filter. It only removes BUYs; it never creates one."""
+    # Require a complete executable trade plan.
+    required=('CMP','IDEAL_ENTRY','STOP_LOSS','TARGET_1')
+    try:
+        vals=[float(row.get(c)) for c in required]
+        if any(pd.isna(x) or x<=0 for x in vals): return False, 'INCOMPLETE_TRADE_PLAN'
+    except Exception:
+        return False, 'INCOMPLETE_TRADE_PLAN'
+
+    try:
+        entry=float(row.get('IDEAL_ENTRY'))
+        stop=float(row.get('STOP_LOSS'))
+        target=float(row.get('TARGET_1'))
+        risk=entry-stop
+        reward=target-entry
+        if risk<=0 or reward<=0: return False, 'INVALID_RISK_REWARD'
+        if reward/risk < 1.8: return False, 'LOW_RR'
+    except Exception:
+        return False, 'INVALID_RISK_REWARD'
+
+    # If available, use technical confirmation fields as hard safety filters.
+    for col in ('LIQUIDITY_STATUS','Liquidity Status'):
+        if col in row and str(row.get(col)).strip() and str(row.get(col)).strip().upper() in {'LOW','POOR','FAIL'}:
+            return False, 'LOW_LIQUIDITY'
+    for col in ('ATR_RISK_PCT','ATR Risk %'):
+        if col in row:
+            try:
+                atr=float(row.get(col))
+                if pd.notna(atr) and not (0 < atr <= 5): return False, 'HIGH_ATR_RISK'
+            except Exception: pass
+    return True, 'PASS'
 
 
 def main():
@@ -100,7 +138,7 @@ def main():
     action_stats={a.get('ACTION'):a for a in parse_action_stats(stats)}
     per_action_verdict={}
     if not ok and reason in EDGE_REASONS:
-        for action in ('PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'):
+        for action in BUY_ACTIONS:
             per_action_verdict[action]=evaluate_action(action_stats.get(action))
         print('PER-ACTION GATE:',{a:v for a,v in per_action_verdict.items()})
 
@@ -113,40 +151,48 @@ def main():
 
     def _published(row):
         action=row.get('ACTION')
-        if action not in {'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}:return action
-        return action if _gate_for(action)=='PASS' else 'QUALITY BLOCKED'
+        if action not in BUY_ACTIONS:return action
+        gate=_gate_for(action)
+        if gate!='PASS': return 'QUALITY BLOCKED ('+str(gate)+')'
+        safe,safe_reason=_buy_quality_ok(row)
+        return action if safe else 'QUALITY BLOCKED ('+safe_reason+')'
 
     if not hunter.empty:
         hunter['QUALITY_GATE']=hunter['ACTION'].map(_gate_for).fillna('PASS' if ok else reason)
         hunter['PUBLISHED_ACTION']=hunter.apply(_published,axis=1)
+        hunter['BUY_ELIGIBLE']=hunter['PUBLISHED_ACTION'].isin(BUY_ACTIONS)
         if used_core_fallback:
-            # Core Trend context is explicitly marked; it is not an additional
-            # release path and cannot turn a blocked setup into a live BUY.
             hunter['SOURCE_CONTEXT']='CORE_TREND_FALLBACK_NO_SIGNAL'
     else:
         hunter['QUALITY_GATE']=pd.Series(dtype=object)
         hunter['PUBLISHED_ACTION']=pd.Series(dtype=object)
+        hunter['BUY_ELIGIBLE']=pd.Series(dtype=bool)
 
     ledger=safe_read_csv(OUT/'trade_ledger.csv') if (OUT/'trade_ledger.csv').exists() else pd.DataFrame()
     hunter=apply_risk_management(hunter,ledger,_sector_map())
     if not hunter.empty and 'RISK_MANAGER_STATUS' in hunter.columns:
-        rblocked=hunter['PUBLISHED_ACTION'].isin({'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}) & ~hunter['RISK_MANAGER_STATUS'].isin({'PASS','N/A_GATE_BLOCKED','N/A'})
+        rblocked=hunter['PUBLISHED_ACTION'].isin(BUY_ACTIONS) & ~hunter['RISK_MANAGER_STATUS'].isin({'PASS','N/A_GATE_BLOCKED','N/A'})
         if rblocked.any():
-            print(f"RISK MANAGER: {int(rblocked.sum())} signal(s) cleared the quality gate but were blocked on money-management grounds (position caps / drawdown kill-switch) — see RISK_MANAGER_STATUS")
+            print(f'RISK MANAGER: {int(rblocked.sum())} signal(s) blocked by position/drawdown controls')
             hunter.loc[rblocked,'PUBLISHED_ACTION']='RISK BLOCKED (' + hunter.loc[rblocked,'RISK_MANAGER_STATUS'].astype(str) + ')'
+            hunter.loc[rblocked,'BUY_ELIGIBLE']=False
 
     edge=compute_divergence(ledger,stats)
     safe_to_csv(edge,OUT/'edge_monitor.csv')
-    decaying=edge[edge.get('EDGE_STATUS','')=='EDGE_DECAY_WARNING'] if not edge.empty else pd.DataFrame()
-    if not decaying.empty:
-        print(f"EDGE MONITOR WARNING: live results are underperforming the backtest for: {', '.join(decaying.ACTION.tolist())} — see edge_monitor.csv")
 
+    # User-facing BUY report: only executable BUY rows. Blocked/watch/context rows remain in Early Hunter.
     safe_to_csv(hunter,OUT/'early_hunter.csv')
-    safe_to_csv(hunter[hunter.get('PUBLISHED_ACTION','WATCH').isin({'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'})],OUT/'buy_candidates.csv')
+    buy=hunter[hunter['BUY_ELIGIBLE']].copy() if not hunter.empty else pd.DataFrame(columns=hunter.columns)
+    if not buy.empty:
+        sort_cols=[c for c in ('EDGE_CONFIDENCE','HUNTER_SCORE','PRE_BREAKOUT_SCORE') if c in buy.columns]
+        if sort_cols: buy=buy.sort_values(sort_cols,ascending=False,kind='mergesort')
+        buy.insert(0,'BUY_RANK',range(1,len(buy)+1))
+    safe_to_csv(buy,OUT/'buy_candidates.csv')
+
     stats['quality_gate']='PASS' if ok else reason
     safe_to_csv(pd.DataFrame([stats]),stats_path)
     _write_v2_master()
-    published=int(hunter.PUBLISHED_ACTION.isin({'PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY'}).sum()) if not hunter.empty else 0
+    published=int(hunter['BUY_ELIGIBLE'].sum()) if not hunter.empty else 0
     print(f'FINAL QUALITY GATE={reason} | BUY PUBLISHED={published} | CORE_FALLBACK={used_core_fallback}')
 
 if __name__=='__main__': main()
