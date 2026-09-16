@@ -1,0 +1,77 @@
+name: RY APEX Intraday Report
+
+on:
+  workflow_run:
+    workflows: ["Update NSE Stocks to Google Sheet"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  intraday-report:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: src
+      NSE_OUTPUT_DIR: ${{ github.workspace }}/output
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Libraries
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download Main Engine Artifact
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: nse-early-hunter-profit-optimized-engine
+          path: output
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Prepare Empty Output for Manual Run
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: mkdir -p output
+
+      - name: Build Intraday Research Signals
+        run: PYTHONPATH=src python src/intraday_engine.py
+
+      - name: Validate Intraday Outputs
+        run: |
+          test -f output/intraday_buy_signals.csv
+          test -f output/intraday_watchlist.csv
+          python - <<'PY'
+          import pandas as pd
+          b=pd.read_csv('output/intraday_buy_signals.csv')
+          w=pd.read_csv('output/intraday_watchlist.csv')
+          if not b.empty and not set(b['INTRADAY_ACTION'].astype(str)).issubset({'INTRADAY BUY'}):
+              raise SystemExit('INVALID_INTRADAY_BUY_OUTPUT')
+          print(f'INTRADAY VALID | BUY={len(b)} | WATCHLIST={len(w)}')
+          PY
+
+      - name: Publish Intraday Google Sheets
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: python src/publish_intraday.py
+
+      - name: Upload Intraday Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nse-intraday-research-report
+          path: output/intraday_*.csv
+          if-no-files-found: error
+          retention-days: 30
