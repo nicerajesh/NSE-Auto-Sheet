@@ -1,5 +1,7 @@
 name: Update NSE Stocks to Google Sheet
 on:
+  push:
+    branches: [main]
   schedule:
     # 20:15 IST (14:45 UTC), Monday-Friday; after the daily NSE data pipeline window.
     - cron: '45 14 * * 1-5'
