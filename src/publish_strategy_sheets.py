@@ -124,6 +124,39 @@ def build_buy_view(hunter: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+
+def build_master_view(hunter: pd.DataFrame) -> pd.DataFrame:
+    """Single user-facing classification: exactly one status per symbol."""
+    if hunter.empty or 'SYMBOL' not in hunter.columns:
+        return pd.DataFrame()
+    x=hunter.copy()
+    x['SYMBOL']=x['SYMBOL'].astype(str).str.upper().str.strip()
+    statuses=[]; reasons=[]
+    for _,r in x.iterrows():
+        action=str(r.get('ACTION','')).strip().upper()
+        if bool(r.get('BUY_ELIGIBLE',False)):
+            status='VALIDATED BUY'; reason='Historical edge + executable plan + risk gates passed'
+        elif action in BUY_ACTIONS and technical_research_ok(r):
+            status='RESEARCH BUY'; reason='Technical setup passes research filters; historical release gate is not validated'
+        elif action in BUY_ACTIONS and str(r.get('PUBLISHED_ACTION','')).upper().startswith('RISK BLOCKED'):
+            status='RISK BLOCKED'; reason=str(r.get('RISK_MANAGER_STATUS','Risk manager blocked'))
+        elif action in BUY_ACTIONS:
+            status='QUALITY BLOCKED'; reason=str(r.get('QUALITY_GATE','Historical validation gate blocked release'))
+        elif action in {'WATCH','WAIT','REVERSAL WATCH','STEALTH WATCH'}:
+            status='WATCH'; reason='Setup developing; no validated entry'
+        else:
+            status='NO TRADE'; reason='Technical conditions do not qualify'
+        statuses.append(status); reasons.append(reason)
+    x['SIGNAL_STATUS']=statuses; x['DECISION_REASON']=reasons
+    priority={'VALIDATED BUY':1,'RESEARCH BUY':2,'WATCH':3,'RISK BLOCKED':4,'QUALITY BLOCKED':5,'NO TRADE':6}
+    x['_P']=x['SIGNAL_STATUS'].map(priority).fillna(9)
+    score=pd.to_numeric(x.get('HUNTER_SCORE',x.get('RANK_SCORE',pd.Series(0,index=x.index))),errors='coerce').fillna(0)
+    x['_S']=score
+    x=x.sort_values(['_P','_S'],ascending=[True,False],kind='mergesort').drop_duplicates('SYMBOL',keep='first')
+    x=x.drop(columns=['_P','_S'],errors='ignore').reset_index(drop=True)
+    x.insert(0,'MASTER_RANK',range(1,len(x)+1))
+    return x
+
 def delivery_only(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -188,10 +221,12 @@ def main():
             return sh.add_worksheet(title=title, rows=500, cols=50)
 
     hunter = safe_read_csv(OUT / 'early_hunter.csv')
+    master = build_master_view(hunter)
     buys = build_buy_view(hunter)
     swing = buys.copy()
     delivery = delivery_only(buys)
 
+    write(worksheet('MASTER'), master, 'RY APEX MATRIX — MASTER DECISION')
     write(worksheet('SWING'), swing, 'RY APEX MATRIX — SWING BUY HUNTER')
     write(worksheet('DELIVERY'), delivery, 'RY APEX MATRIX — DELIVERY BUY HUNTER')
 
@@ -201,13 +236,14 @@ def main():
         'MERA ACTION PLAN', 'Master Buy Dashboard', 'Early Hunter',
         'Core Trend Matrix', 'Decision Diagnostics', 'Dashboard',
         'INTRADAY WATCHLIST', 'Action Plan', 'Trading Dashboard',
+        'Top 500 Stocks', '52 Week Low Rocket', 'APEX Matrix', 'Stealth Accumulation',
     }
     existing = {ws.title: ws for ws in sh.worksheets()}
     for title in sorted(legacy_tabs & set(existing)):
         sh.del_worksheet(existing[title])
         print('REMOVED LEGACY SHEET |', title)
 
-    print(f'CLEAN STRATEGY PUBLISH | SWING={len(swing)} | DELIVERY={len(delivery)} | VALIDATED={int((buys.SIGNAL_STATUS == "VALIDATED BUY").sum()) if not buys.empty else 0} | RESEARCH={int((buys.SIGNAL_STATUS == "RESEARCH BUY").sum()) if not buys.empty else 0}')
+    print(f'CLEAN STRATEGY PUBLISH | MASTER={len(master)} | SWING={len(swing)} | DELIVERY={len(delivery)} | VALIDATED={int((buys.SIGNAL_STATUS == "VALIDATED BUY").sum()) if not buys.empty else 0} | RESEARCH={int((buys.SIGNAL_STATUS == "RESEARCH BUY").sum()) if not buys.empty else 0}')
 
 
 if __name__ == '__main__':
