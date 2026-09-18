@@ -256,6 +256,10 @@ status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | MOD
 _astats={a.get('ACTION'):a for a in (stats.get('action_stats') or [])}
 _abits=' | '.join(f"{_a} BT{_astats[_a].get('trades',0)} Win{_astats[_a].get('win_rate_pct',0)}% PF{_astats[_a].get('profit_factor',0)}" for _a in ('PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY') if _a in _astats)
 if _abits:status=status+' || '+_abits
-ws_stocks.update(values=[['STATUS']],range_name='T1');ws_stocks.update(values=[[status]],range_name='T2');print(status)
+if WRITE_LEGACY_SHEETS:
+    ws_stocks.update(values=[['STATUS']],range_name='T1');ws_stocks.update(values=[[status]],range_name='T2')
+else:
+    print('LEGACY STATUS WRITE DISABLED')
+print(status)
 if not buy.empty:
     cols=[c for c in ['SYMBOL','ACTION','CATEGORY','HUNTER_SCORE','CMP','ENTRY_PRICE','ENTRY_ZONE','BREAKOUT_TRIGGER','STOP_LOSS','TARGET_1','TARGET_2','TARGET_3'] if c in buy.columns];print(buy[cols].head(30).to_string(index=False))
