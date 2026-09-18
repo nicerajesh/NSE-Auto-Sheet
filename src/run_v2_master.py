@@ -14,12 +14,23 @@ V2_COLUMNS = [
 
 
 def main():
-    src=OUT/'decision_candidates.csv'
-    if not src.exists():
-        raise RuntimeError('output/decision_candidates.csv missing')
+    # V2 must consume the same canonical candidate context as finalization.
+    # decision_candidates.csv can legitimately be empty on a no-signal day,
+    # so never let that intermediate file erase a populated Early Hunter/Core Trend set.
+    sources=[OUT/'early_hunter.csv', OUT/'decision_candidates.csv', OUT/'core_trend_matrix.csv']
+    df=pd.DataFrame()
+    source_used=None
+    for src in sources:
+        if src.exists():
+            candidate=safe_read_csv(src)
+            if not candidate.empty and {'SYMBOL','ACTION'}.issubset(candidate.columns):
+                df=candidate
+                source_used=src.name
+                break
+    if df.empty:
+        raise RuntimeError('No candidate context available: early_hunter.csv, decision_candidates.csv and core_trend_matrix.csv are all empty')
 
-    df=safe_read_csv(src)
-    regime=str(df.iloc[0].get('MARKET_REGIME','UNKNOWN')) if not df.empty else 'UNKNOWN'
+    regime=str(df.iloc[0].get('MARKET_REGIME','UNKNOWN'))
     master=build_master(df, regime)
 
     # Always publish the complete V2 schema.  Older/partial master_decision
@@ -40,7 +51,7 @@ def main():
 
     master = master[V2_COLUMNS]
     safe_to_csv(master, OUT/'master_buy_decision_v2.csv')
-    print('V2 MASTER READY:', len(master), 'rows | schema=', ','.join(master.columns))
+    print('V2 MASTER READY:', len(master), 'rows | source=', source_used, '| schema=', ','.join(master.columns))
     print(master.head(15).to_string(index=False) if not master.empty else 'NO SETUPS')
 
 
