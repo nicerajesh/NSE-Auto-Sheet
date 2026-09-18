@@ -230,18 +230,16 @@ def main():
     write(worksheet('SWING'), swing, 'RY APEX MATRIX — SWING BUY HUNTER')
     write(worksheet('DELIVERY'), delivery, 'RY APEX MATRIX — DELIVERY BUY HUNTER')
 
-    # Keep the Google Sheet intentionally small. Diagnostics remain available
-    # as workflow artifacts/CSV and are not competing user-facing decisions.
-    legacy_tabs = {
-        'MERA ACTION PLAN', 'Master Buy Dashboard', 'Early Hunter',
-        'Core Trend Matrix', 'Decision Diagnostics', 'Dashboard',
-        'INTRADAY WATCHLIST', 'Action Plan', 'Trading Dashboard',
-        'Top 500 Stocks', '52 Week Low Rocket', 'APEX Matrix', 'Stealth Accumulation',
-    }
+    # Keep ONLY the three canonical user-facing tabs. Any other project-generated
+    # strategy/diagnostic tab is obsolete and is removed so there can be only one
+    # source of truth in Google Sheets.
+    canonical_tabs = {'MASTER', 'SWING', 'DELIVERY'}
     existing = {ws.title: ws for ws in sh.worksheets()}
-    for title in sorted(legacy_tabs & set(existing)):
-        sh.del_worksheet(existing[title])
-        print('REMOVED LEGACY SHEET |', title)
+    for title, ws in existing.items():
+        if title not in canonical_tabs:
+            sh.del_worksheet(ws)
+            print('REMOVED OBSOLETE SHEET |', title)
+
 
     print(f'CLEAN STRATEGY PUBLISH | MASTER={len(master)} | SWING={len(swing)} | DELIVERY={len(delivery)} | VALIDATED={int((buys.SIGNAL_STATUS == "VALIDATED BUY").sum()) if not buys.empty else 0} | RESEARCH={int((buys.SIGNAL_STATUS == "RESEARCH BUY").sum()) if not buys.empty else 0}')
 
