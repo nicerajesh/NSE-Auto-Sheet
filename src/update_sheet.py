@@ -53,8 +53,9 @@ for old_name in ('Top 250 Stocks','Top 250 Turnover','Top 500 Turnover','Turnove
         old=book.worksheet(old_name); book.del_worksheet(old)
     except gspread.WorksheetNotFound: pass
     except Exception as e: print(f'legacy tab cleanup warning for {old_name}: {e}')
-ws_stocks=get_or_create(STOCKS_SHEET,1000,30)
-ws_hunter=get_or_create(HUNTER_SHEET,3000,100)
+WRITE_LEGACY_SHEETS=os.getenv('WRITE_LEGACY_SHEETS','0').strip().lower() in {'1','true','yes'}
+ws_stocks=get_or_create(STOCKS_SHEET,1000,30) if WRITE_LEGACY_SHEETS else None
+ws_hunter=get_or_create(HUNTER_SHEET,3000,100) if WRITE_LEGACY_SHEETS else None
 def sess():
     s=requests.Session();s.headers.update({'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/151 Safari/537.36','Accept-Language':'en-US,en;q=0.9','Referer':'https://www.nseindia.com/','Accept':'application/json,text/plain,*/*'})
     try:s.get('https://www.nseindia.com',timeout=20)
@@ -237,14 +238,20 @@ view[['Decision','Decision Reason']]=view.SYMBOL.map(drow).apply(pd.Series)
 for outcol,hcol in [('Hunter Score','HUNTER_SCORE'),('Stage','STAGE'),('Entry Price','ENTRY_PRICE'),('Entry Zone','ENTRY_ZONE'),('Entry Trigger','BREAKOUT_TRIGGER'),('Stop Loss','STOP_LOSS'),('Target 1','TARGET_1'),('Target 2','TARGET_2'),('Target 3','TARGET_3')]:view[outcol]=view.SYMBOL.map(lambda x:hmap.get(x,{}).get(hcol,''))
 view=view.sort_values(['Decision','Hunter Score'],ascending=[True,False],na_position='last').head(500)
 headers=['NSE Code','Volume','Close Price','CMP','50 DMA','100 DMA','200 DMA','Bull Run','Decision','Decision Reason','Hunter Score','Stage','Entry Price','Entry Zone','Entry Trigger','Stop Loss','Target 1','Target 2','Target 3','Quality Gate'];rows=[headers]+[[sheet_scalar(v) for v in [r.SYMBOL,r.TTL_TRD_QNTY,r.CLOSE_PRICE,r.CLOSE_PRICE,getattr(r,'EMA50',''),getattr(r,'EMA100',''),getattr(r,'EMA200',''),r['Bull Run'],r['Decision'],r['Decision Reason'],r['Hunter Score'],r['Stage'],r['Entry Price'],r['Entry Zone'],r['Entry Trigger'],r['Stop Loss'],r['Target 1'],r['Target 2'],r['Target 3'],hmap.get(r.SYMBOL,{}).get('QUALITY_GATE',gate_reason)]] for _,r in view.iterrows()]
-safe_clear(ws_stocks,ws_hunter);ws_stocks.update(values=rows,range_name='A1',value_input_option='USER_ENTERED'); hrows=flat_frame_rows(hunter); ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')
-try:
-    def fmt_range(a1,typ='NUMBER',pattern='0.00'):ws_hunter.format(a1,{'numberFormat':{'type':typ,'pattern':pattern}})
-    fmt_range('B2:B501','NUMBER','0');fmt_range('C2:G501','NUMBER','0.00');fmt_range('K2:K501','NUMBER','0')
-except Exception as e:print('Sheet format warning:',e)
-for ws in (ws_stocks,ws_hunter):
-    try:ws.freeze(rows=1)
-    except Exception:pass
+if WRITE_LEGACY_SHEETS:
+    safe_clear(ws_stocks,ws_hunter)
+    ws_stocks.update(values=rows,range_name='A1',value_input_option='USER_ENTERED')
+    hrows=flat_frame_rows(hunter)
+    ws_hunter.update(values=hrows,range_name='A1',value_input_option='USER_ENTERED')
+    try:
+        def fmt_range(a1,typ='NUMBER',pattern='0.00'):ws_hunter.format(a1,{'numberFormat':{'type':typ,'pattern':pattern}})
+        fmt_range('B2:B501','NUMBER','0');fmt_range('C2:G501','NUMBER','0.00');fmt_range('K2:K501','NUMBER','0')
+    except Exception as e:print('Sheet format warning:',e)
+    for ws in (ws_stocks,ws_hunter):
+        try:ws.freeze(rows=1)
+        except Exception:pass
+else:
+    print('LEGACY GOOGLE SHEET WRITE DISABLED: canonical publisher will update only current strategy tabs')
 status=f'NIFTY500 | Data {latest_date:%d-%b-%Y} | Universe {len(universe)} | MODEL BUY {len(buy)} | PRE {int((hunter.ACTION=="PRE-BREAKOUT BUY").sum())} | BREAKOUT {int((hunter.ACTION=="BREAKOUT BUY").sum())} | SWING {int((hunter.ACTION=="SWING BUY").sum())} | WATCH gate {MIN_SCORE} | BUY gate {STRAT.buy_score} | BT {stats.get("trades",0)} | Win {stats.get("win_rate_pct",0)}% | PF {stats.get("profit_factor",0)} | Gate {gate_reason} | D1 sessions {hist.DATE.nunique()}'
 _astats={a.get('ACTION'):a for a in (stats.get('action_stats') or [])}
 _abits=' | '.join(f"{_a} BT{_astats[_a].get('trades',0)} Win{_astats[_a].get('win_rate_pct',0)}% PF{_astats[_a].get('profit_factor',0)}" for _a in ('PRE-BREAKOUT BUY','BREAKOUT BUY','SWING BUY') if _a in _astats)
