@@ -74,18 +74,13 @@ def _load_hunter():
 
 
 def _write_v2_master():
-    """Materialize the master from the best current candidate/context source."""
-    preferred=OUT/'decision_candidates.csv'
-    fallback=OUT/'early_hunter.csv'
-    if preferred.exists():
-        df=safe_read_csv(preferred)
-        if df.empty and fallback.exists(): df=safe_read_csv(fallback)
-    elif fallback.exists():
-        df=safe_read_csv(fallback)
-    else:
-        raise RuntimeError('Neither decision_candidates.csv nor early_hunter.csv is available')
-
-    regime=str(df.iloc[0].get('MARKET_REGIME','UNKNOWN')) if not df.empty else 'UNKNOWN'
+    """Materialize V2 from the same canonical source used by finalization."""
+    # Never allow an empty/failed intermediate decision_candidates.csv to erase
+    # a valid Core Trend fallback. This was the source of zero-row V2 failures.
+    df, used_core = _load_hunter()
+    if df.empty:
+        raise RuntimeError('No candidate context available: early_hunter.csv and core_trend_matrix.csv are both empty')
+    regime=str(df.iloc[0].get('MARKET_REGIME','UNKNOWN'))
     master=build_master(df, regime)
     for col in V2_COLUMNS:
         if col not in master.columns:
