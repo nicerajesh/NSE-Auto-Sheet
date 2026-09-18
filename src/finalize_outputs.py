@@ -41,9 +41,35 @@ def _load_hunter():
     hunter=core.copy()
     if 'RANK_SCORE' in hunter.columns and 'HUNTER_SCORE' not in hunter.columns:
         hunter['HUNTER_SCORE']=hunter['RANK_SCORE']
-    if 'ENTRY_PRICE' in hunter.columns and 'IDEAL_ENTRY' not in hunter.columns:
-        hunter['IDEAL_ENTRY']=hunter['ENTRY_PRICE']
-    hunter['SOURCE_CONTEXT']='CORE_TREND_FALLBACK_NO_SIGNAL'
+
+    # Canonicalize technical setup labels. These are NOT released BUY signals.
+    if 'ACTION' in hunter.columns:
+        hunter['TECHNICAL_ACTION']=hunter['ACTION'].astype(str)
+        hunter['ACTION']=hunter['ACTION'].replace({
+            'STRONG BUY':'SWING BUY',
+            'BUY ON PULLBACK':'SWING BUY',
+        })
+
+    # Core Trend Matrix has no scanner-time trade plan. Build a deterministic
+    # research plan from CMP + ATR; validation still happens downstream.
+    cmpv=pd.to_numeric(hunter.get('CMP'),errors='coerce')
+    atrp=pd.to_numeric(hunter.get('ATR_PCT'),errors='coerce')
+    atr_abs=cmpv*atrp/100.0
+    entry=cmpv
+    stop=entry-1.6*atr_abs
+    target1=entry+2.0*(entry-stop)
+    target2=entry+3.0*(entry-stop)
+    target3=entry+4.0*(entry-stop)
+    hunter['IDEAL_ENTRY']=entry
+    hunter['STOP_LOSS']=stop
+    hunter['TARGET_1']=target1
+    hunter['TARGET_2']=target2
+    hunter['TARGET_3']=target3
+    hunter['RISK_PCT']=((entry-stop)/entry*100).round(2)
+    hunter['ATR_RISK_PCT']=atrp
+    hunter['BUY_ZONE']=entry.map(lambda x: f'{x*0.99:.2f} - {x*1.01:.2f}' if pd.notna(x) else '')
+    hunter['MAX_BUY_PRICE']=entry*1.015
+    hunter['SOURCE_CONTEXT']='CORE_TREND_FALLBACK_TECHNICAL_CANDIDATE'
     return hunter, True
 
 
