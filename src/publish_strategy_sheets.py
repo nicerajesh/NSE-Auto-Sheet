@@ -1,37 +1,43 @@
-"""Publish the single clean user-facing Swing/Delivery views.
+"""Canonical Google Sheets publisher.
 
-Design goals:
-- VALIDATED BUY remains the strict, historically validated signal.
-- RESEARCH BUY surfaces technically strong candidates when the historical
-  release gate is blocked, instead of hiding them as NO BUY.
-- Risk/incomplete-plan candidates are never promoted to RESEARCH BUY.
-- Core data/diagnostic CSVs stay in the artifact; Google Sheets stays simple.
+Exactly two user-facing tabs are maintained:
+1. ACTION PLAN - executable BUY setups only.
+2. SYSTEM STATUS - compact health summary.
+
+All research, indicators, backtests, OOS validation and diagnostics remain
+backend CSV artifacts and are never published as extra tabs.
 """
 from __future__ import annotations
 
 import json
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import gspread
 import numpy as np
 import pandas as pd
 from google.oauth2.service_account import Credentials
-from gspread.exceptions import APIError
-import time
+from gspread.exceptions import APIError, WorksheetNotFound
 
 from csv_utils import safe_read_csv
 
-OUT = Path(os.getenv('NSE_OUTPUT_DIR', 'output'))
-DEFAULT_SHEET_ID = '1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM'
-BUY_ACTIONS = {'PRE-BREAKOUT BUY', 'BREAKOUT BUY', 'SWING BUY'}
-BLOCK_WORDS = {'QUALITY BLOCKED', 'RISK BLOCKED'}
+OUT = Path(os.getenv("NSE_OUTPUT_DIR", "output"))
+DEFAULT_SHEET_ID = "1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM"
+KEEP_SHEETS = {"ACTION PLAN", "SYSTEM STATUS"}
+BUY_ACTIONS = {"PRE-BREAKOUT BUY", "BREAKOUT BUY", "SWING BUY"}
 
 
-def clean(v):
-    if pd.isna(v):
-        return ''
-    return v.item() if hasattr(v, 'item') else v
+def clean(value):
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return value.item() if hasattr(value, "item") else value
 
 
 def num(row, *names):
@@ -46,349 +52,245 @@ def num(row, *names):
     return np.nan
 
 
-def technical_research_ok(row) -> bool:
-    """Conservative research candidate filter.
-
-    This is deliberately independent of the historical release gate, but it
-    still requires a usable trade plan and several technical confirmations.
-    """
-    action = str(row.get('ACTION', '')).strip().upper()
-    if action not in BUY_ACTIONS:
-        return False
-
-    # V7 historical breakout quality gate. This is a historical release gate,
-    # not a future-information live filter.
-    if action == 'BREAKOUT BUY':
-        v7_path = OUT / 'v7_false_breakout_validation.csv'
-        if v7_path.exists():
-            try:
-                v7 = safe_read_csv(v7_path)
-                all_rows = v7[v7['SCORE_BUCKET'].astype(str).eq('ALL')] if 'SCORE_BUCKET' in v7.columns else pd.DataFrame()
-                if not all_rows.empty:
-                    pf = float(pd.to_numeric(all_rows.iloc[0].get('PROFIT_FACTOR'), errors='coerce'))
-                    fb = float(pd.to_numeric(all_rows.iloc[0].get('POST_OUTCOME_FALSE_BREAKOUT_RATE_PCT'), errors='coerce'))
-                    if not (np.isfinite(pf) and np.isfinite(fb) and pf >= 1.10 and fb <= 40.0):
-                        return False
-            except Exception:
-                # Fail closed if the historical safety diagnostic is unavailable.
-                return False
-
-    published = str(row.get('PUBLISHED_ACTION', '')).strip().upper()
-    if published.startswith('RISK BLOCKED'):
-        return False
-    if published in BUY_ACTIONS:
-        return True
-    if not published.startswith('QUALITY BLOCKED'):
-        return False
-
-    cmp_ = num(row, 'CMP', 'CLOSE_PRICE')
-    entry = num(row, 'IDEAL_ENTRY', 'ENTRY_PRICE')
-    stop = num(row, 'STOP_LOSS')
-    target = num(row, 'TARGET_1')
-    score = num(row, 'HUNTER_SCORE', 'PRE_BREAKOUT_SCORE', 'RANK_SCORE')
-    rsi = num(row, 'RSI14')
-    rs = num(row, 'RELATIVE_STRENGTH', 'RS_VS_UNIVERSE')
-    vol = num(row, 'VOLUME_RATIO', 'VOL_RATIO')
-    atr = num(row, 'ATR_RISK_PCT', 'ATR_PCT')
-    ema200 = num(row, 'EMA200')
-
-    if not all(np.isfinite(x) for x in (cmp_, entry, stop, target, score)):
-        return False
-    risk = entry - stop
-    reward = target - entry
-    if risk <= 0 or reward <= 0 or reward / risk < 1.5:
-        return False
-    if score < 72:
-        return False
-    if np.isfinite(rsi) and not (45 <= rsi <= 72):
-        return False
-    if np.isfinite(rs) and rs < 0:
-        return False
-    if np.isfinite(vol) and vol < 0.9:
-        return False
-    if np.isfinite(atr) and not (0 < atr <= 6.5):
-        return False
-    if np.isfinite(ema200) and cmp_ <= ema200:
-        return False
-    return True
-
-
-def build_buy_view(hunter: pd.DataFrame) -> pd.DataFrame:
-    if hunter.empty or 'ACTION' not in hunter.columns:
-        return pd.DataFrame(columns=hunter.columns)
-    x = hunter.copy()
-    x['SYMBOL'] = x.get('SYMBOL', '').astype(str).str.upper().str.strip()
-    x = x[x['ACTION'].astype(str).str.upper().isin(BUY_ACTIONS)].copy()
-    if x.empty:
-        return x
-
-    validated = x[x.get('BUY_ELIGIBLE', False).astype(bool)].copy() if 'BUY_ELIGIBLE' in x.columns else pd.DataFrame()
-    validated['SIGNAL_STATUS'] = 'VALIDATED BUY'
-
-    research = x[x.apply(technical_research_ok, axis=1)].copy()
-    research['SIGNAL_STATUS'] = 'RESEARCH BUY'
-    research['BUY_ELIGIBLE'] = False
-
-    # Never duplicate a symbol; validated takes precedence over research.
-    out = pd.concat([validated, research], ignore_index=True, sort=False)
-    if out.empty:
-        return out
-    out['_priority'] = out['SIGNAL_STATUS'].map({'VALIDATED BUY': 0, 'RESEARCH BUY': 1}).fillna(9)
-    score_col = 'HUNTER_SCORE' if 'HUNTER_SCORE' in out.columns else 'RANK_SCORE'
-    if score_col in out.columns:
-        out[score_col] = pd.to_numeric(out[score_col], errors='coerce')
-    out = out.sort_values(['_priority', score_col] if score_col in out.columns else ['_priority'], ascending=True, kind='mergesort')
-    out = out.drop_duplicates('SYMBOL', keep='first').drop(columns=['_priority'])
-    out.insert(0, 'BUY_RANK', range(1, len(out) + 1))
-    return out.reset_index(drop=True)
-
-
-
-def build_master_view(hunter: pd.DataFrame) -> pd.DataFrame:
-    """Single user-facing classification: exactly one status per symbol."""
-    if hunter.empty or 'SYMBOL' not in hunter.columns:
-        return pd.DataFrame()
-    x=hunter.copy()
-    x['SYMBOL']=x['SYMBOL'].astype(str).str.upper().str.strip()
-    statuses=[]; reasons=[]
-    for _,r in x.iterrows():
-        action=str(r.get('ACTION','')).strip().upper()
-        if bool(r.get('BUY_ELIGIBLE',False)):
-            status='VALIDATED BUY'; reason='Historical edge + executable plan + risk gates passed'
-        elif action in BUY_ACTIONS and technical_research_ok(r):
-            status='RESEARCH BUY'; reason='Technical setup passes research filters; historical release gate is not validated'
-        elif action in BUY_ACTIONS and str(r.get('PUBLISHED_ACTION','')).upper().startswith('RISK BLOCKED'):
-            status='RISK BLOCKED'; reason=str(r.get('RISK_MANAGER_STATUS','Risk manager blocked'))
-        elif action in BUY_ACTIONS:
-            status='QUALITY BLOCKED'; reason=str(r.get('QUALITY_GATE','Historical validation gate blocked release'))
-        elif action in {'WATCH','WAIT','REVERSAL WATCH','STEALTH WATCH'}:
-            status='WATCH'; reason='Setup developing; no validated entry'
-        else:
-            status='NO TRADE'; reason='Technical conditions do not qualify'
-        statuses.append(status); reasons.append(reason)
-    x['SIGNAL_STATUS']=statuses; x['DECISION_REASON']=reasons
-    priority={'VALIDATED BUY':1,'RESEARCH BUY':2,'WATCH':3,'RISK BLOCKED':4,'QUALITY BLOCKED':5,'NO TRADE':6}
-    x['_P']=x['SIGNAL_STATUS'].map(priority).fillna(9)
-    score=pd.to_numeric(x.get('HUNTER_SCORE',x.get('RANK_SCORE',pd.Series(0,index=x.index))),errors='coerce').fillna(0)
-    x['_S']=score
-    x=x.sort_values(['_P','_S'],ascending=[True,False],kind='mergesort').drop_duplicates('SYMBOL',keep='first')
-    x=x.drop(columns=['_P','_S'],errors='ignore').reset_index(drop=True)
-    x.insert(0,'MASTER_RANK',range(1,len(x)+1))
-    return x
-
-def delivery_only(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    cols = [c for c in ('DELIVERY', 'DELIVERY_STATUS', 'DELIVERY_PCT', 'DELIVERY_PERCENT') if c in df.columns]
-    if not cols:
-        return pd.DataFrame(columns=df.columns)
-    x = df.copy()
-    mask = pd.Series(False, index=x.index)
-    for c in cols:
-        if c in ('DELIVERY_PCT', 'DELIVERY_PERCENT'):
-            mask |= pd.to_numeric(x[c], errors='coerce').ge(50)
-        else:
-            mask |= x[c].astype(str).str.upper().str.contains('STRONG|HIGH|IMPROV|POSITIVE', regex=True, na=False)
-    return x[mask].drop_duplicates('SYMBOL', keep='first').reset_index(drop=True)
-
-
-def write(ws, df: pd.DataFrame, title: str):
-    preferred = [
-        'BUY_RANK', 'SIGNAL_STATUS', 'SYMBOL', 'ACTION', 'CMP',
-        'IDEAL_ENTRY', 'BUY_ZONE', 'MAX_BUY_PRICE', 'BREAKOUT_TRIGGER',
-        'STOP_LOSS', 'TARGET_1', 'TARGET_2', 'TARGET_3', 'RISK_PCT',
-        'EDGE_CONFIDENCE', 'HUNTER_SCORE', 'PRE_BREAKOUT_SCORE', 'RSI14',
-        'ADX14', 'RELATIVE_STRENGTH', 'RS_VS_UNIVERSE', 'DELIVERY',
-        'DELIVERY_PCT', 'VOLUME_RATIO', 'ATR_RISK_PCT', 'ATR_PCT',
-        'LIQUIDITY_STATUS', 'QUALITY_GATE', 'PUBLISHED_ACTION', 'WHY',
-        'DECISION_REASON'
-    ]
-    if df.empty:
-        values = [[title], ['NO CURRENT BUY CANDIDATES']]
-    else:
-        cols = [c for c in preferred if c in df.columns]
-        cols += [c for c in df.columns if c not in cols]
-        df = df[cols]
-        values = [[title], ['VALIDATED BUY + TECHNICAL RESEARCH BUY | CURRENT RUN'], list(df.columns)] + [
-            [clean(v) for v in row] for row in df.itertuples(index=False, name=None)
-        ]
-    if ws.row_count < len(values) + 3:
-        ws.add_rows(len(values) + 3 - ws.row_count)
-    if ws.col_count < max(20, len(values[-1]) + 2):
-        ws.add_cols(max(20, len(values[-1]) + 2) - ws.col_count)
-    # One clear + one values update per sheet. Retry transient Google API quota errors.
-    last_error = None
-    for attempt in range(5):
-        try:
-            ws.clear()
-            ws.update(range_name='A1', values=values, value_input_option='USER_ENTERED')
-            ws.freeze(rows=3 if not df.empty else 1)
-            return
-        except APIError as exc:
-            last_error = exc
-            if '429' not in str(exc):
-                raise
-            time.sleep(min(30, 2 ** attempt * 2))
-    raise last_error
+def read_csv(name):
+    path = OUT / name
+    return safe_read_csv(path) if path.exists() else pd.DataFrame()
 
 
 def build_action_plan(hunter: pd.DataFrame) -> pd.DataFrame:
-    """Create the single trader-facing BUY sheet.
-
-    All research/validation logic stays in Python. The Google Sheet exposes
-    only executable trade information: BUY, entry, SL, T1/T2/T3, R:R and WHY.
-    """
-    if hunter.empty or 'ACTION' not in hunter.columns:
-        return pd.DataFrame(columns=[
-            'RANK','BUY','ENTRY','STOP_LOSS','T1','T2','T3',
-            'T1_RR','T2_RR','T3_RR','RISK_PCT','WHY'
-        ])
+    columns = [
+        "RANK", "BUY", "ENTRY", "STOP LOSS", "T1", "T2", "T3",
+        "T1 R:R", "T2 R:R", "T3 R:R", "RISK %", "QTY",
+        "CAPITAL", "RISK AMOUNT", "WHY",
+    ]
+    if hunter.empty or "SYMBOL" not in hunter.columns:
+        return pd.DataFrame(columns=columns)
 
     x = hunter.copy()
-    x['SYMBOL'] = x.get('SYMBOL', '').astype(str).str.upper().str.strip()
-    x['ACTION'] = x['ACTION'].astype(str).str.upper().str.strip()
-    x = x[x['ACTION'].isin(BUY_ACTIONS)].copy()
+    action = x.get("ACTION", "").astype(str).str.upper().str.strip()
+    x["ACTION"] = action
+
+    # Only final quality/risk-cleared BUYs are allowed onto the user sheet.
+    if "BUY_ELIGIBLE" not in x.columns:
+        return pd.DataFrame(columns=columns)
+    x["BUY_ELIGIBLE"] = x["BUY_ELIGIBLE"].astype(bool)
+    x = x[x["BUY_ELIGIBLE"] & x["ACTION"].isin(BUY_ACTIONS)].copy()
+
+    if "RISK_MANAGER_STATUS" in x.columns:
+        x = x[x["RISK_MANAGER_STATUS"].astype(str).str.upper().isin(
+            {"PASS", "N/A", "N/A_GATE_BLOCKED", ""}
+        )].copy()
+
     if x.empty:
-        return pd.DataFrame(columns=[
-            'RANK','BUY','ENTRY','STOP_LOSS','T1','T2','T3',
-            'T1_RR','T2_RR','T3_RR','RISK_PCT','WHY'
-        ])
+        return pd.DataFrame(columns=columns)
 
-    validated = x[x.get('BUY_ELIGIBLE', False).astype(bool)].copy() if 'BUY_ELIGIBLE' in x.columns else pd.DataFrame()
-    research = x[x.apply(technical_research_ok, axis=1)].copy()
+    score = pd.to_numeric(
+        x.get("HUNTER_SCORE", x.get("PRE_BREAKOUT_SCORE", 0)),
+        errors="coerce",
+    ).fillna(0)
+    x["_score"] = score
+    x = x.sort_values("_score", ascending=False, kind="mergesort")
+    x = x.drop_duplicates("SYMBOL", keep="first")
 
-    out = pd.concat([validated, research], ignore_index=True, sort=False)
-    if out.empty:
-        return pd.DataFrame(columns=[
-            'RANK','BUY','ENTRY','STOP_LOSS','T1','T2','T3',
-            'T1_RR','T2_RR','T3_RR','RISK_PCT','WHY'
-        ])
-
-    # One symbol, one final BUY. Prefer historically validated candidates.
-    out['_validated'] = out.get('BUY_ELIGIBLE', False).astype(bool).astype(int)
-    score = pd.to_numeric(out.get('HUNTER_SCORE', out.get('RANK_SCORE', 0)), errors='coerce').fillna(0)
-    out['_score'] = score
-    out = out.sort_values(['_validated','_score'], ascending=[False,False], kind='mergesort')
-    out = out.drop_duplicates('SYMBOL', keep='first')
-
-    entry = pd.to_numeric(out.get('IDEAL_ENTRY', out.get('ENTRY_PRICE')), errors='coerce')
-    stop = pd.to_numeric(out.get('STOP_LOSS'), errors='coerce')
+    entry = pd.to_numeric(x.get("IDEAL_ENTRY", x.get("ENTRY_PRICE")), errors="coerce")
+    stop = pd.to_numeric(x.get("STOP_LOSS"), errors="coerce")
+    t1 = pd.to_numeric(x.get("TARGET_1"), errors="coerce")
+    t2 = pd.to_numeric(x.get("TARGET_2"), errors="coerce")
+    t3 = pd.to_numeric(x.get("TARGET_3"), errors="coerce")
     risk = entry - stop
 
-    # Targets are generated by the backend at 2.5R / 3.5R / 5R.
-    t1 = pd.to_numeric(out.get('TARGET_1'), errors='coerce')
-    t2 = pd.to_numeric(out.get('TARGET_2'), errors='coerce')
-    t3 = pd.to_numeric(out.get('TARGET_3'), errors='coerce')
-
-    rr1 = (t1-entry)/risk
-    rr2 = (t2-entry)/risk
-    rr3 = (t3-entry)/risk
-
     valid = (
-        entry.notna() & stop.notna() & (risk > 0) &
-        t1.notna() & t2.notna() & t3.notna() &
-        (rr1 >= 2.5)
+        entry.notna() & stop.notna() & t1.notna() & t2.notna() & t3.notna()
+        & (entry > 0) & (stop > 0) & (risk > 0)
+        & (t1 > entry) & (t2 > t1) & (t3 > t2)
     )
-    out = out[valid].copy()
-    entry, stop, risk = entry[valid], stop[valid], risk[valid]
-    t1, t2, t3 = t1[valid], t2[valid], t3[valid]
-    rr1, rr2, rr3 = rr1[valid], rr2[valid], rr3[valid]
+    x = x[valid].copy()
+    entry, stop, t1, t2, t3, risk = (
+        s[valid] for s in (entry, stop, t1, t2, t3, risk)
+    )
 
-    if out.empty:
-        return pd.DataFrame(columns=[
-            'RANK','BUY','ENTRY','STOP_LOSS','T1','T2','T3',
-            'T1_RR','T2_RR','T3_RR','RISK_PCT','WHY'
-        ])
+    if x.empty:
+        return pd.DataFrame(columns=columns)
+
+    rr1 = (t1 - entry) / risk
+    rr2 = (t2 - entry) / risk
+    rr3 = (t3 - entry) / risk
+
+    # Hard minimum reward floor: the first target must be at least 2.5R.
+    valid_rr = rr1 >= 2.5
+    x = x[valid_rr].copy()
+    entry, stop, t1, t2, t3, risk = (
+        s[valid_rr] for s in (entry, stop, t1, t2, t3, risk)
+    )
+    rr1, rr2, rr3 = rr1[valid_rr], rr2[valid_rr], rr3[valid_rr]
+
+    if x.empty:
+        return pd.DataFrame(columns=columns)
 
     def why(row):
         parts = []
-        for col, label in [
-            ('TREND','Trend'), ('RELATIVE_STRENGTH','RS'),
-            ('VOLUME_RATIO','Volume'), ('RSI14','RSI'),
-            ('BREAKOUT_STATUS','Breakout')
-        ]:
-            v = str(row.get(col,'')).strip()
-            if v and v.lower() not in {'nan','none'}:
-                parts.append(f'{label}: {v}')
-        return ' | '.join(parts[:4]) or 'Technical setup + risk/reward passed'
+        for col, label in (
+            ("TREND", "Trend"),
+            ("RELATIVE_STRENGTH", "RS"),
+            ("RS_VS_UNIVERSE", "RS"),
+            ("VOLUME_RATIO", "Volume"),
+            ("RSI14", "RSI"),
+            ("BREAKOUT_STATUS", "Breakout"),
+        ):
+            value = str(row.get(col, "")).strip()
+            if value and value.lower() not in {"nan", "none"}:
+                parts.append(f"{label}: {value}")
+        return " | ".join(dict.fromkeys(parts))[:220] or "Technical + risk/reward gates passed"
+
+    qty = pd.to_numeric(x.get("POSITION_QTY", 0), errors="coerce").fillna(0)
+    capital = pd.to_numeric(x.get("CAPITAL_ALLOCATED", 0), errors="coerce").fillna(0)
+    risk_amount = pd.to_numeric(x.get("RISK_AMOUNT", 0), errors="coerce").fillna(0)
 
     result = pd.DataFrame({
-        'RANK': range(1, len(out)+1),
-        'BUY': out['SYMBOL'].values,
-        'ENTRY': entry.round(2).values,
-        'STOP_LOSS': stop.round(2).values,
-        'T1': t1.round(2).values,
-        'T2': t2.round(2).values,
-        'T3': t3.round(2).values,
-        'T1_RR': rr1.round(2).values,
-        'T2_RR': rr2.round(2).values,
-        'T3_RR': rr3.round(2).values,
-        'RISK_PCT': ((risk/entry)*100).round(2).values,
-        'WHY': [why(row) for _, row in out.iterrows()],
+        "RANK": range(1, len(x) + 1),
+        "BUY": x["SYMBOL"].astype(str).str.upper().values,
+        "ENTRY": entry.round(2).values,
+        "STOP LOSS": stop.round(2).values,
+        "T1": t1.round(2).values,
+        "T2": t2.round(2).values,
+        "T3": t3.round(2).values,
+        "T1 R:R": rr1.round(2).values,
+        "T2 R:R": rr2.round(2).values,
+        "T3 R:R": rr3.round(2).values,
+        "RISK %": ((risk / entry) * 100).round(2).values,
+        "QTY": qty.loc[x.index].astype(int).values,
+        "CAPITAL": capital.loc[x.index].round(2).values,
+        "RISK AMOUNT": risk_amount.loc[x.index].round(2).values,
+        "WHY": [why(row) for _, row in x.iterrows()],
     })
     return result.head(10).reset_index(drop=True)
 
 
-def write_action_plan(ws, df: pd.DataFrame):
-    title = 'RY APEX MATRIX — ACTION PLAN'
-    if df.empty:
-        values = [[title], ['NO VALID BUY TODAY']]
-        freeze_rows = 1
-    else:
-        values = [[title], ['ONLY ACTIONABLE BUY SETUPS | BACKEND VALIDATION HIDDEN'],
-                  list(df.columns)] + [[clean(v) for v in row] for row in df.itertuples(index=False, name=None)]
-        freeze_rows = 3
+def build_status(plan, hunter, backtest, oos, v7):
+    data_date = ""
+    if not hunter.empty and "DATE" in hunter.columns:
+        dates = pd.to_datetime(hunter["DATE"], errors="coerce").dropna()
+        if not dates.empty:
+            data_date = dates.max().strftime("%Y-%m-%d")
 
-    if ws.row_count < len(values) + 3:
-        ws.add_rows(len(values) + 3 - ws.row_count)
-    if ws.col_count < len(values[-1]) + 2:
-        ws.add_cols(len(values[-1]) + 2 - ws.col_count)
+    regime = ""
+    if not hunter.empty and "MARKET_REGIME" in hunter.columns:
+        vals = hunter["MARKET_REGIME"].dropna().astype(str)
+        if not vals.empty:
+            regime = vals.mode().iloc[0]
+
+    rows = [
+        ["RY APEX MATRIX — SYSTEM STATUS"],
+        ["STATUS", "READY"],
+        ["DATA DATE", data_date],
+        ["MARKET REGIME", regime or "UNKNOWN"],
+        ["VALID BUY SETUPS", len(plan)],
+        ["HUNTER ROWS", len(hunter)],
+        ["BACKTEST TRADES", int(pd.to_numeric(backtest.get("trades", 0), errors="coerce") or 0)],
+        ["OOS STATUS", oos],
+        ["V7 STATUS", v7],
+        ["UPDATED UTC", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")],
+    ]
+    return rows
+
+
+def open_book():
+    raw = os.getenv("GCP_CREDENTIALS", "")
+    if not raw:
+        raise RuntimeError("GCP_CREDENTIALS missing")
+    creds = Credentials.from_service_account_info(
+        json.loads(raw),
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ],
+    )
+    gc = gspread.authorize(creds)
+    url = os.getenv("GOOGLE_SHEET_URL") or os.getenv("SHEET_URL")
+    return gc.open_by_url(url) if url else gc.open_by_key(
+        os.getenv("SPREADSHEET_ID") or DEFAULT_SHEET_ID
+    )
+
+
+def ensure_sheet(book, title, rows=100, cols=20):
+    try:
+        return book.worksheet(title)
+    except WorksheetNotFound:
+        return book.add_worksheet(title=title, rows=rows, cols=cols)
+
+
+def write_sheet(ws, values, freeze_rows):
+    rows_needed = max(20, len(values) + 5)
+    cols_needed = max(20, max(len(row) for row in values) + 2)
+    if ws.row_count < rows_needed:
+        ws.add_rows(rows_needed - ws.row_count)
+    if ws.col_count < cols_needed:
+        ws.add_cols(cols_needed - ws.col_count)
 
     last_error = None
     for attempt in range(5):
         try:
             ws.clear()
-            ws.update(range_name='A1', values=values, value_input_option='USER_ENTERED')
+            ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
             ws.freeze(rows=freeze_rows)
             return
         except APIError as exc:
             last_error = exc
-            if '429' not in str(exc):
+            if "429" not in str(exc):
                 raise
             time.sleep(min(30, 2 ** attempt * 2))
     raise last_error
 
 
+def remove_extra_sheets(book):
+    # Delete every old user-facing tab. Backend CSV artifacts are untouched.
+    for ws in list(book.worksheets()):
+        if ws.title not in KEEP_SHEETS:
+            try:
+                book.del_worksheet(ws)
+                print("DELETED OLD SHEET:", ws.title)
+            except APIError as exc:
+                # Do not fail the entire trading pipeline if a stale/locked tab
+                # cannot be deleted; the canonical tabs are still published.
+                print("WARNING: could not delete sheet", ws.title, exc)
+
+
 def main():
-    raw = os.getenv('GCP_CREDENTIALS', '')
-    if not raw:
-        raise RuntimeError('GCP_CREDENTIALS missing')
-
-    cred = Credentials.from_service_account_info(
-        json.loads(raw),
-        scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'],
-    )
-    gc = gspread.authorize(cred)
-    url = os.getenv('GOOGLE_SHEET_URL') or os.getenv('SHEET_URL')
-    sh = gc.open_by_url(url) if url else gc.open_by_key(os.getenv('SPREADSHEET_ID') or DEFAULT_SHEET_ID)
-
-    def worksheet(title):
-        try:
-            return sh.worksheet(title)
-        except gspread.WorksheetNotFound:
-            return sh.add_worksheet(title=title, rows=100, cols=20)
-
-    hunter = safe_read_csv(OUT / 'early_hunter.csv')
+    hunter = read_csv("early_hunter.csv")
     plan = build_action_plan(hunter)
 
-    # One canonical trader-facing sheet. Research/diagnostic CSVs remain in
-    # GitHub Actions artifacts and are not pushed into the user's working view.
-    write_action_plan(worksheet('ACTION PLAN'), plan)
+    backtest_df = read_csv("backtest_summary.csv")
+    backtest = backtest_df.iloc[0].to_dict() if not backtest_df.empty else {}
 
-    print(f'ACTION PLAN PUBLISHED | BUY_ROWS={len(plan)}')
-    if not plan.empty:
-        print(plan.to_string(index=False))
+    oos = "UNKNOWN"
+    aq = read_csv("action_quality_summary.csv")
+    if not aq.empty:
+        if "status" in aq.columns and aq["status"].astype(str).str.upper().eq("WAITING_FOR_DATA").any():
+            oos = "WAITING FOR DATA"
+        elif "ok" in aq.columns:
+            oos = "PASS" if aq["ok"].astype(str).str.lower().eq("true").any() else "BLOCKED"
+
+    v7_df = read_csv("v7_false_breakout_validation.csv")
+    v7 = "AVAILABLE" if not v7_df.empty else "NOT AVAILABLE"
+
+    book = open_book()
+    remove_extra_sheets(book)
+
+    action_values = [["RY APEX MATRIX — ACTION PLAN"],
+                     ["ONLY FINAL QUALITY/RISK-CLEARED BUY SETUPS"]]
+    if plan.empty:
+        action_values.append(["NO VALID BUY TODAY"])
+    else:
+        action_values.append(list(plan.columns))
+        action_values.extend([[clean(v) for v in row] for row in plan.itertuples(index=False, name=None)])
+
+    write_sheet(ensure_sheet(book, "ACTION PLAN", 100, 20), action_values, 2)
+
+    status_values = build_status(plan, hunter, backtest, oos, v7)
+    write_sheet(ensure_sheet(book, "SYSTEM STATUS", 30, 10), status_values, 1)
+
+    print(f"CANONICAL SHEETS PUBLISHED | ACTION PLAN={len(plan)} | SYSTEM STATUS=1 | EXTRA TABS REMOVED")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
