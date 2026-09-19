@@ -103,10 +103,15 @@ def _summary_row(master, plan):
 
 
 def main():
+    # The clean publisher is the single Google Sheets writer for daily runs.
+    # This repair script now prepares/validates local outputs only by default.
+    # Legacy-sheet repair is opt-in because writing many tabs here followed by
+    # the clean publisher can exhaust Sheets API write quota.
     master = build_master_buy_dashboard()
     safe_to_csv(master, OUT / 'master_buy_dashboard.csv')
     plan = build_action_plan()
     safe_to_csv(plan, OUT / 'mera_action_plan.csv')
+
     hunter = _read('decision_candidates.csv', _read('early_hunter.csv'))
     commands = _read('trading_commands.csv')
     buy = _read('buy_candidates.csv')
@@ -115,36 +120,53 @@ def main():
     apex = _read('apex_matrix.csv')
     stealth = _read('stealth_accumulation.csv')
     action_sheet = commands if not commands.empty else plan
-    if action_sheet.empty: action_sheet = _summary_row(master, plan)
+    if action_sheet.empty:
+        action_sheet = _summary_row(master, plan)
+
+    print('SHEET REPAIR PREP OK:', {
+        'plan': len(plan),
+        'commands': len(commands),
+        'action_sheet': len(action_sheet),
+        'master_buy_dashboard': len(master),
+        'confirmed_buy_candidates': len(buy),
+        'decision_candidates': len(hunter),
+        'low52': len(low52),
+        'apex': len(apex),
+        'stealth': len(stealth),
+    })
+
+    # Preserve the old emergency repair capability, but never run it in the
+    # normal pipeline unless explicitly requested.
+    if os.getenv('REPAIR_LEGACY_SHEETS', '').strip().lower() not in {'1', 'true', 'yes'}:
+        print('SHEET REPAIR SKIPPED: Google Sheets writes are owned by publish_strategy_sheets.py')
+        return
+
     gc = gspread.authorize(_credentials())
     sh = _open_sheet(gc)
-    def get_or_create(title, rows=3000, cols=100):
-        try: return sh.worksheet(title)
-        except gspread.WorksheetNotFound: return sh.add_worksheet(title=title, rows=rows, cols=cols)
-    ws_plan = get_or_create('MERA ACTION PLAN', max(100,len(plan)+10), 20)
-    _write(ws_plan, plan if not plan.empty else _summary_row(master, plan))
-    try:
-        ws_plan.format('A1:Z1', {'textFormat': {'bold': True, 'fontSize': 12}, 'backgroundColor': {'red':0.85,'green':0.85,'blue':0.85}})
-        if not plan.empty and 'KYA KARU' in plan.columns:
-            for i,val in enumerate(plan['KYA KARU'].astype(str), start=2):
-                if 'BECHO' in val or 'EXIT' in val: color={'red':1.0,'green':0.85,'blue':0.85}
-                elif 'KHARIDO' in val: color={'red':0.83,'green':0.96,'blue':0.83}
-                elif 'WAIT' in val or 'TRIGGER' in val: color={'red':1.0,'green':0.95,'blue':0.75}
-                elif 'HOLD' in val: color={'red':1.0,'green':0.97,'blue':0.78}
-                else: color={'red':0.93,'green':0.93,'blue':0.93}
-                ws_plan.format(f'A{i}:Z{i}', {'backgroundColor':color})
-    except Exception as e: print('MERA ACTION PLAN format warning:', e)
-    try: ws_plan.update_index(0)
-    except Exception as e: print('MERA ACTION PLAN reorder warning:', e)
-    _write(get_or_create('Aaj Kya Karna Hai', max(100,len(action_sheet)+10), 30), action_sheet)
-    _write(get_or_create('Master Buy Dashboard', max(100,len(master)+10), max(30,len(master.columns)+2 if not master.empty else 30)), master if not master.empty else _summary_row(master,plan))
-    _write(get_or_create('Buy Candidates', max(100,len(buy)+10), max(30,len(buy.columns)+2 if not buy.empty else 30)), buy if not buy.empty else pd.DataFrame([{'STATUS':'NO CONFIRMED BUY TODAY','NOTE':'See Master Buy Dashboard / MERA ACTION PLAN for WAIT and WATCH setups.'}]))
-    _write(get_or_create('Early Hunter', max(100,len(hunter)+10), max(40,len(hunter.columns)+2 if not hunter.empty else 40)), hunter)
-    _write(get_or_create('52 Week Low Rocket', max(100,len(low52)+10), max(25,len(low52.columns)+2 if not low52.empty else 25)), low52)
-    _write(get_or_create('APEX Matrix', max(100,len(apex)+10), max(25,len(apex.columns)+2 if not apex.empty else 25)), apex)
-    _write(get_or_create('Stealth Accumulation', max(100,len(stealth)+10), max(25,len(stealth.columns)+2 if not stealth.empty else 25)), stealth)
-    if not dash.empty: _write(get_or_create('Dashboard', max(100,len(dash)+10), max(40,len(dash.columns)+2)), dash)
-    print('SHEET PUBLISH OK:', {'plan':len(plan),'commands':len(commands),'action_sheet':len(action_sheet),'master_buy_dashboard':len(master),'confirmed_buy_candidates':len(buy),'decision_candidates':len(hunter),'low52':len(low52),'apex':len(apex),'stealth':len(stealth)})
 
+    def get_or_create(title, rows=3000, cols=100):
+        try:
+            return sh.worksheet(title)
+        except gspread.WorksheetNotFound:
+            return sh.add_worksheet(title=title, rows=rows, cols=cols)
+
+    # Emergency/manual mode only.
+    targets = [
+        ('MERA ACTION PLAN', plan if not plan.empty else _summary_row(master, plan), 20),
+        ('Aaj Kya Karna Hai', action_sheet, 30),
+        ('Master Buy Dashboard', master if not master.empty else _summary_row(master, plan), max(30, len(master.columns) + 2 if not master.empty else 30)),
+        ('Buy Candidates', buy if not buy.empty else pd.DataFrame([{'STATUS':'NO CONFIRMED BUY TODAY'}]), max(30, len(buy.columns) + 2 if not buy.empty else 30)),
+        ('Early Hunter', hunter, max(40, len(hunter.columns) + 2 if not hunter.empty else 40)),
+        ('52 Week Low Rocket', low52, max(25, len(low52.columns) + 2 if not low52.empty else 25)),
+        ('APEX Matrix', apex, max(25, len(apex.columns) + 2 if not apex.empty else 25)),
+        ('Stealth Accumulation', stealth, max(25, len(stealth.columns) + 2 if not stealth.empty else 25)),
+    ]
+    if not dash.empty:
+        targets.append(('Dashboard', dash, max(40, len(dash.columns) + 2)))
+
+    for title, df, cols in targets:
+        _write(get_or_create(title, max(100, len(df) + 10), cols), df)
+
+    print('SHEET LEGACY REPAIR OK:', len(targets))
 
 if __name__ == '__main__': main()
