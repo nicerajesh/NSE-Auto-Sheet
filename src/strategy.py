@@ -101,7 +101,9 @@ def _features(g,i,market):
     zone_low=entry*(1-STRAT.max_buy_zone_pct/100);zone_high=entry*(1+STRAT.max_buy_zone_pct/100);max_buy=min(zone_high,trigger*.997 if np.isfinite(trigger) else zone_high)
     pre_buy=pre_gate and pre>=STRAT.buy_score and valid_risk
     breakout_buy=confirmed and breakout>=STRAT.buy_score and valid_risk
-    # Adaptive swing route: use the baseline score when no breakout/pre-breakout fires.\n    # This prevents a zero-BUY day solely because the stricter breakout gate did not fire.\n    swing_buy=(not confirmed and swing>=STRAT.min_score and valid_risk and not pre_buy and trend_ready and rs_positive and not_extended)
+    # Adaptive swing route: use the baseline score when no breakout/pre-breakout fires.
+    # This prevents a zero-BUY day solely because the stricter breakout gate did not fire.
+    swing_buy=(not confirmed and swing>=STRAT.min_score and valid_risk and not pre_buy and trend_ready and rs_positive and not_extended)
     if pre_buy:action='PRE-BREAKOUT BUY'
     elif breakout_buy:action='BREAKOUT BUY'
     elif swing_buy:action='SWING BUY'
