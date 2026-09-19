@@ -56,6 +56,23 @@ def technical_research_ok(row) -> bool:
     if action not in BUY_ACTIONS:
         return False
 
+    # V7 historical breakout quality gate. This is a historical release gate,
+    # not a future-information live filter.
+    if action == 'BREAKOUT BUY':
+        v7_path = OUT / 'v7_false_breakout_validation.csv'
+        if v7_path.exists():
+            try:
+                v7 = safe_read_csv(v7_path)
+                all_rows = v7[v7['SCORE_BUCKET'].astype(str).eq('ALL')] if 'SCORE_BUCKET' in v7.columns else pd.DataFrame()
+                if not all_rows.empty:
+                    pf = float(pd.to_numeric(all_rows.iloc[0].get('PROFIT_FACTOR'), errors='coerce'))
+                    fb = float(pd.to_numeric(all_rows.iloc[0].get('POST_OUTCOME_FALSE_BREAKOUT_RATE_PCT'), errors='coerce'))
+                    if not (np.isfinite(pf) and np.isfinite(fb) and pf >= 1.10 and fb <= 40.0):
+                        return False
+            except Exception:
+                # Fail closed if the historical safety diagnostic is unavailable.
+                return False
+
     published = str(row.get('PUBLISHED_ACTION', '')).strip().upper()
     if published.startswith('RISK BLOCKED'):
         return False
