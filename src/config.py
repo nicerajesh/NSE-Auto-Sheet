@@ -17,9 +17,9 @@ class StrategyConfig:
     max_entry_extension_pct:float=4.0
     max_stop_pct:float=8.5
     min_stop_pct:float=2.0
-    min_rr1:float=1.50
-    min_rr2:float=2.50
-    min_rr3:float=4.00
+    min_rr1:float=2.50
+    min_rr2:float=3.50
+    min_rr3:float=5.00
     volume_breakout_ratio:float=1.20
     delivery_floor:float=30.0
     max_atr_pct:float=6.5
@@ -89,7 +89,7 @@ class ApexConfig:
     min_body_ratio:float=0.40; min_close_position:float=0.65
     vcp_lookback:int=20; compression_level:float=0.80; accumulation_lookback:int=10
     atr_len:int=14; initial_atr:float=2.5; trail_atr:float=2.5; max_extension_atr:float=3.0
-    rr1:float=2.0; rr2:float=3.0
+    rr1:float=2.5; rr2:float=3.5
     buy_score:int=75; apex_score_min:int=88; tactical_score_min:int=82
     cooldown_bars:int=5
     require_breakout_for_buy:bool=False
