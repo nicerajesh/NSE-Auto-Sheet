@@ -55,8 +55,9 @@ def _features(g,i,market):
     if not np.isfinite(prior20) and i>=20:prior20=_f(h.iloc[i-20:i].max())
     if not np.isfinite(low20) and i>=20:low20=_f(l.iloc[i-20:i].min())
     e20p=_f(g.EMA20.iloc[i-5]) if i>=5 and 'EMA20' in g else np.nan;e50p=_f(g.EMA50.iloc[i-5]) if i>=5 and 'EMA50' in g else np.nan
-    trend_ready=all(np.isfinite(x) for x in (close,e20,e50,e100)) and close>e50 and e20>e50 and e50>=e100*.995
-    trend_strong=all(np.isfinite(x) for x in (close,e20,e50,e100,e200,e20p,e50p)) and close>e20>e50>e100>e200 and e20>e20p and e50>e50p
+    supertrend_dir=_f(r.get('SUPERTREND_DIRECTION'));supertrend_bull=np.isfinite(supertrend_dir) and supertrend_dir>0
+    trend_ready=all(np.isfinite(x) for x in (close,e20,e50,e100)) and close>e50 and e20>e50 and e50>=e100*.995 and (not np.isfinite(supertrend_dir) or supertrend_bull)
+    trend_strong=all(np.isfinite(x) for x in (close,e20,e50,e100,e200,e20p,e50p)) and close>e20>e50>e100>e200 and e20>e20p and e50>e50p and (not np.isfinite(supertrend_dir) or supertrend_bull)
     atr_compress=np.isfinite(atr_pct) and np.isfinite(atr_avg) and atr_pct<=atr_avg*.92
     mid=c.rolling(20,min_periods=20).mean();std=c.rolling(20,min_periods=20).std(ddof=0);bbw=4*std/mid.replace(0,np.nan)*100
     bb_now=_f(bbw.iloc[i]);bb_prev=_f(bbw.iloc[i-5]) if i>=5 else np.nan;bb_compress=np.isfinite(bb_now) and np.isfinite(bb_prev) and bb_now<=bb_prev*.90
@@ -85,7 +86,18 @@ def _features(g,i,market):
     trigger=prior20*1.003 if np.isfinite(prior20) else np.nan;entry=close;stop=close-1.5*atr if np.isfinite(close) and np.isfinite(atr) and atr>0 else np.nan
     if np.isfinite(low20) and np.isfinite(stop):stop=max(stop,low20*.985)
     risk=entry-stop if np.isfinite(entry) and np.isfinite(stop) else np.nan;risk_pct=risk/entry*100 if np.isfinite(risk) and entry else np.nan;valid_risk=np.isfinite(risk_pct) and STRAT.min_stop_pct<=risk_pct<=STRAT.max_stop_pct
-    t1=entry+risk*STRAT.min_rr1 if np.isfinite(risk) and risk>0 else np.nan;t2=entry+risk*STRAT.min_rr2 if np.isfinite(risk) and risk>0 else np.nan;t3=entry+risk*STRAT.min_rr3 if np.isfinite(risk) and risk>0 else np.nan
+    # Targets combine minimum R:R floors with nearby resistance and ATR expansion room.
+    if np.isfinite(risk) and risk>0:
+        rr_t1=entry+risk*STRAT.min_rr1; rr_t2=entry+risk*STRAT.min_rr2; rr_t3=entry+risk*STRAT.min_rr3
+        resistance_levels=[x for x in (prior20, _f(r.get('PRIOR_HIGH55'))) if np.isfinite(x) and x>entry]
+        nearest_res=min(resistance_levels) if resistance_levels else np.nan
+        structural_t1=(nearest_res+0.50*atr) if np.isfinite(nearest_res) and np.isfinite(atr) and atr>0 else rr_t1
+        t1=max(rr_t1,structural_t1)
+        atr_step=atr if np.isfinite(atr) and atr>0 else risk
+        t2=max(rr_t2,t1+atr_step)
+        t3=max(rr_t3,t2+atr_step)
+    else:
+        t1=t2=t3=np.nan
     zone_low=entry*(1-STRAT.max_buy_zone_pct/100);zone_high=entry*(1+STRAT.max_buy_zone_pct/100);max_buy=min(zone_high,trigger*.997 if np.isfinite(trigger) else zone_high)
     pre_buy=pre_gate and pre>=STRAT.buy_score and valid_risk
     breakout_buy=confirmed and breakout>=STRAT.buy_score and valid_risk
@@ -97,7 +109,7 @@ def _features(g,i,market):
     else:action='WATCH'
     confidence=int(min(90,max(0,round(max(pre,breakout)*.90)))) if action in ACTIONABLE else int(min(69,max(0,round(pre*.90))))
     reasons=[]
-    for ok,msg in [(trend_strong,'Strong trend'),(trend_ready,'Trend aligned'),(higher_low,'Higher-low'),(tests>=STRAT.min_resistance_tests,f'{tests} resistance tests'),(compression,'Compression'),(base_tightening,'Base tightening'),(dryup,'Volume dry-up'),(volume_expansion,'Volume expansion'),(accumulation,'Accumulation/OBV'),(delivery_ok,'Delivery improving'),(rs_strong,'Strong RS'),(sector_strength=='POSITIVE','Sector positive'),(confirmed,'Breakout confirmed'),(not valid_risk,'Risk outside limits'),(not sector_ok,'Sector weak')]:
+    for ok,msg in [(supertrend_bull,'Supertrend bullish'),(trend_strong,'Strong trend'),(trend_ready,'Trend aligned'),(higher_low,'Higher-low'),(tests>=STRAT.min_resistance_tests,f'{tests} resistance tests'),(compression,'Compression'),(base_tightening,'Base tightening'),(dryup,'Volume dry-up'),(volume_expansion,'Volume expansion'),(accumulation,'Accumulation/OBV'),(delivery_ok,'Delivery improving'),(rs_strong,'Strong RS'),(sector_strength=='POSITIVE','Sector positive'),(confirmed,'Breakout confirmed'),(not valid_risk,'Risk outside limits'),(not sector_ok,'Sector weak')]:
         if ok:reasons.append(msg)
     return locals()
 
