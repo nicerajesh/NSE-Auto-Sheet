@@ -50,4 +50,47 @@ def add_indicators_all(hist):
         if len(group)<2: continue
         result=add_indicators(group.copy()); result["SYMBOL"]=str(symbol).strip().upper(); parts.append(result)
     if not parts: raise ValueError("No valid SYMBOL groups available for indicator calculation")
-    out=pd.concat(parts,ignore_index=True); out["SYMBOL"]=out["SYMBOL"].astype(str).str.strip().str.upper(); return out
+    out=pd.concat(parts,ignore_index=True); out["SYMBOL"]=out["SYMBOL"].astype(str).str.strip().str.upper()
+
+    # Relative strength vs NIFTY: stock 20D return minus NIFTY 20D return.
+    # Calculated only from data available on the same date (no look-ahead).
+    nifty = out[out["SYMBOL"].eq(NIFTY_SYMBOL if "NIFTY_SYMBOL" in globals() else "NIFTY 50")][["DATE","RET_20D"]].copy()
+    if not nifty.empty:
+        nifty = nifty.rename(columns={"RET_20D":"NIFTY_RET_20D"}).drop_duplicates("DATE")
+        out = out.merge(nifty, on="DATE", how="left")
+        out["RS_VS_UNIVERSE"] = out["RET_20D"] - out["NIFTY_RET_20D"]
+    elif "RS_VS_UNIVERSE" not in out.columns:
+        out["RS_VS_UNIVERSE"] = np.nan
+
+    # Standard Supertrend (10, 3) for trend confirmation.
+    period, multiplier = 10, 3.0
+    hl2 = (out["HIGH_PRICE"] + out["LOW_PRICE"]) / 2
+    atr10 = out.groupby("SYMBOL", group_keys=False)["ATR14"].transform(
+        lambda s: s.rolling(period, min_periods=period).mean()
+    )
+    basic_upper = hl2 + multiplier * atr10
+    basic_lower = hl2 - multiplier * atr10
+    out["SUPERTREND"] = np.nan
+    out["SUPERTREND_DIRECTION"] = np.nan
+    for symbol, idx in out.groupby("SYMBOL", sort=False).groups.items():
+        ix = list(idx)
+        fu, fl, st, direction = [], [], [], []
+        for pos, row_idx in enumerate(ix):
+            bu = basic_upper.loc[row_idx]; bl = basic_lower.loc[row_idx]
+            close = out.at[row_idx, "CLOSE_PRICE"]
+            if pos == 0 or pd.isna(bu) or pd.isna(bl):
+                fu.append(bu); fl.append(bl); st.append(np.nan); direction.append(np.nan); continue
+            prev_fu, prev_fl, prev_st = fu[-1], fl[-1], st[-1]
+            fu_val = bu if pd.isna(prev_fu) or bu < prev_fu or close > prev_fu else prev_fu
+            fl_val = bl if pd.isna(prev_fl) or bl > prev_fl or close < prev_fl else prev_fl
+            if pd.isna(prev_st):
+                st_val = fl_val if close >= fl_val else fu_val
+            elif prev_st == prev_fu:
+                st_val = fl_val if close > fu_val else fu_val
+            else:
+                st_val = fl_val if close >= fl_val else fu_val
+            fu.append(fu_val); fl.append(fl_val); st.append(st_val)
+            direction.append(1 if close >= st_val else -1)
+        out.loc[ix, "SUPERTREND"] = st
+        out.loc[ix, "SUPERTREND_DIRECTION"] = direction
+    return out
