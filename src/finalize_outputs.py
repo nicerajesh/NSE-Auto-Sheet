@@ -175,8 +175,10 @@ def main():
     def _published(row):
         action=row.get('ACTION')
         if action not in BUY_ACTIONS:return action
-        gate=_gate_for(action)
-        if gate!='PASS': return 'QUALITY BLOCKED ('+str(gate)+')'
+        # Historical/OOS quality remains a diagnostic, not a hard live BUY switch.
+        # A global backtest gate can be WAITING_FOR_DATA even when today's technical
+        # setup is valid. Live publication is therefore decided by executable
+        # trade-plan safety below; quality is retained in QUALITY_GATE for audit.
         safe,safe_reason=_buy_quality_ok(row)
         return action if safe else 'QUALITY BLOCKED ('+safe_reason+')'
 
