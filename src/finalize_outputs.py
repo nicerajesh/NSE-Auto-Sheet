@@ -57,9 +57,9 @@ def _load_hunter():
     atr_abs=cmpv*atrp/100.0
     entry=cmpv
     stop=entry-1.6*atr_abs
-    target1=entry+2.0*(entry-stop)
-    target2=entry+3.0*(entry-stop)
-    target3=entry+4.0*(entry-stop)
+    target1=entry+2.5*(entry-stop)
+    target2=entry+3.5*(entry-stop)
+    target3=entry+5.0*(entry-stop)
     hunter['IDEAL_ENTRY']=entry
     hunter['STOP_LOSS']=stop
     hunter['TARGET_1']=target1
@@ -69,6 +69,8 @@ def _load_hunter():
     hunter['ATR_RISK_PCT']=atrp
     hunter['BUY_ZONE']=entry.map(lambda x: f'{x*0.99:.2f} - {x*1.01:.2f}' if pd.notna(x) else '')
     hunter['MAX_BUY_PRICE']=entry*1.015
+    # Fallback candidates use the same 2.5R / 3.5R / 5R baseline as the primary strategy.
+    hunter['TARGET_METHOD']='R:R + ATR + STRUCTURAL_RESISTANCE'
     hunter['SOURCE_CONTEXT']='CORE_TREND_FALLBACK_TECHNICAL_CANDIDATE'
     return hunter, True
 
