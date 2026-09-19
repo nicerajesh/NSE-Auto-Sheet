@@ -67,7 +67,7 @@ def action_walk_forward(path: str | Path = "output/backtest_trades.csv") -> tupl
     for action in sorted(ACTIONABLE):
         a = eligible[eligible.ACTION.eq(action)]
         if a.empty:
-            summary["actions"][action] = {"ok": False, "reason": "INSUFFICIENT_OOS_WINDOWS"}
+            summary["actions"][action] = {"ok": False, "status": "WAITING_FOR_DATA", "reason": "INSUFFICIENT_OOS_WINDOWS"}
             continue
         good = a[(a.profit_factor >= BT.min_oos_profit_factor) & (a.median_return_pct > 0) &
                  (a.win_rate_pct >= BT.min_oos_win_rate) & (a.expectancy_pct > BT.min_oos_expectancy_pct)]
@@ -84,6 +84,10 @@ def action_walk_forward(path: str | Path = "output/backtest_trades.csv") -> tupl
             "latest_ok": bool(latest_ok),
         }
     summary["ok"] = all(v.get("ok") for v in summary["actions"].values() if v.get("windows", 0) > 0)
+    # Missing OOS windows are a data-availability state, not a model failure.
+    # Keep release gates strict, but report WAITING_FOR_DATA instead of BLOCKED.
+    if any(v.get("status") == "WAITING_FOR_DATA" for v in summary["actions"].values()):
+        summary["reason"] = "WAITING_FOR_MORE_OOS_DATA"
     if not summary["ok"]:
         summary["reason"] = "ACTION_OOS_VALIDATION_FAILED"
     return out, summary
