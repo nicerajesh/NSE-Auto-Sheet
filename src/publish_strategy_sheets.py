@@ -17,6 +17,8 @@ import gspread
 import numpy as np
 import pandas as pd
 from google.oauth2.service_account import Credentials
+from gspread.exceptions import APIError
+import time
 
 from csv_utils import safe_read_csv
 
@@ -197,9 +199,20 @@ def write(ws, df: pd.DataFrame, title: str):
         ws.add_rows(len(values) + 3 - ws.row_count)
     if ws.col_count < max(20, len(values[-1]) + 2):
         ws.add_cols(max(20, len(values[-1]) + 2) - ws.col_count)
-    ws.clear()
-    ws.update('A1', values, value_input_option='USER_ENTERED')
-    ws.freeze(rows=3 if not df.empty else 1)
+    # One clear + one values update per sheet. Retry transient Google API quota errors.
+    last_error = None
+    for attempt in range(5):
+        try:
+            ws.clear()
+            ws.update(range_name='A1', values=values, value_input_option='USER_ENTERED')
+            ws.freeze(rows=3 if not df.empty else 1)
+            return
+        except APIError as exc:
+            last_error = exc
+            if '429' not in str(exc):
+                raise
+            time.sleep(min(30, 2 ** attempt * 2))
+    raise last_error
 
 
 def main():
@@ -230,15 +243,11 @@ def main():
     write(worksheet('SWING'), swing, 'RY APEX MATRIX — SWING BUY HUNTER')
     write(worksheet('DELIVERY'), delivery, 'RY APEX MATRIX — DELIVERY BUY HUNTER')
 
-    # Keep ONLY the three canonical user-facing tabs. Any other project-generated
-    # strategy/diagnostic tab is obsolete and is removed so there can be only one
-    # source of truth in Google Sheets.
-    canonical_tabs = {'MASTER', 'SWING', 'DELIVERY'}
-    existing = {ws.title: ws for ws in sh.worksheets()}
-    for title, ws in existing.items():
-        if title not in canonical_tabs:
-            sh.del_worksheet(ws)
-            print('REMOVED OBSOLETE SHEET |', title)
+    # Do NOT delete legacy tabs during every daily run.
+    # Deleting worksheets one-by-one creates unnecessary Sheets API write requests
+    # and can leave the workbook partially modified when the per-minute quota is hit.
+    # MASTER/SWING/DELIVERY are the canonical user-facing source of truth.
+    print('CANONICAL SHEETS PUBLISHED | MASTER/SWING/DELIVERY')
 
 
     print(f'CLEAN STRATEGY PUBLISH | MASTER={len(master)} | SWING={len(swing)} | DELIVERY={len(delivery)} | VALIDATED={int((buys.SIGNAL_STATUS == "VALIDATED BUY").sum()) if not buys.empty else 0} | RESEARCH={int((buys.SIGNAL_STATUS == "RESEARCH BUY").sum()) if not buys.empty else 0}')
