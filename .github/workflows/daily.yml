@@ -1,0 +1,71 @@
+name: RY APEX Daily
+
+on:
+  schedule:
+    - cron: '45 14 * * 1-5'      # 20:15 IST, Mon-Fri (NSE bhavcopy aa chuka hota hai)
+  workflow_dispatch:
+    inputs:
+      rebuild_history:
+        description: 'History cache dobara bana do (eod2 se fresh download)'
+        type: boolean
+        default: false
+      clean_extra_tabs:
+        description: 'ACTION PLAN / SYSTEM STATUS ke alawa baaki Google Sheet tabs delete karo'
+        type: boolean
+        default: false
+
+concurrency:
+  group: nse-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Tests
+        run: python -m pytest -q tests
+
+      - name: Restore history + ledger cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: nse-state-v2-none
+          restore-keys: nse-state-v2-
+
+      - name: Run engine and publish
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          CLEAN_EXTRA_TABS: ${{ inputs.clean_extra_tabs && '1' || '0' }}
+          CAPITAL_BASE: ${{ vars.CAPITAL_BASE }}
+          RISK_PER_TRADE_PCT: ${{ vars.RISK_PER_TRADE_PCT }}
+          MAX_CONCURRENT_POSITIONS: ${{ vars.MAX_CONCURRENT_POSITIONS }}
+        run: python src/run.py ${{ inputs.rebuild_history && '--rebuild-history' || '' }}
+
+      - name: Save history + ledger cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: nse-state-v2-${{ github.run_id }}
+
+      - name: Upload CSV outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ry-apex-output
+          path: output/*.csv
+          if-no-files-found: warn
+          retention-days: 14
