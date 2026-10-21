@@ -173,6 +173,40 @@ def load_history(state_path: Path, symbols: list[str], rebuild: bool = False, of
     return hist
 
 
+def load_positions_history(symbols: list[str], offline: bool = False) -> pd.DataFrame:
+    """Load history for user-held stocks outside the scan universe.
+
+    These bars are used ONLY for MY POSITIONS monitoring; callers must not mix
+    them into the signal universe/backtest because that would alter cross-sectional ranks.
+    Missing symbols remain absent and are reported, never filled with fabricated prices.
+    """
+    symbols = sorted({str(s).strip().upper() for s in symbols if str(s).strip()})
+    cols = ["SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"]
+    if not symbols:
+        return pd.DataFrame(columns=cols)
+    try:
+        hist = bootstrap_history(symbols)
+    except RuntimeError as e:
+        print(f"POSITIONS HISTORY: bootstrap unavailable for {symbols}: {e}")
+        return pd.DataFrame(columns=cols)
+    if hist is None or hist.empty:
+        return pd.DataFrame(columns=cols)
+    if not offline:
+        try:
+            hist = top_up(hist, symbols)
+        except Exception as e:  # noqa: BLE001
+            print("POSITIONS HISTORY: NSE top-up warning:", e)
+    hist = hist[hist["SYMBOL"].isin(symbols)].copy()
+    hist["DATE"] = pd.to_datetime(hist["DATE"], errors="coerce")
+    hist = hist.dropna(subset=["DATE", "OPEN", "HIGH", "LOW", "CLOSE"])
+    hist = hist.sort_values(["SYMBOL", "DATE"]).drop_duplicates(["SYMBOL", "DATE"], keep="last").reset_index(drop=True)
+    found = set(hist["SYMBOL"].unique())
+    missing = sorted(set(symbols) - found)
+    print(f"POSITIONS HISTORY: loaded {len(found)}/{len(symbols)} held symbols"
+          + (f"; no history: {', '.join(missing)}" if missing else ""))
+    return hist
+
+
 def sessions_behind(last: pd.Timestamp, today: datetime | None = None) -> int:
     today = pd.Timestamp(today or datetime.now()).normalize()
     if last >= today:

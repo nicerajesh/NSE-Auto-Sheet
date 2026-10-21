@@ -14,6 +14,7 @@
 | `src/backtest.py` | 2019+ deep backtest, saal-wise, health, edge gate |
 | `src/ledger.py` | published signals ka live track (SL raise / exit / scoreboard) |
 | `src/data.py` | Nifty 500 list, 8 saal history (eod2_data), rozana NSE bhavcopy top-up |
+| Held-stock monitoring | Positions outside the current Nifty 500 scan universe load their own history for HOLD/SL/EXIT evaluation; this history is excluded from signal ranks and the strategy backtest. Missing history still reports NO DATA. |
 | `src/positions.py` | tumhari asli positions: HOLD / SL RAISE / EXIT, risk budget, drawdown guard |
 | `src/notify.py` | Telegram alerts (optional) |
 | `src/publish.py` | Google Sheet: ACTION PLAN, SYSTEM STATUS, RY (retry ke saath) |
@@ -134,3 +135,7 @@ SL = 2 ATR. T1/T2/T3 = 2R/4R/6R; T1 par SL entry par, T2 par SL T1 par, T3 par S
 - Survivorship bias: universe aaj ka Nifty 500 hai. Asli results kam honge.
 - Sheet me "WEAK REGIME - half size" dikhe to size aadha rakho ya paper trade karo. LIVE SCOREBOARD 4-6 hafte dekho.
 - Data 3+ session purana ho to BUY apne aap band.
+
+
+## Held positions outside Nifty 500 (Oct 2026)
+The daily pipeline now reads MY POSITIONS before history loading. Any held symbol outside the scan universe is loaded separately from the configured historical source and topped up from NSE when online. These extra bars are used only for position monitoring; they do not change cross-sectional signal ranks, the market proxy, or backtest results. If no historical file exists for a held symbol, it remains explicitly marked NO DATA rather than receiving guessed prices. See `tests/test_data.py` for coverage.
