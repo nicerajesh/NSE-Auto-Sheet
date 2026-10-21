@@ -51,12 +51,32 @@ def main(argv=None) -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     STATE.mkdir(parents=True, exist_ok=True)
 
+    # Read positions before loading history so holdings outside today's Nifty 500
+    # can receive their own data. Their bars are kept separate from signal ranking.
+    book = None if a.no_publish else pb.open_book()
+    raw_pos = pb.read_positions_rows(book) if book is not None else ps.load_csv(a.positions_csv)
+    pos, pos_problems = ps.parse(raw_pos)
+
     symbols = [s.strip().upper() for s in a.symbols.split(",") if s.strip()] or dt.fetch_universe()
     hist = dt.load_history(STATE / "history.csv.gz", symbols, rebuild=a.rebuild_history, offline=a.offline)
     f = add_features(hist)
     f = add_v42_features(f)
     asof = f["DATE"].max()
     print(f"DATA: {hist.SYMBOL.nunique()} symbols | {hist.DATE.nunique()} sessions | latest {asof:%Y-%m-%d}")
+
+    # Fetch held-only symbols separately. Do NOT add them to the scan dataframe:
+    # cross-sectional ranks, index proxy, backtest and BUY candidates stay unchanged.
+    scan_symbols = set(hist["SYMBOL"].astype(str).str.upper().unique())
+    extra_symbols = sorted(set(pos["SYMBOL"]) - scan_symbols) if not pos.empty else []
+    extra_hist = dt.load_positions_history(extra_symbols, offline=a.offline)
+    if not extra_hist.empty:
+        extra_f = add_features(extra_hist)
+        f_positions = pd.concat([f, extra_f], ignore_index=True, sort=False)
+        f_positions = f_positions.sort_values(["SYMBOL", "DATE"]).drop_duplicates(
+            ["SYMBOL", "DATE"], keep="last"
+        ).reset_index(drop=True)
+    else:
+        f_positions = f
 
     trades = bt.run_backtest(f)
     summ = bt.summarize(trades)
@@ -66,11 +86,8 @@ def main(argv=None) -> int:
     behind = 0 if a.offline else dt.sessions_behind(asof)
     stale = behind > CFG.stale_sessions
 
-    # ---- tumhari asli positions (Sheet ka MY POSITIONS tab ya CSV) ----
-    book = None if a.no_publish else pb.open_book()
-    raw_pos = pb.read_positions_rows(book) if book is not None else ps.load_csv(a.positions_csv)
-    pos, pos_problems = ps.parse(raw_pos)
-    mine = ps.evaluate(pos, f, asof)
+    # ---- real holdings are evaluated against scan + held-only history ----
+    mine = ps.evaluate(pos, f_positions, asof)
     msum = ps.summarize(mine)
     guard = msum["dd_guard"]
     buy_ok = gate_ok and not stale and not guard
