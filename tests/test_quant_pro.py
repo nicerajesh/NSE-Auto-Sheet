@@ -54,6 +54,20 @@ def test_simulator_checks_stop_conservatively():
     assert sim["T1_HIT"] is False and sim["T2_HIT"] is False and sim["T3_HIT"] is False
 
 
+
+def test_simulator_records_each_target_touch():
+    sim = simulate_quant_pro_trade(
+        np.array([100.0, 100.0, 121.0, 141.0, 161.0]),
+        np.array([101.0, 125.0, 145.0, 165.0, 166.0]),
+        np.array([99.0, 95.0, 110.0, 130.0, 150.0]),
+        np.array([100.0, 120.0, 140.0, 160.0, 155.0]),
+        1, 90.0, signal_close=100.0,
+    )
+    assert sim is not None
+    assert sim["T1_HIT"] is True
+    assert sim["T2_HIT"] is True
+    assert sim["T3_HIT"] is True
+
 def test_simulator_skips_gap_up():
     sim = simulate_quant_pro_trade(
         np.array([100.0, 103.0]), np.array([101.0, 104.0]),
