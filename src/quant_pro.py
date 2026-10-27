@@ -133,25 +133,30 @@ def simulate_quant_pro_trade(o, h, l, c, entry_idx: int, stop0: float, signal_cl
     if risk <= 0:
         return None
     stop, hi = float(stop0), fill
+    t1_hit = t2_hit = t3_hit = False
     end = min(n, entry_idx + MAX_HOLD)
     for j in range(entry_idx, end):
         if float(l[j]) <= stop:
             px = min(float(o[j]), stop) if np.isfinite(o[j]) else stop
             return {"closed": True, "exit_idx": j, "exit_px": px, "fill": fill, "stop_now": stop,
-                    "risk": risk, "reason": "STOP" if stop == stop0 else "TRAILING SL"}
+                    "risk": risk, "reason": "STOP" if stop == stop0 else "TRAILING SL",
+                    "T1_HIT": t1_hit, "T2_HIT": t2_hit, "T3_HIT": t3_hit}
         hi = max(hi, float(h[j]))
-        if hi >= fill + T3_R * risk:
+        t1_hit = t1_hit or hi >= fill + T1_R * risk
+        t2_hit = t2_hit or hi >= fill + T2_R * risk
+        t3_hit = t3_hit or hi >= fill + T3_R * risk
+        if t3_hit:
             stop = max(stop, fill + T2_R * risk)
-        elif hi >= fill + T2_R * risk:
+        elif t2_hit:
             stop = max(stop, fill + T1_R * risk)
-        elif hi >= fill + T1_R * risk:
+        elif t1_hit:
             stop = max(stop, fill)
     if entry_idx + MAX_HOLD <= n:
         j = entry_idx + MAX_HOLD - 1
         return {"closed": True, "exit_idx": j, "exit_px": float(c[j]), "fill": fill, "stop_now": stop,
-                "risk": risk, "reason": "TIME EXIT"}
+                "risk": risk, "reason": "TIME EXIT", "T1_HIT": t1_hit, "T2_HIT": t2_hit, "T3_HIT": t3_hit}
     return {"closed": False, "exit_idx": n - 1, "exit_px": float(c[-1]), "fill": fill, "stop_now": stop,
-            "risk": risk, "reason": "OPEN"}
+            "risk": risk, "reason": "OPEN", "T1_HIT": t1_hit, "T2_HIT": t2_hit, "T3_HIT": t3_hit}
 
 
 def run_quant_pro_backtest(features: pd.DataFrame) -> pd.DataFrame:
@@ -190,6 +195,7 @@ def run_quant_pro_backtest(features: pd.DataFrame) -> pd.DataFrame:
                 "GROSS_RETURN_PCT": round(raw_ret, 4), "NET_RETURN_PCT": round(net_ret, 4),
                 "R_MULTIPLE_NET": round((net_ret / 100 * sim["fill"]) / risk, 4),
                 "HOLD_SESSIONS": int(sim["exit_idx"] - i),
+                "T1_HIT": bool(sim["T1_HIT"]), "T2_HIT": bool(sim["T2_HIT"]), "T3_HIT": bool(sim["T3_HIT"]),
             })
             last_exit = int(sim["exit_idx"])
             i = last_exit + 1
@@ -227,7 +233,8 @@ def summarize_quant_pro_periods(trades: pd.DataFrame, split_year: int = 2024) ->
 
 def summarize_quant_pro(trades: pd.DataFrame) -> dict:
     if trades is None or trades.empty:
-        return {"trades": 0, "win_pct": np.nan, "avg_net_pct": np.nan, "profit_factor": np.nan, "max_drawdown_pct": np.nan}
+        return {"trades": 0, "win_pct": np.nan, "avg_net_pct": np.nan, "profit_factor": np.nan, "max_drawdown_pct": np.nan,
+                "t1_hit_pct": np.nan, "t2_hit_pct": np.nan, "t3_hit_pct": np.nan}
     ret = pd.to_numeric(trades["NET_RETURN_PCT"], errors="coerce").dropna()
     wins, losses = ret[ret > 0].sum(), -ret[ret < 0].sum()
     equity = (1 + ret / 100).cumprod()
@@ -237,4 +244,7 @@ def summarize_quant_pro(trades: pd.DataFrame) -> dict:
         "avg_net_pct": round(float(ret.mean()), 4),
         "profit_factor": round(float(wins / losses), 4) if losses > 0 else (float("inf") if wins > 0 else np.nan),
         "max_drawdown_pct": round(float(dd.min()), 4),
+        "t1_hit_pct": round(float(trades.loc[ret.index, "T1_HIT"].astype(bool).mean() * 100), 2) if "T1_HIT" in trades.columns else np.nan,
+        "t2_hit_pct": round(float(trades.loc[ret.index, "T2_HIT"].astype(bool).mean() * 100), 2) if "T2_HIT" in trades.columns else np.nan,
+        "t3_hit_pct": round(float(trades.loc[ret.index, "T3_HIT"].astype(bool).mean() * 100), 2) if "T3_HIT" in trades.columns else np.nan,
     }
