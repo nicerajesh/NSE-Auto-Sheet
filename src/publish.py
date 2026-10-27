@@ -116,6 +116,22 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
             add([r["SYMBOL"], r["CLOSE"], r["TRIGGER"], r["DIST_TO_TRIGGER_PCT"], r["RANGE_TIGHTNESS"], r["MOM_RANK"], r["EMA20"], r["RSI"]])
     else:
         add(["Watchlist khaali"])
+    add([""])
+    add(["E) RY APEX QUANT PRO V43 - quality score (probability nahi); regime = available-stock universe proxy, NIFTY index nahi"], "title")
+    qs = ctx.get("qp_summary") or {}
+    add([f"Backtest closed trades: {qs.get('trades', 0)} | Win %: {qs.get('win_pct', '')} | Avg net %/trade: {qs.get('avg_net_pct', '')} | "
+         f"Profit Factor: {qs.get('profit_factor', '')} | Max drawdown % (trade-sequence equity): {qs.get('max_drawdown_pct', '')}"])
+    add(["Costs: 0.35% round trip assumption | Entry: next session OPEN | Stop: 2 ATR | T1/T2/T3: 2R/4R/6R staircase | "
+         "Daily OHLC backtest is approximate; no guaranteed fills/profits."])
+    add(["STOCK", "SETUP", "SCORE /100", "MARKET REGIME PROXY", "CLOSE REF", "MAX BUY (+2%)", "STOP", "T1", "T2", "T3",
+         "RISK %", "QTY", "CAPITAL Rs", "RISK Rs"], "header")
+    qbuy = ctx.get("buy_v43")
+    if ctx.get("buy_ok") and qbuy is not None and not qbuy.empty:
+        for _, r in qbuy.iterrows():
+            add([r["SYMBOL"], r["QP_SETUP"], r["QP_SCORE"], r["QP_MARKET_REGIME"], r["CLOSE"], r["QP_MAX_BUY"],
+                 r["STOP"], r["T1"], r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"]])
+    else:
+        add(["", "KOI QUALIFIED V43 BUY NAHI" if ctx.get("buy_ok") else "BUY BAND: " + ctx.get("banner", "")])
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
 
@@ -161,6 +177,13 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
         for _, r in b42.iterrows():
             add([r["SYMBOL"], f"BUY (V42 {r['V42_ENTRY_TYPE']})", r["CLOSE"], r["STOP"], r["T1"], r["T2"], "",
                  f"Pine V42 signal, score {r['V42_SCORE']}/100 - PF sabse kam (~1.19), size sabse chhota. Detail: RY V42 tab"])
+            any_row = True
+
+    b43 = ctx.get("buy_v43")
+    if ctx.get("buy_ok") and b43 is not None and not b43.empty:
+        for _, r in b43.iterrows():
+            add([r["SYMBOL"], f"BUY (V43 {r['QP_SETUP']})", r["CLOSE"], r["STOP"], r["T1"], r["T2"], r["T3"],
+                 f"Quant Pro score {r['QP_SCORE']}/100; universe-proxy regime; backtest metrics shown in ACTION PLAN"])
             any_row = True
 
     mine = ctx.get("mine")
