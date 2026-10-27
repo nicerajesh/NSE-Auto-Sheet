@@ -11,6 +11,7 @@
 |---|---|
 | `src/config.py` | saari settings |
 | `src/engine.py` | signal + SL/T1/T2/T3 + exit simulator (backtest aur live dono yehi use karte hain) |
+| `src/quant_pro.py` | Quant Pro V43 score, market-proxy regime, conservative trade simulator, cost-aware backtest diagnostics |
 | `src/backtest.py` | 2019+ deep backtest, saal-wise, health, edge gate |
 | `src/ledger.py` | published signals ka live track (SL raise / exit / scoreboard) |
 | `src/data.py` | Nifty 500 list, 8 saal history (eod2_data), rozana NSE bhavcopy top-up |
@@ -36,7 +37,7 @@ V43 existing data pipeline ko reuse karta hai; BhavCopy/history source ya existi
 - **Setups:** trend-confirmed breakout aur pullback; volume, relative-strength rank, liquidity, ATR risk aur overhead-resistance headroom scoring.
 - **Risk:** initial stop 2 ATR; reference targets 2R/4R/6R; conservative daily OHLC stop handling; next-session OPEN entry; gap-up >2% skip; 0.35% round-trip transaction-cost assumption.
 - **Portfolio fit:** V43 candidates existing strict and WATCH candidates ke baad remaining slots, cash and open-risk budget se fit hote hain.
-- **Outputs:** output/action_plan_buy_v43_quant_pro.csv, output/backtest_trades_v43_quant_pro.csv, and output/backtest_summary_v43_quant_pro.csv.
+- **Outputs:** output/action_plan_buy_v43_quant_pro.csv, output/backtest_trades_v43_quant_pro.csv, and output/backtest_summary_v43_quant_pro.csv, output/backtest_by_year_v43_quant_pro.csv, and output/backtest_period_split_v43_quant_pro.csv.
 - **Validation status:** automated unit tests cover score bounds, proxy labels, stop simulation, gap filter, net-return summary, and missing-feature handling. Full GitHub Actions run + real historical backtest must pass before considering live use.
 
 **No profit guarantee:** V43 is a research candidate, not a promise of profit. Results have current-universe survivorship bias, the market proxy is not NIFTY, and daily OHLC bars cannot reproduce every real fill. Inspect yearly/out-of-sample results, fees, slippage and drawdown; paper-trade before risking capital.
