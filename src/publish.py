@@ -53,6 +53,27 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
          f"Free slots {ctx['slots_free']}/{CFG.max_positions} | Capital Rs {CFG.capital:,.0f} | Risk/trade {CFG.risk_per_trade_pct}%"])
     add([""])
 
+
+    # Decision-first summary: only V43 candidates that passed the existing safety gates.
+    qs_simple = ctx.get("qp_summary") or {}
+    qbuy_simple = ctx.get("buy_v43")
+    add(["AAJ KA SIMPLE DECISION"], "title")
+    if not ctx.get("buy_ok"):
+        add(["WAIT - abhi BUY nahi", ctx.get("banner", "Safety gate active")])
+    elif qbuy_simple is not None and not qbuy_simple.empty:
+        add(["CHECK V43 BUY CANDIDATES - next session OPEN par; MAX BUY se upar ho to SKIP"])
+        add(["STOCK", "ENTRY REF", "MAX BUY", "STOP LOSS", "T1", "T2", "T3", "QTY", "V43 T1 HIT %", "V43 T2 HIT %", "V43 T3 HIT %"], "header")
+        sample = int(qs_simple.get("trades", 0) or 0)
+        for _, qr in qbuy_simple.head(3).iterrows():
+            rates = [qs_simple.get("t1_hit_pct"), qs_simple.get("t2_hit_pct"), qs_simple.get("t3_hit_pct")]
+            rate_text = rates if sample >= 30 else ["LOW SAMPLE"] * 3
+            add([qr["SYMBOL"], qr["CLOSE"], qr["QP_MAX_BUY"], qr["STOP"], qr["T1"], qr["T2"], qr["T3"], qr.get("QTY", ""),
+                 *rate_text])
+        add([f"Target hit % = past V43 trades only ({sample} trades); overall strategy rate, NOT stock-specific prediction or guarantee."])
+    else:
+        add(["WAIT - aaj koi qualified V43 BUY nahi. WATCHLIST ko BUY signal na samjhein."])
+    add([""])
+
     mine = ctx.get("mine")
     add(["A) MERI POSITIONS - AAJ KA KAAM (SL order broker me tum khud update karo)"], "title")
     add(["STOCK", "STATE", "QTY", "BUY PRICE", "LAST CLOSE", "P&L %", "P&L Rs", "R NOW", "CURRENT SL", "T1", "T2", "T3", "ACTION"], "header")
@@ -85,8 +106,7 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
         add(["", "KOI NAYA BUY NAHI" if ctx["buy_ok"] else "BUY BAND: " + ctx["banner"]])
     add([""])
 
-    add(["B2) WATCH BUY - dhila filter, roz aane ki koshish karta hai (backtest PF ~1.7, strict wale ~2.2 se KAM). "
-         "Size jaan-bujhkar aadha hai. Ye 'kuch dikhane ke liye' list hai, guaranteed edge nahi."], "title")
+    add(["B2) WATCH ONLY - ise automatic BUY na samjhein. Filter dhila hai; historical backtest strict BUY se kamzor (~PF 1.7 vs ~2.2)."], "title")
     add(hdr, "header")
     bw = ctx.get("buy_watch")
     if ctx["buy_ok"] and bw is not None and not bw.empty:
