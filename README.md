@@ -12,6 +12,7 @@
 | `src/config.py` | saari settings |
 | `src/engine.py` | signal + SL/T1/T2/T3 + exit simulator (backtest aur live dono yehi use karte hain) |
 | `src/quant_pro.py` | Quant Pro V43 score, market-proxy regime, conservative trade simulator, cost-aware backtest diagnostics |
+| `tradingview/RY_APEX_MATRIX_V43_QUANT_PRO.pine` | TradingView chart companion with benchmark-relative strength, score, BUY/EXIT markers, stop/targets and alerts |
 | `src/backtest.py` | 2019+ deep backtest, saal-wise, health, edge gate |
 | `src/ledger.py` | published signals ka live track (SL raise / exit / scoreboard) |
 | `src/data.py` | Nifty 500 list, 8 saal history (eod2_data), rozana NSE bhavcopy top-up |
@@ -31,12 +32,13 @@
 
 ## RY APEX MATRIX Quant Pro V43 (research tier)
 
-V43 existing data pipeline ko reuse karta hai; BhavCopy/history source ya existing Sheet tabs ko rename/delete nahi karta. Iska score 0-100 ranking aid hai, win probability nahi. Entry candidates ACTION PLAN ke naye section "E) RY APEX QUANT PRO V43" aur existing RY quick-view tab me dikhte hain. Naye Google Sheet tabs add nahi hote.
+V43 existing data pipeline ko reuse karta hai; BhavCopy/history source ya existing Sheet tabs ko rename/delete nahi karta. Iska score 0-100 ranking aid hai, win probability nahi. Entry candidates ACTION PLAN ke naye section "E) RY APEX QUANT PRO V43" aur existing RY quick-view tab me dikhte hain. TradingView ke liye alag chart companion Pine file bhi hai; Pine ka RS filter benchmark-relative hai aur Python ka score cross-sectional ranks use karta hai, isliye dono signals exact same hona guaranteed nahi. Naye Google Sheet tabs add nahi hote.
 
 - **Market regime limitation:** historical data me direct NIFTY index series use nahi ki gayi. Regime available stocks ke median daily return aur EMA200 breadth se banta hai; ise clearly PROXY label kiya gaya hai, NIFTY nahi.
 - **Setups:** trend-confirmed breakout aur pullback; volume, relative-strength rank, liquidity, ATR risk aur overhead-resistance headroom scoring.
 - **Risk:** initial stop 2 ATR; reference targets 2R/4R/6R; conservative daily OHLC stop handling; next-session OPEN entry; gap-up >2% skip; 0.35% round-trip transaction-cost assumption.
 - **Portfolio fit:** V43 candidates existing strict and WATCH candidates ke baad remaining slots, cash and open-risk budget se fit hote hain.
+- **TradingView:** tradingview/RY_APEX_MATRIX_V43_QUANT_PRO.pine is an indicator companion; it does not place broker orders and has not been verified by the TradingView compiler in this workflow.
 - **Outputs:** output/action_plan_buy_v43_quant_pro.csv, output/backtest_trades_v43_quant_pro.csv, and output/backtest_summary_v43_quant_pro.csv, output/backtest_by_year_v43_quant_pro.csv, and output/backtest_period_split_v43_quant_pro.csv.
 - **Validation status:** automated unit tests cover score bounds, proxy labels, stop simulation, gap filter, net-return summary, and missing-feature handling. Full GitHub Actions run + real historical backtest must pass before considering live use.
 
