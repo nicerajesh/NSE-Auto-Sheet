@@ -21,7 +21,7 @@ from config import CFG         # noqa: E402
 from engine import add_features, latest_candidates, position_size  # noqa: E402
 from v42 import add_v42_features, latest_v42_candidates            # noqa: E402
 from quant_pro import (add_quant_pro_features, latest_quant_pro_candidates, position_size_quant_pro,
-                      run_quant_pro_backtest, summarize_quant_pro)  # noqa: E402
+                      run_quant_pro_backtest, summarize_quant_pro, summarize_quant_pro_by_year, summarize_quant_pro_periods)  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.getenv("NSE_STATE_DIR", ROOT / "state"))
@@ -121,6 +121,8 @@ def main(argv=None) -> int:
         buy_v43 = buy_v43[buy_v43["QTY"] > 0]
     qp_trades = run_quant_pro_backtest(f)
     qp_summary = summarize_quant_pro(qp_trades)
+    qp_yearly = summarize_quant_pro_by_year(qp_trades)
+    qp_periods = summarize_quant_pro_periods(qp_trades, split_year=2024)
 
     signals = buy                                    # paper ledger me sab signals (portfolio limit se pehle)
 
@@ -160,7 +162,7 @@ def main(argv=None) -> int:
                buy=buy, buy_watch=buy_watch, buy_v38=buy_v38, buy_v42=buy_v42, watch=watch, open=open_t, slots_free=slots_free, bt=summ, by_year=yearly, score=score,
                n_symbols=hist.SYMBOL.nunique(), n_sessions=hist.DATE.nunique(),
                breadth50=float((last.CLOSE > last.EMA50).mean() * 100), breadth200=float((last.CLOSE > last.EMA200).mean() * 100),
-               notes=notes(yearly, summ), buy_v43=buy_v43, qp_summary=qp_summary, qp_trades=qp_trades)
+               notes=notes(yearly, summ), buy_v43=buy_v43, qp_summary=qp_summary, qp_trades=qp_trades, qp_yearly=qp_yearly, qp_periods=qp_periods)
 
     # CSV artifacts (hamesha)
     (buy if buy_ok else buy.head(0)).to_csv(OUT / "action_plan_buy.csv", index=False)
@@ -170,6 +172,8 @@ def main(argv=None) -> int:
     (buy_v43 if buy_ok else buy_v43.head(0)).to_csv(OUT / "action_plan_buy_v43_quant_pro.csv", index=False)
     qp_trades.to_csv(OUT / "backtest_trades_v43_quant_pro.csv", index=False)
     pd.DataFrame([qp_summary]).to_csv(OUT / "backtest_summary_v43_quant_pro.csv", index=False)
+    qp_yearly.to_csv(OUT / "backtest_by_year_v43_quant_pro.csv", index=False)
+    qp_periods.to_csv(OUT / "backtest_period_split_v43_quant_pro.csv", index=False)
     watch.head(CFG.watch_rows).to_csv(OUT / "watchlist.csv", index=False)
     open_t.to_csv(OUT / "open_signals.csv", index=False)
     mine.to_csv(OUT / "my_positions_status.csv", index=False)
