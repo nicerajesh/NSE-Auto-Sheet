@@ -136,7 +136,7 @@ else if barstate.isconfirmed and inTrade and not newBuy
         t3Hit := true
         stopPrice := math.max(stopPrice, entryPrice + initialRisk * rr2)
 
-riskPerShare = not na(entryPrice) and not na(stopPrice) ? math.max(entryPrice - stopPrice, syminfo.mintick) : na
+riskPerShare = not na(initialRisk) ? math.max(initialRisk, syminfo.mintick) : na
 riskBudget = capital * riskPct / 100
 qtyByRisk = not na(riskPerShare) and riskPerShare > 0 ? math.floor(riskBudget / riskPerShare) : 0
 qtyByCapital = not na(entryPrice) and entryPrice > 0 ? math.floor(capital * maxPositionPct / 100 / entryPrice) : 0
