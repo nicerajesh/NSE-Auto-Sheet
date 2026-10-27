@@ -51,6 +51,7 @@ def test_simulator_checks_stop_conservatively():
     sim = simulate_quant_pro_trade(o, h, l, c, 1, 96.0, signal_close=100.0)
     assert sim["closed"] is True
     assert sim["exit_px"] == pytest.approx(96.0)
+    assert sim["T1_HIT"] is False and sim["T2_HIT"] is False and sim["T3_HIT"] is False
 
 
 def test_simulator_skips_gap_up():
@@ -67,6 +68,16 @@ def test_summary_uses_net_returns():
     assert summary["trades"] == 3
     assert summary["win_pct"] == pytest.approx(66.67, abs=0.01)
     assert summary["profit_factor"] == pytest.approx(3.0)
+    target_trades = pd.DataFrame({
+        "NET_RETURN_PCT": [2.0, -1.0, 3.0],
+        "T1_HIT": [True, False, True],
+        "T2_HIT": [True, False, True],
+        "T3_HIT": [False, False, True],
+    })
+    target_summary = summarize_quant_pro(target_trades)
+    assert target_summary["t1_hit_pct"] == pytest.approx(66.67, abs=0.01)
+    assert target_summary["t2_hit_pct"] == pytest.approx(66.67, abs=0.01)
+    assert target_summary["t3_hit_pct"] == pytest.approx(33.33, abs=0.01)
 
 
 def test_missing_features_fail_loudly():
