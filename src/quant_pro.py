@@ -197,6 +197,32 @@ def run_quant_pro_backtest(features: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["EXIT_DATE", "SYMBOL"]).reset_index(drop=True) if not out.empty else out
 
 
+
+def summarize_quant_pro_by_year(trades: pd.DataFrame) -> pd.DataFrame:
+    """Yearly closed-trade summaries. This is not a portfolio-level concurrent-position backtest."""
+    if trades is None or trades.empty:
+        return pd.DataFrame(columns=["YEAR", "trades", "win_pct", "avg_net_pct", "profit_factor", "max_drawdown_pct"])
+    t = trades.copy()
+    t["EXIT_DATE"] = pd.to_datetime(t["EXIT_DATE"], errors="coerce")
+    rows = []
+    for year, group in t.dropna(subset=["EXIT_DATE"]).groupby(t["EXIT_DATE"].dt.year):
+        rows.append({"YEAR": int(year), **summarize_quant_pro(group)})
+    return pd.DataFrame(rows).sort_values("YEAR").reset_index(drop=True) if rows else pd.DataFrame()
+
+
+def summarize_quant_pro_periods(trades: pd.DataFrame, split_year: int = 2024) -> pd.DataFrame:
+    """Time-split diagnostic. Treat 2024+ as a later-period check, not a pristine holdout."""
+    if trades is None or trades.empty:
+        return pd.DataFrame(columns=["PERIOD", "trades", "win_pct", "avg_net_pct", "profit_factor", "max_drawdown_pct"])
+    t = trades.copy()
+    t["EXIT_DATE"] = pd.to_datetime(t["EXIT_DATE"], errors="coerce")
+    periods = [
+        (f"EARLIER_THAN_{split_year}", t[t["EXIT_DATE"].dt.year < split_year]),
+        (f"{split_year}_ONWARD_DIAGNOSTIC", t[t["EXIT_DATE"].dt.year >= split_year]),
+    ]
+    return pd.DataFrame([{"PERIOD": label, **summarize_quant_pro(group)} for label, group in periods])
+
+
 def summarize_quant_pro(trades: pd.DataFrame) -> dict:
     if trades is None or trades.empty:
         return {"trades": 0, "win_pct": np.nan, "avg_net_pct": np.nan, "profit_factor": np.nan, "max_drawdown_pct": np.nan}
