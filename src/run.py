@@ -20,6 +20,8 @@ import publish as pb           # noqa: E402
 from config import CFG         # noqa: E402
 from engine import add_features, latest_candidates, position_size  # noqa: E402
 from v42 import add_v42_features, latest_v42_candidates            # noqa: E402
+from quant_pro import (add_quant_pro_features, latest_quant_pro_candidates, position_size_quant_pro,
+                      run_quant_pro_backtest, summarize_quant_pro)  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.getenv("NSE_STATE_DIR", ROOT / "state"))
@@ -55,6 +57,7 @@ def main(argv=None) -> int:
     hist = dt.load_history(STATE / "history.csv.gz", symbols, rebuild=a.rebuild_history, offline=a.offline)
     f = add_features(hist)
     f = add_v42_features(f)
+    f = add_quant_pro_features(f)
     asof = f["DATE"].max()
     print(f"DATA: {hist.SYMBOL.nunique()} symbols | {hist.DATE.nunique()} sessions | latest {asof:%Y-%m-%d}")
 
@@ -106,6 +109,19 @@ def main(argv=None) -> int:
         sz = buy_v42.apply(lambda r: pd.Series(position_size(r["CLOSE"], r["STOP"], mult_total * CFG.v42_size_mult)), axis=1)
         buy_v42 = pd.concat([buy_v42, sz], axis=1)
         buy_v42 = buy_v42[buy_v42["QTY"] > 0]
+    # Quant Pro V43: score + cost-aware backtest; market regime is a universe proxy, not NIFTY.
+    buy_v43 = latest_quant_pro_candidates(f)
+    if not buy_v43.empty:
+        buy_v43 = buy_v43.copy()
+        buy_v43["STOP"] = buy_v43["QP_STOP"]
+        buy_v43["T1"], buy_v43["T2"], buy_v43["T3"] = buy_v43["QP_T1"], buy_v43["QP_T2"], buy_v43["QP_T3"]
+        buy_v43["RISK_PCT"] = buy_v43["QP_RISK_PCT"]
+        sz = buy_v43.apply(lambda r: pd.Series(position_size_quant_pro(r["CLOSE"], r["STOP"], mult_total)), axis=1)
+        buy_v43 = pd.concat([buy_v43, sz], axis=1)
+        buy_v43 = buy_v43[buy_v43["QTY"] > 0]
+    qp_trades = run_quant_pro_backtest(f)
+    qp_summary = summarize_quant_pro(qp_trades)
+
     signals = buy                                    # paper ledger me sab signals (portfolio limit se pehle)
 
     held = set(pos["SYMBOL"]) if not pos.empty else set()
@@ -119,6 +135,13 @@ def main(argv=None) -> int:
     budget2 = budget - float(buy["RISK_AMT"].sum()) if not buy.empty else budget
     cash2 = cash - float(buy["CAPITAL_USED"].sum()) if not buy.empty else cash
     buy_watch = ps.fit_to_portfolio(buy_watch, held2, slots_free2, budget2, cash2)
+    # V43 gets only remaining portfolio capacity after strict and WATCH candidates.
+    held3 = held2 | set(buy_watch["SYMBOL"]) if not buy_watch.empty else held2
+    slots_free3 = max(0, slots_free2 - len(buy_watch))
+    budget3 = budget2 - float(buy_watch["RISK_AMT"].sum()) if not buy_watch.empty else budget2
+    cash3 = cash2 - float(buy_watch["CAPITAL_USED"].sum()) if not buy_watch.empty else cash2
+    buy_v43 = ps.fit_to_portfolio(buy_v43, held3, slots_free3, budget3, cash3)
+
     # V38 tier: yahan koi slots/budget/held narrowing nahi - user ne kaha "jitne bhi BUY aayein sab
     # sheet me dikhein". Isliye ye tier bas apni QTY/CAPITAL dikhata hai (position_size se), portfolio
     # budget se cut nahi hota. Fayda: sheet me poora signal list dikhta hai; nuksan: agar tum saare le
@@ -137,13 +160,16 @@ def main(argv=None) -> int:
                buy=buy, buy_watch=buy_watch, buy_v38=buy_v38, buy_v42=buy_v42, watch=watch, open=open_t, slots_free=slots_free, bt=summ, by_year=yearly, score=score,
                n_symbols=hist.SYMBOL.nunique(), n_sessions=hist.DATE.nunique(),
                breadth50=float((last.CLOSE > last.EMA50).mean() * 100), breadth200=float((last.CLOSE > last.EMA200).mean() * 100),
-               notes=notes(yearly, summ))
+               notes=notes(yearly, summ), buy_v43=buy_v43, qp_summary=qp_summary, qp_trades=qp_trades)
 
     # CSV artifacts (hamesha)
     (buy if buy_ok else buy.head(0)).to_csv(OUT / "action_plan_buy.csv", index=False)
     (buy_watch if buy_ok else buy_watch.head(0)).to_csv(OUT / "action_plan_buy_watch.csv", index=False)
     (buy_v38 if buy_ok else buy_v38.head(0)).to_csv(OUT / "action_plan_buy_v38.csv", index=False)
     (buy_v42 if buy_ok else buy_v42.head(0)).to_csv(OUT / "action_plan_buy_v42.csv", index=False)
+    (buy_v43 if buy_ok else buy_v43.head(0)).to_csv(OUT / "action_plan_buy_v43_quant_pro.csv", index=False)
+    qp_trades.to_csv(OUT / "backtest_trades_v43_quant_pro.csv", index=False)
+    pd.DataFrame([qp_summary]).to_csv(OUT / "backtest_summary_v43_quant_pro.csv", index=False)
     watch.head(CFG.watch_rows).to_csv(OUT / "watchlist.csv", index=False)
     open_t.to_csv(OUT / "open_signals.csv", index=False)
     mine.to_csv(OUT / "my_positions_status.csv", index=False)
@@ -152,6 +178,7 @@ def main(argv=None) -> int:
     led.to_csv(OUT / "signal_ledger.csv", index=False)
     print(f"RESULT | {banner} | new BUY {len(buy) if buy_ok else 0} | watch {len(watch)} | open {int(led.STATUS.isin(['ACTIVE','PENDING']).sum())}")
     print(f"BACKTEST | {summ}")
+    print(f"QUANT PRO V43 BACKTEST | {qp_summary}")
 
     if not a.no_publish:
         ok = pb.publish(pb.build_action_rows(ctx), pb.build_status_rows(ctx), pb.build_ry_rows(ctx),
