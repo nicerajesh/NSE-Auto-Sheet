@@ -391,32 +391,123 @@ def _retry(fn, *a, **k):
 
 
 def _write_tab(book, title: str, rows: list[list], marks: dict) -> None:
+    """Write a clean, readable report without changing tab names or creating extra tabs."""
     import gspread
+
+    width = max((len(row) for row in rows), default=1)
     try:
         ws = _retry(book.worksheet, title)
     except gspread.WorksheetNotFound:
-        ws = _retry(book.add_worksheet, title=title, rows=max(100, len(rows) + 20), cols=max(20, len(rows[0]) + 2))
+        ws = _retry(book.add_worksheet, title=title, rows=max(100, len(rows) + 20), cols=max(20, width + 2))
+
     if ws.row_count < len(rows) + 5:
         _retry(ws.add_rows, len(rows) + 5 - ws.row_count)
-    if ws.col_count < len(rows[0]):
-        _retry(ws.add_cols, len(rows[0]) - ws.col_count)
-    _retry(ws.batch_clear, ["A1:Z1000"])          # bare ws.clear() spaces wali sheet names par fail hota tha
-    # RAW zaroori hai: USER_ENTERED hamari date-strings ("21-Sep-2026") ko khud reparse karke
-    # apne default datetime format me badal deta tha, aur us column ka date-format agle plain
-    # number (jaise stock count) par bhi chipak jaata tha -> "1901-05-14" jaisा bekar output.
+    if ws.col_count < width:
+        _retry(ws.add_cols, width - ws.col_count)
+
+    # Clear a wider range than the current report so old cells cannot remain visible
+    # if a previous report had more columns or rows.
+    _retry(ws.batch_clear, ["A1:AZ2000"])
+    # RAW prevents date-like labels from being silently converted by Sheets.
     _retry(ws.update, values=rows, range_name="A1", value_input_option="RAW")
-    reqs = []
+
+    reqs = [
+        {"updateSheetProperties": {
+            "properties": {"sheetId": ws.id, "gridProperties": {"frozenRowCount": 1},
+                           "tabColor": {"red": 0.12, "green": 0.32, "blue": 0.58}},
+            "fields": "gridProperties.frozenRowCount,tabColor"
+        }},
+        {"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": len(rows),
+                      "startColumnIndex": 0, "endColumnIndex": width},
+            "cell": {"userEnteredFormat": {
+                "textFormat": {"fontFamily": "Arial", "fontSize": 10, "foregroundColor": {"red": 0.12, "green": 0.15, "blue": 0.20}},
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+            }},
+            "fields": "userEnteredFormat(textFormat,verticalAlignment,wrapStrategy)"
+        }},
+        {"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": width},
+            "properties": {"pixelSize": 125},
+            "fields": "pixelSize"
+        }},
+        {"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1},
+            "properties": {"pixelSize": 155},
+            "fields": "pixelSize"
+        }},
+        {"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": 0, "endIndex": len(rows)},
+            "properties": {"pixelSize": 30},
+            "fields": "pixelSize"
+        }},
+    ]
+
+    # Section/title rows use a consistent dark band; column headings use a lighter band.
     for i in marks.get("title", []):
-        reqs.append({"repeatCell": {"range": {"sheetId": ws.id, "startRowIndex": i, "endRowIndex": i + 1},
-                                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontSize": 11}}},
-                                    "fields": "userEnteredFormat.textFormat"}})
+        reqs.append({"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": i, "endRowIndex": i + 1,
+                      "startColumnIndex": 0, "endColumnIndex": width},
+            "cell": {"userEnteredFormat": {
+                "textFormat": {"bold": True, "fontSize": 11,
+                               "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+                "backgroundColor": {"red": 0.10, "green": 0.24, "blue": 0.42},
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+            }},
+            "fields": "userEnteredFormat(textFormat,backgroundColor,verticalAlignment,wrapStrategy)"
+        }})
+        reqs.append({"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": i, "endIndex": i + 1},
+            "properties": {"pixelSize": 34},
+            "fields": "pixelSize"
+        }})
+
     for i in marks.get("header", []):
-        reqs.append({"repeatCell": {"range": {"sheetId": ws.id, "startRowIndex": i, "endRowIndex": i + 1},
-                                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True},
-                                                                   "backgroundColor": {"red": 0.9, "green": 0.93, "blue": 0.98}}},
-                                    "fields": "userEnteredFormat(textFormat,backgroundColor)"}})
-    if reqs:
-        _retry(book.batch_update, {"requests": reqs})
+        reqs.append({"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": i, "endRowIndex": i + 1,
+                      "startColumnIndex": 0, "endColumnIndex": width},
+            "cell": {"userEnteredFormat": {
+                "textFormat": {"bold": True, "fontSize": 10,
+                               "foregroundColor": {"red": 0.10, "green": 0.24, "blue": 0.42}},
+                "backgroundColor": {"red": 0.82, "green": 0.88, "blue": 0.95},
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+                "borders": {"bottom": {"style": "SOLID_MEDIUM",
+                                       "color": {"red": 0.40, "green": 0.52, "blue": 0.66}}},
+            }},
+            "fields": "userEnteredFormat(textFormat,backgroundColor,verticalAlignment,wrapStrategy,borders)"
+        }})
+        reqs.append({"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": i, "endIndex": i + 1},
+            "properties": {"pixelSize": 38},
+            "fields": "pixelSize"
+        }})
+
+    # The last column commonly contains an action/explanation; give it extra room.
+    if width >= 5:
+        reqs.append({"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": width - 1, "endIndex": width},
+            "properties": {"pixelSize": 260},
+            "fields": "pixelSize"
+        }})
+
+    # Make the first report title more prominent than section labels.
+    first_title = min(marks.get("title", [0]))
+    reqs.append({"repeatCell": {
+        "range": {"sheetId": ws.id, "startRowIndex": first_title, "endRowIndex": first_title + 1,
+                  "startColumnIndex": 0, "endColumnIndex": width},
+        "cell": {"userEnteredFormat": {
+            "textFormat": {"bold": True, "fontSize": 14,
+                           "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+            "backgroundColor": {"red": 0.06, "green": 0.16, "blue": 0.30},
+            "verticalAlignment": "MIDDLE",
+            "wrapStrategy": "WRAP",
+        }},
+        "fields": "userEnteredFormat(textFormat,backgroundColor,verticalAlignment,wrapStrategy)"
+    }})
+    _retry(book.batch_update, {"requests": reqs})
 
 
 def open_book(creds_json: str | None = None):
