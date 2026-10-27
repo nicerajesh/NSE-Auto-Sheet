@@ -53,6 +53,57 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
          f"Free slots {ctx['slots_free']}/{CFG.max_positions} | Capital Rs {CFG.capital:,.0f} | Risk/trade {CFG.risk_per_trade_pct}%"])
     add([""])
 
+
+    # Decision-first summary: only V43 candidates that passed the existing safety gates.
+    qs_simple = ctx.get("qp_summary") or {}
+    qbuy_simple = ctx.get("buy_v43")
+    add(["AAJ KA SIMPLE DECISION"], "title")
+    if not ctx.get("buy_ok"):
+        add(["WAIT - abhi BUY nahi", ctx.get("banner", "Safety gate active")])
+    elif qbuy_simple is not None and not qbuy_simple.empty:
+        add(["CHECK V43 BUY CANDIDATES - next session OPEN par; MAX BUY se upar ho to SKIP"])
+        add(["STOCK", "ENTRY REF", "MAX BUY", "STOP LOSS", "T1", "T2", "T3", "QTY", "V43 T1 HIT %", "V43 T2 HIT %", "V43 T3 HIT %"], "header")
+        sample = int(qs_simple.get("trades", 0) or 0)
+        for _, qr in qbuy_simple.head(3).iterrows():
+            rates = [qs_simple.get("t1_hit_pct"), qs_simple.get("t2_hit_pct"), qs_simple.get("t3_hit_pct")]
+            rate_text = rates if sample >= 30 else ["LOW SAMPLE"] * 3
+            add([qr["SYMBOL"], qr["CLOSE"], qr["QP_MAX_BUY"], qr["STOP"], qr["T1"], qr["T2"], qr["T3"], qr.get("QTY", ""),
+                 *rate_text])
+        add([f"Target hit % = past V43 trades only ({sample} trades); overall strategy rate, NOT stock-specific prediction or guarantee."])
+    else:
+        add(["WAIT - aaj koi qualified V43 BUY nahi. WATCHLIST ko BUY signal na samjhein."])
+    add([""])
+
+    # Deep-drawdown recovery radar: explicitly separated from the normal BUY engine.
+    rec = ctx.get("recovery_radar")
+    add(["A2) HIGH-SE NEEche GIRE STOCKS - RECOVERY RADAR (research/watch only; automatic BUY nahi)"], "title")
+    add(["STOCK", "STAGE", "SCORE /100", "52W HIGH SE DOWN %", "52W LOW SE UP %", "PRICE", "ENTRY TRIGGER",
+         "MAX BUY", "REF STOP", "T1", "T2", "T3", "UP/DOWN VOL RATIO", "ACTION"], "header")
+    if rec is not None and not rec.empty:
+        for _, rr in rec.iterrows():
+            if not ctx.get("buy_ok"):
+                action = "BLOCKED - global BUY safety gate"
+            elif rr["REC_STAGE"] == "TRIGGERED":
+                action = "TRIGGERED - PAPER/VERIFY ONLY"
+            else:
+                action = "WAIT FOR volume-confirmed breakout"
+            add([rr["SYMBOL"], rr["REC_STAGE"], rr["REC_SCORE"], rr["REC_DRAWDOWN_PCT"], rr["REC_FROM_LOW_PCT"],
+                 rr["CLOSE"], rr["REC_ENTRY_REF"], rr["REC_MAX_BUY"], rr["REC_STOP"], rr["REC_T1"],
+                 rr["REC_T2"], rr["REC_T3"], rr["REC_ACCUM_RATIO"], action])
+        add(["Entry/SL/T1-T3 are trigger-based references; PREPARE is not a BUY. A triggered row is research/paper-only until separately validated."])
+    else:
+        add(["Aaj koi eligible deep-drawdown recovery setup nahi mila. Falling stock ko sirf discount samajhkar mat kharido."])
+    rd = ctx.get("recovery_diagnostics")
+    if rd is not None and not rd.empty:
+        add(["HISTORICAL RECOVERY DIAGNOSTIC - future high/low excursions after distinct signals (not trade P&L)"], "title")
+        add(["STAGE", "NEXT SESSIONS", "EVENTS", "+10% HIGH TOUCH %", "+20% HIGH TOUCH %",
+             "AVG BEST HIGH %", "MEDIAN BEST HIGH %", "AVG WORST LOW %"], "header")
+        for _, dr in rd.iterrows():
+            add([dr["STAGE"], dr["HORIZON_SESSIONS"], dr["EVENTS"], dr["HIT_PLUS10_PCT"], dr["HIT_PLUS20_PCT"],
+                 dr["AVG_MAX_UPSIDE_PCT"], dr["MEDIAN_MAX_UPSIDE_PCT"], dr["AVG_MAX_DRAWDOWN_PCT"]])
+        add(["This is the later high/low seen inside each window; not an executable return. Overlapping regimes and today's Nifty-500 survivorship bias remain."])
+    add([""])
+
     mine = ctx.get("mine")
     add(["A) MERI POSITIONS - AAJ KA KAAM (SL order broker me tum khud update karo)"], "title")
     add(["STOCK", "STATE", "QTY", "BUY PRICE", "LAST CLOSE", "P&L %", "P&L Rs", "R NOW", "CURRENT SL", "T1", "T2", "T3", "ACTION"], "header")
@@ -85,8 +136,7 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
         add(["", "KOI NAYA BUY NAHI" if ctx["buy_ok"] else "BUY BAND: " + ctx["banner"]])
     add([""])
 
-    add(["B2) WATCH BUY - dhila filter, roz aane ki koshish karta hai (backtest PF ~1.7, strict wale ~2.2 se KAM). "
-         "Size jaan-bujhkar aadha hai. Ye 'kuch dikhane ke liye' list hai, guaranteed edge nahi."], "title")
+    add(["B2) WATCH ONLY - ise automatic BUY na samjhein. Filter dhila hai; historical backtest strict BUY se kamzor (~PF 1.7 vs ~2.2)."], "title")
     add(hdr, "header")
     bw = ctx.get("buy_watch")
     if ctx["buy_ok"] and bw is not None and not bw.empty:
@@ -116,6 +166,34 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
             add([r["SYMBOL"], r["CLOSE"], r["TRIGGER"], r["DIST_TO_TRIGGER_PCT"], r["RANGE_TIGHTNESS"], r["MOM_RANK"], r["EMA20"], r["RSI"]])
     else:
         add(["Watchlist khaali"])
+    add([""])
+    add(["E) RY APEX QUANT PRO V43 - quality score (probability nahi); regime = available-stock universe proxy, NIFTY index nahi"], "title")
+    qs = ctx.get("qp_summary") or {}
+    add([f"Backtest closed trades: {qs.get('trades', 0)} | Win %: {qs.get('win_pct', '')} | Avg net %/trade: {qs.get('avg_net_pct', '')} | "
+         f"Profit Factor: {qs.get('profit_factor', '')} | Max drawdown % (trade-sequence equity): {qs.get('max_drawdown_pct', '')}"])
+    add(["Costs: 0.35% round trip assumption | Entry: next session OPEN | Stop: 2 ATR | T1/T2/T3: 2R/4R/6R staircase | "
+         "Daily OHLC backtest is approximate; no guaranteed fills/profits."])
+    qy = ctx.get("qp_yearly")
+    if qy is not None and not qy.empty:
+        add(["YEAR-WISE V43 CLOSED-TRADE DIAGNOSTIC"], "title")
+        add(["YEAR", "TRADES", "WIN %", "AVG NET %", "PROFIT FACTOR", "MAX DRAWDOWN %"], "header")
+        for _, yr in qy.iterrows():
+            add([yr["YEAR"], yr["trades"], yr["win_pct"], yr["avg_net_pct"], yr["profit_factor"], yr["max_drawdown_pct"]])
+    qp = ctx.get("qp_periods")
+    if qp is not None and not qp.empty:
+        add(["PERIOD SPLIT (2024+ is a later-period diagnostic, not an untouched holdout)"], "title")
+        add(["PERIOD", "TRADES", "WIN %", "AVG NET %", "PROFIT FACTOR", "MAX DRAWDOWN %"], "header")
+        for _, period in qp.iterrows():
+            add([period["PERIOD"], period["trades"], period["win_pct"], period["avg_net_pct"], period["profit_factor"], period["max_drawdown_pct"]])
+    add(["STOCK", "SETUP", "SCORE /100", "MARKET REGIME PROXY", "CLOSE REF", "MAX BUY (+2%)", "STOP", "T1", "T2", "T3",
+         "RISK %", "QTY", "CAPITAL Rs", "RISK Rs"], "header")
+    qbuy = ctx.get("buy_v43")
+    if ctx.get("buy_ok") and qbuy is not None and not qbuy.empty:
+        for _, r in qbuy.iterrows():
+            add([r["SYMBOL"], r["QP_SETUP"], r["QP_SCORE"], r["QP_MARKET_REGIME"], r["CLOSE"], r["QP_MAX_BUY"],
+                 r["STOP"], r["T1"], r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"]])
+    else:
+        add(["", "KOI QUALIFIED V43 BUY NAHI" if ctx.get("buy_ok") else "BUY BAND: " + ctx.get("banner", "")])
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
 
@@ -161,6 +239,13 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
         for _, r in b42.iterrows():
             add([r["SYMBOL"], f"BUY (V42 {r['V42_ENTRY_TYPE']})", r["CLOSE"], r["STOP"], r["T1"], r["T2"], "",
                  f"Pine V42 signal, score {r['V42_SCORE']}/100 - PF sabse kam (~1.19), size sabse chhota. Detail: RY V42 tab"])
+            any_row = True
+
+    b43 = ctx.get("buy_v43")
+    if ctx.get("buy_ok") and b43 is not None and not b43.empty:
+        for _, r in b43.iterrows():
+            add([r["SYMBOL"], f"BUY (V43 {r['QP_SETUP']})", r["CLOSE"], r["STOP"], r["T1"], r["T2"], r["T3"],
+                 f"Quant Pro score {r['QP_SCORE']}/100; universe-proxy regime; backtest metrics shown in ACTION PLAN"])
             any_row = True
 
     mine = ctx.get("mine")
@@ -306,32 +391,123 @@ def _retry(fn, *a, **k):
 
 
 def _write_tab(book, title: str, rows: list[list], marks: dict) -> None:
+    """Write a clean, readable report without changing tab names or creating extra tabs."""
     import gspread
+
+    width = max((len(row) for row in rows), default=1)
     try:
         ws = _retry(book.worksheet, title)
     except gspread.WorksheetNotFound:
-        ws = _retry(book.add_worksheet, title=title, rows=max(100, len(rows) + 20), cols=max(20, len(rows[0]) + 2))
+        ws = _retry(book.add_worksheet, title=title, rows=max(100, len(rows) + 20), cols=max(20, width + 2))
+
     if ws.row_count < len(rows) + 5:
         _retry(ws.add_rows, len(rows) + 5 - ws.row_count)
-    if ws.col_count < len(rows[0]):
-        _retry(ws.add_cols, len(rows[0]) - ws.col_count)
-    _retry(ws.batch_clear, ["A1:Z1000"])          # bare ws.clear() spaces wali sheet names par fail hota tha
-    # RAW zaroori hai: USER_ENTERED hamari date-strings ("21-Sep-2026") ko khud reparse karke
-    # apne default datetime format me badal deta tha, aur us column ka date-format agle plain
-    # number (jaise stock count) par bhi chipak jaata tha -> "1901-05-14" jaisा bekar output.
+    if ws.col_count < width:
+        _retry(ws.add_cols, width - ws.col_count)
+
+    # Clear a wider range than the current report so old cells cannot remain visible
+    # if a previous report had more columns or rows.
+    _retry(ws.batch_clear, ["A1:AZ2000"])
+    # RAW prevents date-like labels from being silently converted by Sheets.
     _retry(ws.update, values=rows, range_name="A1", value_input_option="RAW")
-    reqs = []
+
+    reqs = [
+        {"updateSheetProperties": {
+            "properties": {"sheetId": ws.id, "gridProperties": {"frozenRowCount": 1},
+                           "tabColor": {"red": 0.12, "green": 0.32, "blue": 0.58}},
+            "fields": "gridProperties.frozenRowCount,tabColor"
+        }},
+        {"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": len(rows),
+                      "startColumnIndex": 0, "endColumnIndex": width},
+            "cell": {"userEnteredFormat": {
+                "textFormat": {"fontFamily": "Arial", "fontSize": 10, "foregroundColor": {"red": 0.12, "green": 0.15, "blue": 0.20}},
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+            }},
+            "fields": "userEnteredFormat(textFormat,verticalAlignment,wrapStrategy)"
+        }},
+        {"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": width},
+            "properties": {"pixelSize": 125},
+            "fields": "pixelSize"
+        }},
+        {"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1},
+            "properties": {"pixelSize": 155},
+            "fields": "pixelSize"
+        }},
+        {"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": 0, "endIndex": len(rows)},
+            "properties": {"pixelSize": 30},
+            "fields": "pixelSize"
+        }},
+    ]
+
+    # Section/title rows use a consistent dark band; column headings use a lighter band.
     for i in marks.get("title", []):
-        reqs.append({"repeatCell": {"range": {"sheetId": ws.id, "startRowIndex": i, "endRowIndex": i + 1},
-                                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontSize": 11}}},
-                                    "fields": "userEnteredFormat.textFormat"}})
+        reqs.append({"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": i, "endRowIndex": i + 1,
+                      "startColumnIndex": 0, "endColumnIndex": width},
+            "cell": {"userEnteredFormat": {
+                "textFormat": {"bold": True, "fontSize": 11,
+                               "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+                "backgroundColor": {"red": 0.10, "green": 0.24, "blue": 0.42},
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+            }},
+            "fields": "userEnteredFormat(textFormat,backgroundColor,verticalAlignment,wrapStrategy)"
+        }})
+        reqs.append({"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": i, "endIndex": i + 1},
+            "properties": {"pixelSize": 34},
+            "fields": "pixelSize"
+        }})
+
     for i in marks.get("header", []):
-        reqs.append({"repeatCell": {"range": {"sheetId": ws.id, "startRowIndex": i, "endRowIndex": i + 1},
-                                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True},
-                                                                   "backgroundColor": {"red": 0.9, "green": 0.93, "blue": 0.98}}},
-                                    "fields": "userEnteredFormat(textFormat,backgroundColor)"}})
-    if reqs:
-        _retry(book.batch_update, {"requests": reqs})
+        reqs.append({"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": i, "endRowIndex": i + 1,
+                      "startColumnIndex": 0, "endColumnIndex": width},
+            "cell": {"userEnteredFormat": {
+                "textFormat": {"bold": True, "fontSize": 10,
+                               "foregroundColor": {"red": 0.10, "green": 0.24, "blue": 0.42}},
+                "backgroundColor": {"red": 0.82, "green": 0.88, "blue": 0.95},
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+                "borders": {"bottom": {"style": "SOLID_MEDIUM",
+                                       "color": {"red": 0.40, "green": 0.52, "blue": 0.66}}},
+            }},
+            "fields": "userEnteredFormat(textFormat,backgroundColor,verticalAlignment,wrapStrategy,borders)"
+        }})
+        reqs.append({"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": i, "endIndex": i + 1},
+            "properties": {"pixelSize": 38},
+            "fields": "pixelSize"
+        }})
+
+    # The last column commonly contains an action/explanation; give it extra room.
+    if width >= 5:
+        reqs.append({"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": width - 1, "endIndex": width},
+            "properties": {"pixelSize": 260},
+            "fields": "pixelSize"
+        }})
+
+    # Make the first report title more prominent than section labels.
+    first_title = min(marks.get("title", [0]))
+    reqs.append({"repeatCell": {
+        "range": {"sheetId": ws.id, "startRowIndex": first_title, "endRowIndex": first_title + 1,
+                  "startColumnIndex": 0, "endColumnIndex": width},
+        "cell": {"userEnteredFormat": {
+            "textFormat": {"bold": True, "fontSize": 14,
+                           "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+            "backgroundColor": {"red": 0.06, "green": 0.16, "blue": 0.30},
+            "verticalAlignment": "MIDDLE",
+            "wrapStrategy": "WRAP",
+        }},
+        "fields": "userEnteredFormat(textFormat,backgroundColor,verticalAlignment,wrapStrategy)"
+    }})
+    _retry(book.batch_update, {"requests": reqs})
 
 
 def open_book(creds_json: str | None = None):

@@ -1,0 +1,177 @@
+//@version=6
+indicator("RY APEX MATRIX V43 - QUANT PRO (Chart Companion)", overlay=true, max_labels_count=500)
+
+// IMPORTANT:
+// - This is a chart-side companion, not a broker strategy and not the Python backtest engine.
+// - Score is a rule-based quality score, NOT a win probability.
+// - Signals are confirmed on candle close. Stops/targets are simulated indicator levels.
+// - No indicator can guarantee profit. Validate in TradingView and paper-trade before use.
+
+// ── Inputs
+groupTrend = "Trend / Market"
+emaFastLen = input.int(20, "EMA Fast", minval=2, group=groupTrend)
+emaMidLen = input.int(50, "EMA Mid", minval=5, group=groupTrend)
+emaSlowLen = input.int(200, "EMA Long", minval=20, group=groupTrend)
+benchmarkSymbol = input.symbol("NSE:NIFTY", "Market Benchmark", group=groupTrend)
+useMarketFilter = input.bool(true, "Block defensive benchmark regime", group=groupTrend)
+
+groupEntry = "Entry Quality"
+resLookback = input.int(20, "Resistance Lookback", minval=5, group=groupEntry)
+breakoutBufferPct = input.float(0.20, "Breakout Buffer %", minval=0, step=0.05, group=groupEntry)
+breakoutVol = input.float(1.50, "Breakout Volume / 20D Average", minval=0.5, step=0.1, group=groupEntry)
+minScore = input.int(75, "Minimum Quality Score", minval=0, maxval=100, group=groupEntry)
+minTurnoverCr = input.float(5.0, "Minimum Avg Turnover (₹ Cr)", minval=0, step=1, group=groupEntry)
+minAtrPct = input.float(1.0, "Minimum ATR %", minval=0.1, step=0.1, group=groupEntry)
+maxAtrPct = input.float(7.0, "Maximum ATR %", minval=0.5, step=0.5, group=groupEntry)
+
+groupRisk = "Risk Management"
+capital = input.float(100000, "Reference Capital (₹)", minval=1000, step=1000, group=groupRisk)
+riskPct = input.float(0.50, "Risk per Trade (%)", minval=0.1, maxval=2.0, step=0.1, group=groupRisk)
+maxPositionPct = input.float(15.0, "Max Position (% capital)", minval=1, maxval=100, step=1, group=groupRisk)
+atrLen = input.int(14, "ATR Length", minval=2, group=groupRisk)
+stopAtr = input.float(2.0, "Initial Stop (ATR)", minval=0.5, step=0.25, group=groupRisk)
+rr1 = input.float(2.0, "T1 (R)", minval=0.5, step=0.5, group=groupRisk)
+rr2 = input.float(4.0, "T2 (R)", minval=1.0, step=0.5, group=groupRisk)
+rr3 = input.float(6.0, "T3 (R)", minval=1.5, step=0.5, group=groupRisk)
+
+groupVisual = "Visuals"
+showEMAs = input.bool(true, "Show EMAs", group=groupVisual)
+showDashboard = input.bool(true, "Show Dashboard", group=groupVisual)
+
+// ── Chart features
+ema20 = ta.ema(close, emaFastLen)
+ema50 = ta.ema(close, emaMidLen)
+ema200 = ta.ema(close, emaSlowLen)
+atr = ta.atr(atrLen)
+rsi = ta.rsi(close, 14)
+volAvg = ta.sma(volume, 20)
+volRatio = volAvg > 0 ? volume / volAvg : 0.0
+candleRange = high - low
+bodyPct = candleRange > 0 ? math.abs(close - open) / candleRange : 0.0
+closeLoc = candleRange > 0 ? (close - low) / candleRange : 0.0
+turnoverCr = ta.sma(close * volume, 20) / 1e7
+atrPct = close > 0 ? atr / close * 100 : na
+resistance = ta.highest(high[1], resLookback)
+breakoutLevel = resistance * (1 + breakoutBufferPct / 100)
+hh55 = ta.highest(high[1], 55)
+
+// ── Benchmark regime + relative strength (not a cross-sectional stock rank)
+benchClose = request.security(benchmarkSymbol, timeframe.period, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+benchEma50 = request.security(benchmarkSymbol, timeframe.period, ta.ema(close, 50), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+benchEma200 = request.security(benchmarkSymbol, timeframe.period, ta.ema(close, 200), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+benchBull = benchClose > benchEma200 and benchEma50 > benchEma200
+benchNeutral = benchClose > benchEma50
+marketRegime = benchBull ? "BULLISH" : benchNeutral ? "NEUTRAL" : "DEFENSIVE"
+rsRatio = benchClose > 0 ? close / benchClose : na
+rsMomentum = ta.roc(rsRatio, 60)
+rsPositive = not na(rsMomentum) and rsMomentum > 0
+
+// ── Trend and setup filters
+trendOk = close > ema200 and ema50 > ema200 and ema50 > ema50[10]
+breakoutSetup = trendOk and close > breakoutLevel and volRatio >= breakoutVol and closeLoc >= 0.65 and bodyPct >= 0.40 and close > open and close <= ema20 * 1.12
+pullbackSetup = trendOk and rsPositive and low <= ema20 * 1.01 and close > ema20 and close > open and rsi >= 40 and rsi <= 65 and volRatio >= 0.80
+setupText = breakoutSetup ? "BREAKOUT" : pullbackSetup ? "PULLBACK" : "WAIT"
+
+// ── 100-point score (ranking aid only)
+scoreTrend = trendOk ? (close > ema20 ? 25 : 18) : 0
+scoreRS = rsMomentum >= 10 ? 20 : rsMomentum > 5 ? 16 : rsPositive ? 12 : 0
+scoreSetup = breakoutSetup ? 20 : pullbackSetup ? 16 : 0
+scoreVolume = volRatio >= 2.0 ? 10 : volRatio >= breakoutVol ? 8 : volRatio >= 1.0 ? 5 : 0
+scoreLiquidity = turnoverCr >= 25 ? 5 : turnoverCr >= 10 ? 4 : turnoverCr >= minTurnoverCr ? 2 : 0
+headroomR = not na(hh55) and hh55 > close and atr > 0 ? (hh55 - close) / (stopAtr * atr) : 99.0
+scoreRR = headroomR >= 2 ? 10 : headroomR >= 1 ? 5 : 0
+scoreVolatility = atrPct >= 1 and atrPct <= 5 ? 5 : atrPct >= 0.5 and atrPct <= maxAtrPct ? 3 : 0
+scoreRegime = benchBull ? 5 : benchNeutral ? 2 : 0
+qualityScore = math.min(100, scoreTrend + scoreRS + scoreSetup + scoreVolume + scoreLiquidity + scoreRR + scoreVolatility + scoreRegime)
+riskFiltersOk = turnoverCr >= minTurnoverCr and atrPct >= minAtrPct and atrPct <= maxAtrPct and atr > 0
+marketOk = not useMarketFilter or marketRegime != "DEFENSIVE"
+validSetup = (breakoutSetup or pullbackSetup) and qualityScore >= minScore and riskFiltersOk and marketOk
+
+// ── Indicator-only trade state. No orders are placed.
+var bool inTrade = false
+var float entryPrice = na
+var float stopPrice = na
+var float initialRisk = na
+var float target1 = na
+var float target2 = na
+var float target3 = na
+var bool t1Hit = false
+var bool t2Hit = false
+var bool t3Hit = false
+
+newBuy = barstate.isconfirmed and validSetup and not inTrade
+if newBuy
+    inTrade := true
+    entryPrice := close
+    stopPrice := close - stopAtr * atr
+    initialRisk := math.max(entryPrice - stopPrice, syminfo.mintick)
+    target1 := entryPrice + initialRisk * rr1
+    target2 := entryPrice + initialRisk * rr2
+    target3 := entryPrice + initialRisk * rr3
+    t1Hit := false
+    t2Hit := false
+    t3Hit := false
+
+// Conservative ordering: check the existing stop before ratcheting it from this bar's highs.
+newExit = barstate.isconfirmed and inTrade and not newBuy and not na(stopPrice) and low <= stopPrice
+if newExit
+    inTrade := false
+    entryPrice := na
+    stopPrice := na
+    initialRisk := na
+    target1 := na
+    target2 := na
+    target3 := na
+    t1Hit := false
+    t2Hit := false
+    t3Hit := false
+else if barstate.isconfirmed and inTrade and not newBuy
+    if not na(target1) and high >= target1
+        t1Hit := true
+        stopPrice := math.max(stopPrice, entryPrice)
+    if not na(target2) and high >= target2
+        t2Hit := true
+        stopPrice := math.max(stopPrice, entryPrice + initialRisk * rr1)
+    if not na(target3) and high >= target3
+        t3Hit := true
+        stopPrice := math.max(stopPrice, entryPrice + initialRisk * rr2)
+
+riskPerShare = not na(initialRisk) ? math.max(initialRisk, syminfo.mintick) : na
+riskBudget = capital * riskPct / 100
+qtyByRisk = not na(riskPerShare) and riskPerShare > 0 ? math.floor(riskBudget / riskPerShare) : 0
+qtyByCapital = not na(entryPrice) and entryPrice > 0 ? math.floor(capital * maxPositionPct / 100 / entryPrice) : 0
+suggestedQty = int(math.max(0, math.min(qtyByRisk, qtyByCapital)))
+
+// ── Plots
+plot(showEMAs ? ema20 : na, "EMA 20", color=color.yellow)
+plot(showEMAs ? ema50 : na, "EMA 50", color=color.teal, linewidth=2)
+plot(showEMAs ? ema200 : na, "EMA 200", color=color.gray)
+plot(inTrade ? stopPrice : na, "Simulated Trailing Stop", color=color.fuchsia, linewidth=2, style=plot.style_linebr)
+plot(inTrade and not t1Hit ? target1 : na, "T1", color=color.green, style=plot.style_linebr)
+plot(inTrade and not t2Hit ? target2 : na, "T2", color=color.aqua, style=plot.style_linebr)
+plot(inTrade and not t3Hit ? target3 : na, "T3", color=color.blue, style=plot.style_linebr)
+plotshape(newBuy, title="QUANT PRO BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.lime, textcolor=color.black, size=size.small)
+plotshape(newExit, title="QUANT PRO EXIT", text="EXIT", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, size=size.small)
+
+// ── Dashboard
+var table dash = table.new(position.top_right, 2, 8, border_width=1)
+if barstate.islast and showDashboard
+    table.cell(dash, 0, 0, "RY APEX V43", bgcolor=color.blue, text_color=color.white)
+    table.cell(dash, 1, 0, inTrade ? "IN TRADE" : "SCANNING", bgcolor=inTrade ? color.lime : color.orange, text_color=color.black)
+    table.cell(dash, 0, 1, "SETUP", text_color=color.white)
+    table.cell(dash, 1, 1, setupText, text_color=color.white)
+    table.cell(dash, 0, 2, "SCORE / 100", text_color=color.white)
+    table.cell(dash, 1, 2, str.tostring(qualityScore), bgcolor=qualityScore >= minScore ? color.lime : color.gray, text_color=color.black)
+    table.cell(dash, 0, 3, "MARKET", text_color=color.white)
+    table.cell(dash, 1, 3, marketRegime, bgcolor=benchBull ? color.green : benchNeutral ? color.orange : color.red, text_color=color.white)
+    table.cell(dash, 0, 4, "RS 60D", text_color=color.white)
+    table.cell(dash, 1, 4, na(rsMomentum) ? "N/A" : str.tostring(rsMomentum, "#.##") + "%", text_color=color.white)
+    table.cell(dash, 0, 5, "ATR %", text_color=color.white)
+    table.cell(dash, 1, 5, na(atrPct) ? "N/A" : str.tostring(atrPct, "#.##") + "%", text_color=color.white)
+    table.cell(dash, 0, 6, "STOP / T1", text_color=color.white)
+    table.cell(dash, 1, 6, inTrade ? str.tostring(stopPrice, format.mintick) + " / " + str.tostring(target1, format.mintick) : "-", text_color=color.white)
+    table.cell(dash, 0, 7, "QTY (ref)", text_color=color.white)
+    table.cell(dash, 1, 7, str.tostring(suggestedQty), text_color=color.white)
+
+alertcondition(newBuy, title="RY APEX V43 BUY", message="RY APEX Quant Pro V43: confirmed BUY setup")
+alertcondition(newExit, title="RY APEX V43 EXIT", message="RY APEX Quant Pro V43: simulated stop exit")
