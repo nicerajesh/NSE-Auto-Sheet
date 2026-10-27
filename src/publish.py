@@ -123,6 +123,18 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
          f"Profit Factor: {qs.get('profit_factor', '')} | Max drawdown % (trade-sequence equity): {qs.get('max_drawdown_pct', '')}"])
     add(["Costs: 0.35% round trip assumption | Entry: next session OPEN | Stop: 2 ATR | T1/T2/T3: 2R/4R/6R staircase | "
          "Daily OHLC backtest is approximate; no guaranteed fills/profits."])
+    qy = ctx.get("qp_yearly")
+    if qy is not None and not qy.empty:
+        add(["YEAR-WISE V43 CLOSED-TRADE DIAGNOSTIC"], "title")
+        add(["YEAR", "TRADES", "WIN %", "AVG NET %", "PROFIT FACTOR", "MAX DRAWDOWN %"], "header")
+        for _, yr in qy.iterrows():
+            add([yr["YEAR"], yr["trades"], yr["win_pct"], yr["avg_net_pct"], yr["profit_factor"], yr["max_drawdown_pct"]])
+    qp = ctx.get("qp_periods")
+    if qp is not None and not qp.empty:
+        add(["PERIOD SPLIT (2024+ is a later-period diagnostic, not an untouched holdout)"], "title")
+        add(["PERIOD", "TRADES", "WIN %", "AVG NET %", "PROFIT FACTOR", "MAX DRAWDOWN %"], "header")
+        for _, period in qp.iterrows():
+            add([period["PERIOD"], period["trades"], period["win_pct"], period["avg_net_pct"], period["profit_factor"], period["max_drawdown_pct"]])
     add(["STOCK", "SETUP", "SCORE /100", "MARKET REGIME PROXY", "CLOSE REF", "MAX BUY (+2%)", "STOP", "T1", "T2", "T3",
          "RISK %", "QTY", "CAPITAL Rs", "RISK Rs"], "header")
     qbuy = ctx.get("buy_v43")
