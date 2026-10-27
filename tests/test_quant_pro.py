@@ -96,5 +96,7 @@ def test_market_proxy_features_do_not_use_future_rows():
     for col in ["QP_PROXY_CLOSE", "QP_PROXY_EMA50", "QP_PROXY_EMA200", "QP_SCORE", "QP_SIGNAL", "QP_MARKET_REGIME"]:
         if col == "QP_SIGNAL":
             assert (a[col].fillna(False).values == b[col].fillna(False).values).all()
+        elif col == "QP_MARKET_REGIME":
+            assert (a[col].fillna("").values == b[col].fillna("").values).all()
         else:
             np.testing.assert_allclose(a[col].values, b[col].values, equal_nan=True, rtol=1e-9, err_msg=col)
