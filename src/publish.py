@@ -74,6 +74,36 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
         add(["WAIT - aaj koi qualified V43 BUY nahi. WATCHLIST ko BUY signal na samjhein."])
     add([""])
 
+    # Deep-drawdown recovery radar: explicitly separated from the normal BUY engine.
+    rec = ctx.get("recovery_radar")
+    add(["A2) HIGH-SE NEEche GIRE STOCKS - RECOVERY RADAR (research/watch only; automatic BUY nahi)"], "title")
+    add(["STOCK", "STAGE", "SCORE /100", "52W HIGH SE DOWN %", "52W LOW SE UP %", "PRICE", "ENTRY TRIGGER",
+         "MAX BUY", "REF STOP", "T1", "T2", "T3", "UP/DOWN VOL RATIO", "ACTION"], "header")
+    if rec is not None and not rec.empty:
+        for _, rr in rec.iterrows():
+            if not ctx.get("buy_ok"):
+                action = "BLOCKED - global BUY safety gate"
+            elif rr["REC_STAGE"] == "TRIGGERED":
+                action = "TRIGGERED - PAPER/VERIFY ONLY"
+            else:
+                action = "WAIT FOR volume-confirmed breakout"
+            add([rr["SYMBOL"], rr["REC_STAGE"], rr["REC_SCORE"], rr["REC_DRAWDOWN_PCT"], rr["REC_FROM_LOW_PCT"],
+                 rr["CLOSE"], rr["REC_ENTRY_REF"], rr["REC_MAX_BUY"], rr["REC_STOP"], rr["REC_T1"],
+                 rr["REC_T2"], rr["REC_T3"], rr["REC_ACCUM_RATIO"], action])
+        add(["Entry/SL/T1-T3 are trigger-based references; PREPARE is not a BUY. A triggered row is research/paper-only until separately validated."])
+    else:
+        add(["Aaj koi eligible deep-drawdown recovery setup nahi mila. Falling stock ko sirf discount samajhkar mat kharido."])
+    rd = ctx.get("recovery_diagnostics")
+    if rd is not None and not rd.empty:
+        add(["HISTORICAL RECOVERY DIAGNOSTIC - future high/low excursions after distinct signals (not trade P&L)"], "title")
+        add(["STAGE", "NEXT SESSIONS", "EVENTS", "+10% HIGH TOUCH %", "+20% HIGH TOUCH %",
+             "AVG BEST HIGH %", "MEDIAN BEST HIGH %", "AVG WORST LOW %"], "header")
+        for _, dr in rd.iterrows():
+            add([dr["STAGE"], dr["HORIZON_SESSIONS"], dr["EVENTS"], dr["HIT_PLUS10_PCT"], dr["HIT_PLUS20_PCT"],
+                 dr["AVG_MAX_UPSIDE_PCT"], dr["MEDIAN_MAX_UPSIDE_PCT"], dr["AVG_MAX_DRAWDOWN_PCT"]])
+        add(["This is the later high/low seen inside each window; not an executable return. Overlapping regimes and today's Nifty-500 survivorship bias remain."])
+    add([""])
+
     mine = ctx.get("mine")
     add(["A) MERI POSITIONS - AAJ KA KAAM (SL order broker me tum khud update karo)"], "title")
     add(["STOCK", "STATE", "QTY", "BUY PRICE", "LAST CLOSE", "P&L %", "P&L Rs", "R NOW", "CURRENT SL", "T1", "T2", "T3", "ACTION"], "header")
