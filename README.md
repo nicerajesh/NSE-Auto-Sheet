@@ -27,6 +27,20 @@
 4. Actions -> **RY APEX Daily** -> Run workflow. Pehli run me `clean_extra_tabs` tick karo (baaki purane tabs hat jayenge).
 5. Pehli run me 8 saal ki history download hoti hai (~2-4 min), phir cache me rehti hai.
 
+
+## RY APEX MATRIX Quant Pro V43 (research tier)
+
+V43 existing data pipeline ko reuse karta hai; BhavCopy/history source ya existing Sheet tabs ko rename/delete nahi karta. Iska score 0-100 ranking aid hai, win probability nahi. Entry candidates ACTION PLAN ke naye section "E) RY APEX QUANT PRO V43" aur existing RY quick-view tab me dikhte hain. Naye Google Sheet tabs add nahi hote.
+
+- **Market regime limitation:** historical data me direct NIFTY index series use nahi ki gayi. Regime available stocks ke median daily return aur EMA200 breadth se banta hai; ise clearly PROXY label kiya gaya hai, NIFTY nahi.
+- **Setups:** trend-confirmed breakout aur pullback; volume, relative-strength rank, liquidity, ATR risk aur overhead-resistance headroom scoring.
+- **Risk:** initial stop 2 ATR; reference targets 2R/4R/6R; conservative daily OHLC stop handling; next-session OPEN entry; gap-up >2% skip; 0.35% round-trip transaction-cost assumption.
+- **Portfolio fit:** V43 candidates existing strict and WATCH candidates ke baad remaining slots, cash and open-risk budget se fit hote hain.
+- **Outputs:** output/action_plan_buy_v43_quant_pro.csv, output/backtest_trades_v43_quant_pro.csv, and output/backtest_summary_v43_quant_pro.csv.
+- **Validation status:** automated unit tests cover score bounds, proxy labels, stop simulation, gap filter, net-return summary, and missing-feature handling. Full GitHub Actions run + real historical backtest must pass before considering live use.
+
+**No profit guarantee:** V43 is a research candidate, not a promise of profit. Results have current-universe survivorship bias, the market proxy is not NIFTY, and daily OHLC bars cannot reproduce every real fill. Inspect yearly/out-of-sample results, fees, slippage and drawdown; paper-trade before risking capital.
+
 ## RY V42 - naya tier, Pine Script V42 "PRO SWING ENGINE" ka hoobehoo (Sept 24, 2026)
 User ne V42 Pine Script diya (score engine, 3 BUY tier: APEX/TACTICAL/BUY, VCP/compression,
 accumulation, 6-condition exit) aur kaha "jitne BUY aayein sab do, koi block nahi, sirf apni sheet".
