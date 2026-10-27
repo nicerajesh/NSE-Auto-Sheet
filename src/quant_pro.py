@@ -204,8 +204,10 @@ def summarize_quant_pro_by_year(trades: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["YEAR", "trades", "win_pct", "avg_net_pct", "profit_factor", "max_drawdown_pct"])
     t = trades.copy()
     t["EXIT_DATE"] = pd.to_datetime(t["EXIT_DATE"], errors="coerce")
+    t = t.dropna(subset=["EXIT_DATE"]).copy()
+    t["YEAR"] = t["EXIT_DATE"].dt.year
     rows = []
-    for year, group in t.dropna(subset=["EXIT_DATE"]).groupby(t["EXIT_DATE"].dt.year):
+    for year, group in t.groupby("YEAR"):
         rows.append({"YEAR": int(year), **summarize_quant_pro(group)})
     return pd.DataFrame(rows).sort_values("YEAR").reset_index(drop=True) if rows else pd.DataFrame()
 
