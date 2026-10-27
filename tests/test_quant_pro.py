@@ -6,6 +6,8 @@ from quant_pro import (
     add_quant_pro_features,
     simulate_quant_pro_trade,
     summarize_quant_pro,
+    summarize_quant_pro_by_year,
+    summarize_quant_pro_periods,
 )
 
 
@@ -70,3 +72,29 @@ def test_summary_uses_net_returns():
 def test_missing_features_fail_loudly():
     with pytest.raises(ValueError, match="missing required"):
         add_quant_pro_features(pd.DataFrame({"SYMBOL": ["A"], "DATE": [pd.Timestamp("2024-01-01")]}))
+
+
+def test_yearly_and_period_summaries_are_reported():
+    trades = pd.DataFrame({
+        "EXIT_DATE": pd.to_datetime(["2023-12-01", "2024-02-01", "2025-03-01"]),
+        "NET_RETURN_PCT": [4.0, -2.0, 3.0],
+    })
+    yearly = summarize_quant_pro_by_year(trades)
+    periods = summarize_quant_pro_periods(trades, split_year=2024)
+    assert yearly["YEAR"].tolist() == [2023, 2024, 2025]
+    assert periods["PERIOD"].tolist() == ["EARLIER_THAN_2024", "2024_ONWARD_DIAGNOSTIC"]
+    assert periods.iloc[1]["trades"] == 2
+
+
+def test_market_proxy_features_do_not_use_future_rows():
+    raw = synthetic_features(n=260)
+    full = add_quant_pro_features(raw)
+    cut_date = sorted(raw["DATE"].unique())[220]
+    partial = add_quant_pro_features(raw[raw["DATE"] <= cut_date])
+    a = full[full["DATE"] == cut_date].sort_values("SYMBOL").reset_index(drop=True)
+    b = partial[partial["DATE"] == cut_date].sort_values("SYMBOL").reset_index(drop=True)
+    for col in ["QP_PROXY_CLOSE", "QP_PROXY_EMA50", "QP_PROXY_EMA200", "QP_SCORE", "QP_SIGNAL", "QP_MARKET_REGIME"]:
+        if col == "QP_SIGNAL":
+            assert (a[col].fillna(False).values == b[col].fillna(False).values).all()
+        else:
+            np.testing.assert_allclose(a[col].values, b[col].values, equal_nan=True, rtol=1e-9, err_msg=col)
