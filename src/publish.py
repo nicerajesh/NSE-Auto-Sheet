@@ -343,8 +343,10 @@ def build_status_rows(ctx: dict) -> tuple[list[list], dict]:
     psum = ctx.get("portfolio_summary") or {}
     add(["CONCURRENT PORTFOLIO BACKTEST"], "title")
     add(["Trades", psum.get("trades", ""), "Skipped by risk limits", psum.get("skipped", ""),
-         "Ending equity", psum.get("ending_equity", ""), "Return %", psum.get("total_return_pct", ""),
-         "Max drawdown %", psum.get("max_drawdown_pct", ""), "Profit factor", psum.get("profit_factor", "")], "header")
+         "Period", f"{psum.get('start_date', '')} to {psum.get('end_date', '')}",
+         "CAGR %", psum.get("cagr_pct", ""), "Total return %", psum.get("total_return_pct", ""),
+         "Ending equity", psum.get("ending_equity", ""), "Max DD %", psum.get("max_drawdown_pct", ""),
+         "Profit factor", psum.get("profit_factor", "")], "header")
     add(["Model", "Concurrent sized positions; next-open entry; fixed risk/position/cash/slot limits; closed-trade mark-out"])
     scenarios = ctx.get("cost_scenarios")
     if scenarios is not None and not scenarios.empty:
