@@ -140,29 +140,48 @@ def main(argv=None) -> int:
 
     signals = buy                                    # paper ledger me sab signals (portfolio limit se pehle)
 
+    # Keep every raw candidate for the report, but approve actionable rows through ONE shared risk gate.
+    raw_tiers = {
+        "STRICT BUY": buy.copy(), "WATCH": buy_watch.copy(), "V42": buy_v42.copy(),
+        "V38": buy_v38.copy(), "V43 QUANT PRO": buy_v43.copy(),
+    }
     held = set(pos["SYMBOL"]) if not pos.empty else set()
-    slots_free = max(0, CFG.max_positions - msum["n_open"])
-    budget = CFG.capital * CFG.max_open_risk_pct / 100 - msum["open_risk"]
-    cash = CFG.capital - msum["deployed"]
-    buy = ps.fit_to_portfolio(buy, held, slots_free, budget, cash)
-    # WATCH tier bachi hui slots/budget me hi fit hota hai, strict BUY ke baad
-    held2 = held | set(buy["SYMBOL"]) if not buy.empty else held
-    slots_free2 = max(0, slots_free - len(buy))
-    budget2 = budget - float(buy["RISK_AMT"].sum()) if not buy.empty else budget
-    cash2 = cash - float(buy["CAPITAL_USED"].sum()) if not buy.empty else cash
-    buy_watch = ps.fit_to_portfolio(buy_watch, held2, slots_free2, budget2, cash2)
-    # V43 gets only remaining portfolio capacity after strict and WATCH candidates.
-    held3 = held2 | set(buy_watch["SYMBOL"]) if not buy_watch.empty else held2
-    slots_free3 = max(0, slots_free2 - len(buy_watch))
-    budget3 = budget2 - float(buy_watch["RISK_AMT"].sum()) if not buy_watch.empty else budget2
-    cash3 = cash2 - float(buy_watch["CAPITAL_USED"].sum()) if not buy_watch.empty else cash2
-    buy_v43 = ps.fit_to_portfolio(buy_v43, held3, slots_free3, budget3, cash3)
+    slots_left = max(0, CFG.max_positions - msum["n_open"])
+    budget_left = max(0.0, CFG.capital * CFG.max_open_risk_pct / 100 - msum["open_risk"])
+    cash_left = max(0.0, CFG.capital - msum["deployed"])
+    approved_tiers = {}
+    # Priority: strict > watch > V42 > V38 > V43.
+    for tier_name, frame in [("STRICT BUY", buy), ("WATCH", buy_watch), ("V42", buy_v42), ("V38", buy_v38), ("V43 QUANT PRO", buy_v43)]:
+        approved = ps.fit_to_portfolio(frame, held, slots_left, budget_left, cash_left)
+        approved_tiers[tier_name] = approved
+        if not approved.empty:
+            held.update(approved["SYMBOL"].astype(str))
+            slots_left = max(0, slots_left - len(approved))
+            budget_left = max(0.0, budget_left - float(approved["RISK_AMT"].sum()))
+            cash_left = max(0.0, cash_left - float(approved["CAPITAL_USED"].sum()))
+    buy = approved_tiers["STRICT BUY"]
+    buy_watch = approved_tiers["WATCH"]
+    buy_v42 = approved_tiers["V42"]
+    buy_v38 = approved_tiers["V38"]
+    buy_v43 = approved_tiers["V43 QUANT PRO"]
 
-    # V38 tier: yahan koi slots/budget/held narrowing nahi - user ne kaha "jitne bhi BUY aayein sab
-    # sheet me dikhein". Isliye ye tier bas apni QTY/CAPITAL dikhata hai (position_size se), portfolio
-    # budget se cut nahi hota. Fayda: sheet me poora signal list dikhta hai; nuksan: agar tum saare le
-    # lo to total risk portfolio limit (MAX_OPEN_RISK_PCT) se zyada ho sakta hai - khud dekh kar chuno.
-
+    review_rows = []
+    for tier_name, raw in raw_tiers.items():
+        accepted = approved_tiers[tier_name]
+        accepted_map = accepted.set_index("SYMBOL").to_dict("index") if not accepted.empty else {}
+        if raw is None or raw.empty:
+            continue
+        for _, candidate in raw.iterrows():
+            row = candidate.to_dict()
+            sym = str(row.get("SYMBOL", ""))
+            approved = sym in accepted_map
+            row["TIER"] = tier_name
+            row["APPROVAL_STATUS"] = "APPROVED" if approved and buy_ok else ("BLOCKED - GLOBAL SAFETY GATE" if not buy_ok else "SIGNAL ONLY - RISK LIMIT")
+            row["APPROVAL_REASON"] = ("Within slots/cash/open-risk limits" if approved and buy_ok else (banner if not buy_ok else "Held symbol, no slot, cash or risk budget left"))
+            if approved:
+                row.update(accepted_map[sym])
+            review_rows.append(row)
+    signal_review = pd.DataFrame(review_rows)
     led = lg.load(STATE / "signal_ledger.csv")
     if gate_ok and not stale:
         led = lg.add_signals(led, signals.head(CFG.max_new_per_day), asof)
@@ -178,7 +197,8 @@ def main(argv=None) -> int:
                breadth50=float((last.CLOSE > last.EMA50).mean() * 100), breadth200=float((last.CLOSE > last.EMA200).mean() * 100),
                notes=notes(yearly, summ), buy_v43=buy_v43, qp_summary=qp_summary, qp_trades=qp_trades, qp_yearly=qp_yearly, qp_periods=qp_periods,
                recovery_radar=recovery_radar, recovery_diagnostics=recovery_diagnostics,
-               portfolio_summary=portfolio_summary, universe_audit=universe_audit, cost_scenarios=cost_scenarios)
+               portfolio_summary=portfolio_summary, universe_audit=universe_audit, cost_scenarios=cost_scenarios,
+               signal_review=signal_review)
 
     # CSV artifacts (hamesha)
     (buy if buy_ok else buy.head(0)).to_csv(OUT / "action_plan_buy.csv", index=False)
@@ -194,6 +214,7 @@ def main(argv=None) -> int:
     pd.DataFrame([portfolio_summary]).to_csv(OUT / "backtest_concurrent_summary_v43.csv", index=False)
     cost_scenarios.to_csv(OUT / "backtest_cost_gap_stress_v43.csv", index=False)
     universe_audit.to_csv(OUT / "historical_universe_audit.csv", index=False)
+    signal_review.to_csv(OUT / "signal_approval_review.csv", index=False)
     recovery_radar.to_csv(OUT / "recovery_radar.csv", index=False)
     recovery_diagnostics.to_csv(OUT / "recovery_history_diagnostic.csv", index=False)
     watch.head(CFG.watch_rows).to_csv(OUT / "watchlist.csv", index=False)
