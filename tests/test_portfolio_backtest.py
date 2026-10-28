@@ -29,9 +29,9 @@ def test_cost_and_gap_stress_do_not_improve_returns():
     scenarios = robustness_scenarios(t, initial_capital=100_000, risk_per_trade_pct=0.5,
                                      max_positions=2, max_open_risk_pct=1.0, max_single_position_pct=15)
     base = scenarios.loc[scenarios.SCENARIO == "BASE_0.35_COST", "ending_equity"].iloc[0]
-    high = scenarios.loc[scenarios.SCENARIO == "COST_0.75", "ending_equity"].iloc[0]
+    high = scenarios.loc[scenarios.SCENARIO == "SLIPPAGE_STRESS_0.75_TOTAL_COST", "ending_equity"].iloc[0]
     gap = scenarios.loc[scenarios.SCENARIO == "COST_0.50_PLUS_1PCT_GAP_STRESS", "ending_equity"].iloc[0]
-    assert high <= base and gap <= base
+    broker = scenarios.loc[scenarios.SCENARIO == "BROKERAGE_STRESS_0.50_TOTAL_COST", "ending_equity"].iloc[0]\n    assert high <= broker <= base and gap <= broker
 
 
 def test_universe_audit_explicitly_flags_survivorship_bias():
