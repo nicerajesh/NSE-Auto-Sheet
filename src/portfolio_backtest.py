@@ -157,8 +157,8 @@ def robustness_scenarios(trades: pd.DataFrame, **kwargs) -> pd.DataFrame:
     rows = []
     for cost, gap, label in [
         (0.35, 0.0, "BASE_0.35_COST"),
-        (0.50, 0.0, "COST_0.50"),
-        (0.75, 0.0, "COST_0.75"),
+        (0.50, 0.0, "BROKERAGE_STRESS_0.50_TOTAL_COST"),
+        (0.75, 0.0, "SLIPPAGE_STRESS_0.75_TOTAL_COST"),
         (0.50, 1.0, "COST_0.50_PLUS_1PCT_GAP_STRESS"),
     ]:
         _, summary = run_concurrent_portfolio_backtest(trades, cost_pct=cost, gap_down_stress_pct=gap, **kwargs)
