@@ -240,6 +240,7 @@ def summarize_quant_pro(trades: pd.DataFrame) -> dict:
     equity = (1 + ret / 100).cumprod()
     dd = (equity / equity.cummax() - 1) * 100
     return {
+        "drawdown_basis": "SEQUENTIAL_CLOSED_TRADE_EQUITY_NOT_PORTFOLIO",
         "trades": int(len(ret)), "win_pct": round(float((ret > 0).mean() * 100), 2),
         "avg_net_pct": round(float(ret.mean()), 4),
         "profit_factor": round(float(wins / losses), 4) if losses > 0 else (float("inf") if wins > 0 else np.nan),
