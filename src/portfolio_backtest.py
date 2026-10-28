@@ -138,6 +138,12 @@ def run_concurrent_portfolio_backtest(
         summary = _metrics(eq, pnl, out)
         summary["ending_equity"] = round(float(equity), 2)
         summary["total_return_pct"] = round(float((equity / initial_capital - 1) * 100), 3) if initial_capital else np.nan
+        start_date, end_date = t["ENTRY_DATE"].min(), t["EXIT_DATE"].max()
+        years = max((end_date - start_date).days / 365.25, 0.0)
+        summary["start_date"] = start_date.strftime("%Y-%m-%d")
+        summary["end_date"] = end_date.strftime("%Y-%m-%d")
+        summary["years"] = round(years, 3)
+        summary["cagr_pct"] = round(((equity / initial_capital) ** (1 / years) - 1) * 100, 3) if initial_capital > 0 and years > 0 and equity > 0 else np.nan
         summary.update({"skipped": int(skipped), "initial_capital": float(initial_capital),
                         "risk_per_trade_pct": float(risk_per_trade_pct), "max_positions": int(max_positions),
                         "max_open_risk_pct": float(max_open_risk_pct), "max_single_position_pct": float(max_single_position_pct),
