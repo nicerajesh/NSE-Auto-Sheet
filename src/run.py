@@ -177,10 +177,15 @@ def main(argv=None) -> int:
             sym = str(row.get("SYMBOL", ""))
             approved = sym in accepted_map
             row["TIER"] = tier_name
+            row["SIGNAL_QTY"] = row.get("QTY", 0)
+            row["SIGNAL_CAPITAL"] = row.get("CAPITAL_USED", 0)
+            row["SIGNAL_RISK"] = row.get("RISK_AMT", 0)
             row["APPROVAL_STATUS"] = "APPROVED" if approved and buy_ok else ("BLOCKED - GLOBAL SAFETY GATE" if not buy_ok else "SIGNAL ONLY - RISK LIMIT")
             row["APPROVAL_REASON"] = ("Within slots/cash/open-risk limits" if approved and buy_ok else (banner if not buy_ok else "Held symbol, no slot, cash or risk budget left"))
-            if approved:
+            if approved and buy_ok:
                 row.update(accepted_map[sym])
+            else:
+                row["QTY"], row["CAPITAL_USED"], row["RISK_AMT"] = 0, 0.0, 0.0
             review_rows.append(row)
     signal_review = pd.DataFrame(review_rows)
     led = lg.load(STATE / "signal_ledger.csv")
