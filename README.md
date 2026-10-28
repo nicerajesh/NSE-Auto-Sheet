@@ -151,3 +151,26 @@ SL = 2 ATR. T1/T2/T3 = 2R/4R/6R; T1 par SL entry par, T2 par SL T1 par, T3 par S
 - Survivorship bias: universe aaj ka Nifty 500 hai. Asli results kam honge.
 - Sheet me "WEAK REGIME - half size" dikhe to size aadha rakho ya paper trade karo. LIVE SCOREBOARD 4-6 hafte dekho.
 - Data 3+ session purana ho to BUY apne aap band.
+
+
+## Market Wizard audit — concurrent portfolio and reporting validation
+
+The V43 research pipeline now writes additional diagnostics on every run:
+
+- `output/backtest_concurrent_portfolio_v43.csv` and `output/backtest_concurrent_summary_v43.csv`: concurrent positions with fixed risk-per-trade, max-open-risk, max-position, cash and single-position caps.
+- `output/backtest_cost_gap_stress_v43.csv`: 0.35%, 0.50%, 0.75% round-trip cost assumptions and a 1% adverse stop-gap stress scenario.
+- `output/historical_universe_audit.csv`: coverage and bias checks.
+- `output/signal_approval_review.csv`: raw signal tier plus explicit approval state/reason.
+- `output/backtest_trades_v43_quant_pro.csv`, yearly/period splits, recovery diagnostics and the standard backtest outputs remain available.
+
+### Approval priority
+
+Signals are still displayed by tier, but portfolio approval is applied consistently in this priority order: Strict BUY → WATCH → V42 → V38 → V43. Already-held symbols, no free slots, insufficient cash, or exhausted aggregate open-risk budget result in a non-approved signal. A signal is not an instruction to trade unless its status is `APPROVED` and the global safety gate is open.
+
+### Important validation limits
+
+- The concurrent simulator sizes overlapping trades and respects the configured risk/cash/slot limits, but its drawdown is based on realized equity at exits; it does **not** mark every open position to market daily. Treat it as a stronger portfolio approximation, not a fully broker-realistic equity curve.
+- Cost stress is a sensitivity test. It does not reproduce every broker's order-by-order brokerage, STT, exchange charges, GST, stamp duty, spread, market impact or liquidity slippage.
+- A 1% gap stress is applied to trades whose simulated exit reason is a stop. Actual overnight gaps can be larger.
+- Historical constituent membership, removed/delisted stocks and point-in-time index composition are not reconstructed from the current universe. The audit therefore flags survivorship bias as present; headline historical results remain biased until a dated historical-universe dataset is added.
+- The daily GitHub Actions workflow runs the engine and produces full available-history outputs. Unit tests and synthetic scenarios validate code paths, but they do not certify the strategy's profitability. Do not use live capital until the CI run, real-history artifacts and paper-trading results are reviewed.

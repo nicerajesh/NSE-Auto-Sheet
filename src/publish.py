@@ -54,54 +54,28 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
     add([""])
 
 
-    # Decision-first summary: only V43 candidates that passed the existing safety gates.
-    qs_simple = ctx.get("qp_summary") or {}
-    qbuy_simple = ctx.get("buy_v43")
-    add(["AAJ KA SIMPLE DECISION"], "title")
-    if not ctx.get("buy_ok"):
-        add(["WAIT - abhi BUY nahi", ctx.get("banner", "Safety gate active")])
-    elif qbuy_simple is not None and not qbuy_simple.empty:
-        add(["CHECK V43 BUY CANDIDATES - next session OPEN par; MAX BUY se upar ho to SKIP"])
-        add(["STOCK", "ENTRY REF", "MAX BUY", "STOP LOSS", "T1", "T2", "T3", "QTY", "V43 T1 HIT %", "V43 T2 HIT %", "V43 T3 HIT %"], "header")
-        sample = int(qs_simple.get("trades", 0) or 0)
-        for _, qr in qbuy_simple.head(3).iterrows():
-            rates = [qs_simple.get("t1_hit_pct"), qs_simple.get("t2_hit_pct"), qs_simple.get("t3_hit_pct")]
-            rate_text = rates if sample >= 30 else ["LOW SAMPLE"] * 3
-            add([qr["SYMBOL"], qr["CLOSE"], qr["QP_MAX_BUY"], qr["STOP"], qr["T1"], qr["T2"], qr["T3"], qr.get("QTY", ""),
-                 *rate_text])
-        add([f"Target hit % = past V43 trades only ({sample} trades); overall strategy rate, NOT stock-specific prediction or guarantee."])
+    # Decision-first summary across all tiers (not V43-only).\n    review = ctx.get("signal_review")\n    add(["AAJ KA SIMPLE DECISION"], "title")\n    if not ctx.get("buy_ok"):\n        add(["WAIT - abhi BUY nahi", ctx.get("banner", "Safety gate active")])\n    elif review is not None and not review.empty and (review["APPROVAL_STATUS"] == "APPROVED").any():\n        approved_now = review[review["APPROVAL_STATUS"] == "APPROVED"].head(3)\n        add(["APPROVED candidates only - next session OPEN; entry MAX BUY se upar ho to SKIP"])\n        add(["STOCK", "TIER", "PRICE REF", "STOP", "QTY", "RISK Rs"], "header")\n        for _, sr in approved_now.iterrows():\n            add([sr.get("SYMBOL", ""), sr.get("TIER", ""), sr.get("CLOSE", ""), sr.get("STOP", ""),\n                 sr.get("QTY", ""), sr.get("RISK_AMT", "")])\n    elif review is not None and not review.empty:\n        add(["NO APPROVED BUY - signals exist but failed a risk/global safety gate. See approval table below."])\n    else:\n        add(["WAIT - aaj koi qualified BUY signal nahi. WATCHLIST ko BUY signal na samjhein."])\n    add([""])\n\n    # Compact risk approval board: all tiers remain visible, but only APPROVED rows are actionable.
+    review = ctx.get("signal_review")
+    add(["SIGNAL APPROVAL - signal != approved trade"], "title")
+    add(["STOCK", "TIER", "STATUS", "PRICE", "STOP", "QTY APPROVED", "RISK Rs", "REASON"], "header")
+    if review is not None and not review.empty:
+        for _, sr in review.iterrows():
+            add([sr.get("SYMBOL", ""), sr.get("TIER", ""), sr.get("APPROVAL_STATUS", ""),
+                 sr.get("CLOSE", ""), sr.get("STOP", ""),
+                 sr.get("QTY", "") if sr.get("APPROVAL_STATUS") == "APPROVED" else 0,
+                 sr.get("RISK_AMT", "") if sr.get("APPROVAL_STATUS") == "APPROVED" else 0,
+                 sr.get("APPROVAL_REASON", "")])
+        add(["Only APPROVED rows passed slots, held-symbol, cash and aggregate open-risk checks. Other rows are visible signals, not a buy instruction."])
     else:
-        add(["WAIT - aaj koi qualified V43 BUY nahi. WATCHLIST ko BUY signal na samjhein."])
+        add(["No qualified candidates across Strict/WATCH/V38/V42/V43 today."])
+    psum = ctx.get("portfolio_summary") or {}
+    add(["CONCURRENT BACKTEST", "Trades", psum.get("trades", ""), "Return %", psum.get("total_return_pct", ""),
+         "Max DD %", psum.get("max_drawdown_pct", ""), "PF", psum.get("profit_factor", "")])
+    add(["Universe audit", "SURVIVORSHIP BIAS PRESENT", "Point-in-time constituents NOT VALIDATED. See SYSTEM STATUS and CSV audit."])
     add([""])
 
-    # Deep-drawdown recovery radar: explicitly separated from the normal BUY engine.
-    rec = ctx.get("recovery_radar")
-    add(["A2) HIGH-SE NEEche GIRE STOCKS - RECOVERY RADAR (research/watch only; automatic BUY nahi)"], "title")
-    add(["STOCK", "STAGE", "SCORE /100", "52W HIGH SE DOWN %", "52W LOW SE UP %", "PRICE", "ENTRY TRIGGER",
-         "MAX BUY", "REF STOP", "T1", "T2", "T3", "UP/DOWN VOL RATIO", "ACTION"], "header")
-    if rec is not None and not rec.empty:
-        for _, rr in rec.iterrows():
-            if not ctx.get("buy_ok"):
-                action = "BLOCKED - global BUY safety gate"
-            elif rr["REC_STAGE"] == "TRIGGERED":
-                action = "TRIGGERED - PAPER/VERIFY ONLY"
-            else:
-                action = "WAIT FOR volume-confirmed breakout"
-            add([rr["SYMBOL"], rr["REC_STAGE"], rr["REC_SCORE"], rr["REC_DRAWDOWN_PCT"], rr["REC_FROM_LOW_PCT"],
-                 rr["CLOSE"], rr["REC_ENTRY_REF"], rr["REC_MAX_BUY"], rr["REC_STOP"], rr["REC_T1"],
-                 rr["REC_T2"], rr["REC_T3"], rr["REC_ACCUM_RATIO"], action])
-        add(["Entry/SL/T1-T3 are trigger-based references; PREPARE is not a BUY. A triggered row is research/paper-only until separately validated."])
-    else:
-        add(["Aaj koi eligible deep-drawdown recovery setup nahi mila. Falling stock ko sirf discount samajhkar mat kharido."])
-    rd = ctx.get("recovery_diagnostics")
-    if rd is not None and not rd.empty:
-        add(["HISTORICAL RECOVERY DIAGNOSTIC - future high/low excursions after distinct signals (not trade P&L)"], "title")
-        add(["STAGE", "NEXT SESSIONS", "EVENTS", "+10% HIGH TOUCH %", "+20% HIGH TOUCH %",
-             "AVG BEST HIGH %", "MEDIAN BEST HIGH %", "AVG WORST LOW %"], "header")
-        for _, dr in rd.iterrows():
-            add([dr["STAGE"], dr["HORIZON_SESSIONS"], dr["EVENTS"], dr["HIT_PLUS10_PCT"], dr["HIT_PLUS20_PCT"],
-                 dr["AVG_MAX_UPSIDE_PCT"], dr["MEDIAN_MAX_UPSIDE_PCT"], dr["AVG_MAX_DRAWDOWN_PCT"]])
-        add(["This is the later high/low seen inside each window; not an executable return. Overlapping regimes and today's Nifty-500 survivorship bias remain."])
+    # Recovery radar and long-window excursion diagnostics remain in CSV outputs, not the daily decision tab.
+    add(["Detailed recovery research is available in recovery_radar.csv and recovery_history_diagnostic.csv; not a BUY signal."])
     add([""])
 
     mine = ctx.get("mine")
@@ -365,6 +339,27 @@ def build_status_rows(ctx: dict) -> tuple[list[list], dict]:
     add(["LIVE SCOREBOARD (jo signals is system ne publish kiye)"], "title")
     add(["Closed", "Active/Pending", "Win %", "Avg R", "Profit factor"], "header")
     add([sb["closed"], sb["active"], sb["win_pct"], sb["avg_r"], sb["pf"]])
+    add([""])
+    psum = ctx.get("portfolio_summary") or {}
+    add(["CONCURRENT PORTFOLIO BACKTEST"], "title")
+    add(["Trades", psum.get("trades", ""), "Skipped by risk limits", psum.get("skipped", ""),
+         "Period", f"{psum.get('start_date', '')} to {psum.get('end_date', '')}",
+         "CAGR %", psum.get("cagr_pct", ""), "Total return %", psum.get("total_return_pct", ""),
+         "Ending equity", psum.get("ending_equity", ""), "Max DD %", psum.get("max_drawdown_pct", ""),
+         "Profit factor", psum.get("profit_factor", "")], "header")
+    add(["Model", "Concurrent sized positions; next-open entry; fixed risk/position/cash/slot limits; closed-trade mark-out"])
+    scenarios = ctx.get("cost_scenarios")
+    if scenarios is not None and not scenarios.empty:
+        add(["COST / GAP STRESS", "Scenario", "Return %", "Max DD %", "PF"], "header")
+        for _, sr in scenarios.iterrows():
+            add([sr.get("SCENARIO", ""), sr.get("cost_pct", ""), sr.get("total_return_pct", ""),
+                 sr.get("max_drawdown_pct", ""), sr.get("profit_factor", "")])
+    audit = ctx.get("universe_audit")
+    if audit is not None and not audit.empty:
+        add(["HISTORICAL UNIVERSE VALIDATION"], "title")
+        add(["Check", "Status", "Detail"], "header")
+        for _, ar in audit.iterrows():
+            add([ar.get("CHECK", ""), ar.get("STATUS", ""), ar.get("DETAIL", "")])
     add([""])
     add(["SACH (padh lo)"], "title")
     for line in ctx["notes"]:

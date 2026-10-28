@@ -44,7 +44,7 @@ def _symbol_features(d: pd.DataFrame) -> pd.DataFrame:
     pdi = 100 * _wilder(plus_dm, 14) / atr_w.replace(0, np.nan)
     mdi = 100 * _wilder(minus_dm, 14) / atr_w.replace(0, np.nan)
     dx = 100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan)
-    d["ADX"] = dx.rolling(14, min_periods=14).mean()   # trend strength; 25+ real edge test me mila (PF 1.85->2.2 full-history)
+    d["ADX"] = _wilder(dx, 14)  # Wilder ADX: smooth DX with alpha=1/14, not a simple rolling mean
     d["VOL_RATIO"] = v / v.rolling(20, min_periods=10).mean()
     d["HH20"] = h.shift(1).rolling(20, min_periods=15).max()
     d["CLOSE_LOC"] = (c - l) / (h - l).replace(0, np.nan)

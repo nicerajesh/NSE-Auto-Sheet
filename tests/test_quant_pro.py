@@ -80,6 +80,7 @@ def test_summary_uses_net_returns():
     trades = pd.DataFrame({"NET_RETURN_PCT": [5.0, -2.0, 1.0]})
     summary = summarize_quant_pro(trades)
     assert summary["trades"] == 3
+    assert summary["drawdown_basis"] == "SEQUENTIAL_CLOSED_TRADE_EQUITY_NOT_PORTFOLIO"
     assert summary["win_pct"] == pytest.approx(66.67, abs=0.01)
     assert summary["profit_factor"] == pytest.approx(3.0)
     target_trades = pd.DataFrame({
