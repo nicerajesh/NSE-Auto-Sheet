@@ -54,27 +54,7 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
     add([""])
 
 
-    # Decision-first summary: only V43 candidates that passed the existing safety gates.
-    qs_simple = ctx.get("qp_summary") or {}
-    qbuy_simple = ctx.get("buy_v43")
-    add(["AAJ KA SIMPLE DECISION"], "title")
-    if not ctx.get("buy_ok"):
-        add(["WAIT - abhi BUY nahi", ctx.get("banner", "Safety gate active")])
-    elif qbuy_simple is not None and not qbuy_simple.empty:
-        add(["CHECK V43 BUY CANDIDATES - next session OPEN par; MAX BUY se upar ho to SKIP"])
-        add(["STOCK", "ENTRY REF", "MAX BUY", "STOP LOSS", "T1", "T2", "T3", "QTY", "V43 T1 HIT %", "V43 T2 HIT %", "V43 T3 HIT %"], "header")
-        sample = int(qs_simple.get("trades", 0) or 0)
-        for _, qr in qbuy_simple.head(3).iterrows():
-            rates = [qs_simple.get("t1_hit_pct"), qs_simple.get("t2_hit_pct"), qs_simple.get("t3_hit_pct")]
-            rate_text = rates if sample >= 30 else ["LOW SAMPLE"] * 3
-            add([qr["SYMBOL"], qr["CLOSE"], qr["QP_MAX_BUY"], qr["STOP"], qr["T1"], qr["T2"], qr["T3"], qr.get("QTY", ""),
-                 *rate_text])
-        add([f"Target hit % = past V43 trades only ({sample} trades); overall strategy rate, NOT stock-specific prediction or guarantee."])
-    else:
-        add(["WAIT - aaj koi qualified V43 BUY nahi. WATCHLIST ko BUY signal na samjhein."])
-    add([""])
-
-    # Compact risk approval board: all tiers remain visible, but only APPROVED rows are actionable.
+    # Decision-first summary across all tiers (not V43-only).\n    review = ctx.get("signal_review")\n    add(["AAJ KA SIMPLE DECISION"], "title")\n    if not ctx.get("buy_ok"):\n        add(["WAIT - abhi BUY nahi", ctx.get("banner", "Safety gate active")])\n    elif review is not None and not review.empty and (review["APPROVAL_STATUS"] == "APPROVED").any():\n        approved_now = review[review["APPROVAL_STATUS"] == "APPROVED"].head(3)\n        add(["APPROVED candidates only - next session OPEN; entry MAX BUY se upar ho to SKIP"])\n        add(["STOCK", "TIER", "PRICE REF", "STOP", "QTY", "RISK Rs"], "header")\n        for _, sr in approved_now.iterrows():\n            add([sr.get("SYMBOL", ""), sr.get("TIER", ""), sr.get("CLOSE", ""), sr.get("STOP", ""),\n                 sr.get("QTY", ""), sr.get("RISK_AMT", "")])\n    elif review is not None and not review.empty:\n        add(["NO APPROVED BUY - signals exist but failed a risk/global safety gate. See approval table below."])\n    else:\n        add(["WAIT - aaj koi qualified BUY signal nahi. WATCHLIST ko BUY signal na samjhein."])\n    add([""])\n\n    # Compact risk approval board: all tiers remain visible, but only APPROVED rows are actionable.
     review = ctx.get("signal_review")
     add(["SIGNAL APPROVAL - signal != approved trade"], "title")
     add(["STOCK", "TIER", "STATUS", "PRICE", "STOP", "QTY APPROVED", "RISK Rs", "REASON"], "header")
