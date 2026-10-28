@@ -59,7 +59,7 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
     add(["SIGNAL APPROVAL - signal != approved trade"], "title")
     add(["STOCK", "TIER", "STATUS", "PRICE", "STOP", "QTY APPROVED", "RISK Rs", "REASON"], "header")
     if review is not None and not review.empty:
-        for _, sr in review.head(30).iterrows():
+        for _, sr in review.iterrows():
             add([sr.get("SYMBOL", ""), sr.get("TIER", ""), sr.get("APPROVAL_STATUS", ""),
                  sr.get("CLOSE", ""), sr.get("STOP", ""),
                  sr.get("QTY", "") if sr.get("APPROVAL_STATUS") == "APPROVED" else 0,
