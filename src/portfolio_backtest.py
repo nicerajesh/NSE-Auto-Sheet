@@ -136,6 +136,7 @@ def run_concurrent_portfolio_backtest(
         eq = pd.to_numeric(out["EQUITY_AFTER"], errors="coerce")
         pnl = pd.to_numeric(out["PNL_RS"], errors="coerce")
         summary = _metrics(eq, pnl, out)
+        summary["ending_equity"] = round(float(equity), 2)
         summary["total_return_pct"] = round(float((equity / initial_capital - 1) * 100), 3) if initial_capital else np.nan
         summary.update({"skipped": int(skipped), "initial_capital": float(initial_capital),
                         "risk_per_trade_pct": float(risk_per_trade_pct), "max_positions": int(max_positions),
