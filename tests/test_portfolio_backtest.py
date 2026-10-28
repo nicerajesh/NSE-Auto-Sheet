@@ -32,7 +32,8 @@ def test_cost_and_gap_stress_do_not_improve_returns():
     base = scenarios.loc[scenarios.SCENARIO == "BASE_0.35_COST", "ending_equity"].iloc[0]
     high = scenarios.loc[scenarios.SCENARIO == "SLIPPAGE_STRESS_0.75_TOTAL_COST", "ending_equity"].iloc[0]
     gap = scenarios.loc[scenarios.SCENARIO == "COST_0.50_PLUS_1PCT_GAP_STRESS", "ending_equity"].iloc[0]
-    broker = scenarios.loc[scenarios.SCENARIO == "BROKERAGE_STRESS_0.50_TOTAL_COST", "ending_equity"].iloc[0]\n    assert high <= broker <= base and gap <= broker
+    broker = scenarios.loc[scenarios.SCENARIO == "BROKERAGE_STRESS_0.50_TOTAL_COST", "ending_equity"].iloc[0]
+    assert high <= broker <= base and gap <= broker
 
 
 def test_universe_audit_explicitly_flags_survivorship_bias():
