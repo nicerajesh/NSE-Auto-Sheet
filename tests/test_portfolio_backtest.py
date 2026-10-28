@@ -26,6 +26,7 @@ def test_concurrent_portfolio_limits_positions_and_sizes_risk():
 
 def test_cost_and_gap_stress_do_not_improve_returns():
     t = trades([("AAA", "2024-01-01", "2024-01-02", "2024-01-05", 100, 95, 110, 5.0, 90)])
+    t["EXIT_REASON"] = "STOP"
     scenarios = robustness_scenarios(t, initial_capital=100_000, risk_per_trade_pct=0.5,
                                      max_positions=2, max_open_risk_pct=1.0, max_single_position_pct=15)
     base = scenarios.loc[scenarios.SCENARIO == "BASE_0.35_COST", "ending_equity"].iloc[0]
