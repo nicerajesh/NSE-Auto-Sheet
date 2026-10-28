@@ -33,6 +33,8 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Syntax validation
+        run: python -m compileall -q src tests
       - name: Tests
         run: python -m pytest -q tests
 
