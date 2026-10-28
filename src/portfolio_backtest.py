@@ -111,7 +111,9 @@ def run_concurrent_portfolio_backtest(
             if qty < 1:
                 skipped += 1
                 continue
-            net_ret = float(row["NET_RETURN_PCT"]) - (float(cost_pct) - BASE_COST_PCT) - float(gap_down_stress_pct)
+            stop_exit = str(row.get("EXIT_REASON", "")).upper() in {"STOP", "TRAILING SL", "GAP STOP"}
+            gap_penalty = float(gap_down_stress_pct) if stop_exit else 0.0
+            net_ret = float(row["NET_RETURN_PCT"]) - (float(cost_pct) - BASE_COST_PCT) - gap_penalty
             p = row.to_dict()
             p.update({"QTY": qty, "CAPITAL_USED": round(qty * entry, 2),
                       "CAPITAL_PCT": round(qty * entry / equity * 100, 3),
@@ -134,12 +136,13 @@ def run_concurrent_portfolio_backtest(
         eq = pd.to_numeric(out["EQUITY_AFTER"], errors="coerce")
         pnl = pd.to_numeric(out["PNL_RS"], errors="coerce")
         summary = _metrics(eq, pnl, out)
+        summary["total_return_pct"] = round(float((equity / initial_capital - 1) * 100), 3) if initial_capital else np.nan
         summary.update({"skipped": int(skipped), "initial_capital": float(initial_capital),
                         "risk_per_trade_pct": float(risk_per_trade_pct), "max_positions": int(max_positions),
                         "max_open_risk_pct": float(max_open_risk_pct), "max_single_position_pct": float(max_single_position_pct),
                         "cost_pct": float(cost_pct), "gap_down_stress_pct": float(gap_down_stress_pct),
                         "max_drawdown_pct": round(float(max_dd), 3),
-                        "drawdown_basis": "CONCURRENT_SIZED_CLOSED_TRADE_EQUITY; OPEN TRADES MARKED AT SIMULATED EXIT"})
+                        "drawdown_basis": "CONCURRENT_SIZED_REALIZED_EQUITY_ONLY; OPEN POSITIONS NOT DAILY MARKED TO MARKET"})
     else:
         summary = {"trades": 0, "skipped": int(skipped), "initial_capital": float(initial_capital),
                    "ending_equity": float(initial_capital), "total_return_pct": 0.0, "max_drawdown_pct": 0.0,
