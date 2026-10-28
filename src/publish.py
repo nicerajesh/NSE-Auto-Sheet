@@ -74,6 +74,26 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
         add(["WAIT - aaj koi qualified V43 BUY nahi. WATCHLIST ko BUY signal na samjhein."])
     add([""])
 
+    # Compact risk approval board: all tiers remain visible, but only APPROVED rows are actionable.
+    review = ctx.get("signal_review")
+    add(["SIGNAL APPROVAL - signal != approved trade"], "title")
+    add(["STOCK", "TIER", "STATUS", "PRICE", "STOP", "QTY APPROVED", "RISK Rs", "REASON"], "header")
+    if review is not None and not review.empty:
+        for _, sr in review.head(30).iterrows():
+            add([sr.get("SYMBOL", ""), sr.get("TIER", ""), sr.get("APPROVAL_STATUS", ""),
+                 sr.get("CLOSE", ""), sr.get("STOP", ""),
+                 sr.get("QTY", "") if sr.get("APPROVAL_STATUS") == "APPROVED" else 0,
+                 sr.get("RISK_AMT", "") if sr.get("APPROVAL_STATUS") == "APPROVED" else 0,
+                 sr.get("APPROVAL_REASON", "")])
+        add(["Only APPROVED rows passed slots, held-symbol, cash and aggregate open-risk checks. Other rows are visible signals, not a buy instruction."])
+    else:
+        add(["No qualified candidates across Strict/WATCH/V38/V42/V43 today."])
+    psum = ctx.get("portfolio_summary") or {}
+    add(["CONCURRENT BACKTEST", "Trades", psum.get("trades", ""), "Return %", psum.get("total_return_pct", ""),
+         "Max DD %", psum.get("max_drawdown_pct", ""), "PF", psum.get("profit_factor", "")])
+    add(["Universe audit", "SURVIVORSHIP BIAS PRESENT", "Point-in-time constituents NOT VALIDATED. See SYSTEM STATUS and CSV audit."])
+    add([""])
+
     # Deep-drawdown recovery radar: explicitly separated from the normal BUY engine.
     rec = ctx.get("recovery_radar")
     add(["A2) HIGH-SE NEEche GIRE STOCKS - RECOVERY RADAR (research/watch only; automatic BUY nahi)"], "title")
@@ -365,6 +385,25 @@ def build_status_rows(ctx: dict) -> tuple[list[list], dict]:
     add(["LIVE SCOREBOARD (jo signals is system ne publish kiye)"], "title")
     add(["Closed", "Active/Pending", "Win %", "Avg R", "Profit factor"], "header")
     add([sb["closed"], sb["active"], sb["win_pct"], sb["avg_r"], sb["pf"]])
+    add([""])
+    psum = ctx.get("portfolio_summary") or {}
+    add(["CONCURRENT PORTFOLIO BACKTEST"], "title")
+    add(["Trades", psum.get("trades", ""), "Skipped by risk limits", psum.get("skipped", ""),
+         "Ending equity", psum.get("ending_equity", ""), "Return %", psum.get("total_return_pct", ""),
+         "Max drawdown %", psum.get("max_drawdown_pct", ""), "Profit factor", psum.get("profit_factor", "")], "header")
+    add(["Model", "Concurrent sized positions; next-open entry; fixed risk/position/cash/slot limits; closed-trade mark-out"])
+    scenarios = ctx.get("cost_scenarios")
+    if scenarios is not None and not scenarios.empty:
+        add(["COST / GAP STRESS", "Scenario", "Return %", "Max DD %", "PF"], "header")
+        for _, sr in scenarios.iterrows():
+            add([sr.get("SCENARIO", ""), sr.get("cost_pct", ""), sr.get("total_return_pct", ""),
+                 sr.get("max_drawdown_pct", ""), sr.get("profit_factor", "")])
+    audit = ctx.get("universe_audit")
+    if audit is not None and not audit.empty:
+        add(["HISTORICAL UNIVERSE VALIDATION"], "title")
+        add(["Check", "Status", "Detail"], "header")
+        for _, ar in audit.iterrows():
+            add([ar.get("CHECK", ""), ar.get("STATUS", ""), ar.get("DETAIL", "")])
     add([""])
     add(["SACH (padh lo)"], "title")
     for line in ctx["notes"]:
