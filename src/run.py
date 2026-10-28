@@ -146,7 +146,8 @@ def main(argv=None) -> int:
         "V38": buy_v38.copy(), "V43 QUANT PRO": buy_v43.copy(),
     }
     held = set(pos["SYMBOL"]) if not pos.empty else set()
-    slots_left = max(0, CFG.max_positions - msum["n_open"])
+    slots_free = max(0, CFG.max_positions - msum["n_open"])
+    slots_left = slots_free
     budget_left = max(0.0, CFG.capital * CFG.max_open_risk_pct / 100 - msum["open_risk"])
     cash_left = max(0.0, CFG.capital - msum["deployed"])
     approved_tiers = {}
