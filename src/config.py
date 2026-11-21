@@ -69,15 +69,52 @@ class Config:
     # ---------------- honesty gates ----------------
     edge_min_trades: int = 300             # full-history backtest me itne trades
     edge_min_pf: float = 1.15              # aur itna profit factor, warna BUY band
+    oos_start: str = "2023-01-01"           # walk-forward: is date ke baad ke trades 'out-of-sample' maane jaate hain
+    oos_min_trades: int = 50
+    oos_min_pf: float = 1.0                # OOS PF isse neeche -> BUY band
     health_window_days: int = 120          # recent-performance window (health throttle)
     health_min_trades: int = 30
     health_size_mult: float = 0.5          # recent expectancy <= 0 ho to size aadha
 
+    # ---------------- DELIVERY (monthly momentum rotation) ----------------
+    delivery_capital: float = _env("DELIVERY_CAPITAL", 500_000.0)    # delivery/positional ke liye alag capital
+    delivery_top_n: int = 20               # BUY zone: momentum rank 1..20
+    delivery_hold_n: int = 40              # HOLD zone: rank 21..40 (isse bahar -> exit)
+    delivery_min_turnover_cr: float = 10.0
+    delivery_atr_mult: float = 3.5         # disaster SL = close - 3.5 ATR
+    delivery_min_risk_pct: float = 8.0
+    delivery_max_risk_pct: float = 20.0
+    delivery_risk_pct: float = _env("DELIVERY_RISK_PCT", 0.4)       # ek position par capital ka max risk %
+
+    # ---------------- INTRADAY (Angel One SmartAPI, 5-min ORB + VWAP) ----------------
+    intraday_capital: float = _env("INTRADAY_CAPITAL", 200_000.0)
+    intraday_risk_pct: float = _env("INTRADAY_RISK_PCT", 0.25)      # ek trade par capital ka max risk %
+    intraday_max_leverage: float = _env("INTRADAY_MAX_LEVERAGE", 3.0)
+    intraday_max_trades: int = 3           # din me max signals
+    intraday_orb_minutes: int = 15         # opening range = 09:15-09:30
+    intraday_bar_minutes: int = 5
+    intraday_entry_cutoff: str = "11:30"   # iske baad naya signal nahi
+    intraday_square_off: str = "15:15"     # sab position band
+    intraday_vol_mult: float = 1.5         # breakout bar volume >= 1.5x din ke ab tak ke avg bar volume
+    intraday_breakout_buf_pct: float = 0.05
+    intraday_min_or_pct: float = 0.25      # opening range % of price: isse patli = noise
+    intraday_max_or_pct: float = 1.5       # isse chaudi = pehle hi move ho chuka
+    intraday_min_stop_pct: float = 0.4
+    intraday_max_stop_pct: float = 1.0
+    intraday_t1_r: float = 1.0
+    intraday_t2_r: float = 2.0
+    intraday_t3_r: float = 3.0             # T3 par poora exit
+    intraday_cost_pct: float = 0.12        # round-trip: STT + charges + slippage (assumption - apne broker se match karo)
+    intraday_min_price: float = 100.0
+
     # ---------------- sheets ----------------
     spreadsheet_id: str = _env("SPREADSHEET_ID", "1U9j5fMZAWPUSwoP_U-GKdacVke9nUjspqPR3wGsWAUM")
     positions_tab: str = "MY POSITIONS"
-    action_tab: str = "ACTION PLAN"
+    action_tab: str = "SWING"              # (pehle "ACTION PLAN") - swing report
     status_tab: str = "SYSTEM STATUS"
+    delivery_tab: str = "DELIVERY"
+    intraday_tab: str = "INTRADAY"
+    publish_research_tabs: bool = _env("PUBLISH_RESEARCH_TABS", "0") == "1"   # RY / RY V38 / RY V42 (research-only)
     ry_tab: str = "RY"                     # ek-nazar quick view: aaj ka BUY/SELL, entry, SL, T1/T2/T3
     v38_tab: str = "RY V38"                # Pine Script V38 ke hoobehoo signal - alag sheet
     v42_tab: str = "RY V42"                # Pine Script V42 ke hoobehoo signal - alag sheet

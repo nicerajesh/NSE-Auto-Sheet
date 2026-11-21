@@ -265,7 +265,7 @@ def build_status_rows(ctx: dict) -> tuple[list[list], dict]:
     add(["Stocks in universe", ctx["n_symbols"]])
     add(["History (sessions)", ctx["n_sessions"]])
     add(["Signal verdict", ctx["banner"]])
-    add(["Recent health (last %d din)" % CFG.health_window_days, f"{ctx['health']['label']} | closed trades {ctx['health']['n']} | avg R {ctx['health']['avg_r']}"])
+    add(["Recent health (last %d din)" % CFG.health_window_days, f"{ctx['health']['label']} | closed trades {ctx['health']['n']} | avg R {_v(ctx['health']['avg_r']) or 'n/a'}"])
     add(["Market breadth", f"{ctx['breadth50']:.0f}% stocks > EMA50 | {ctx['breadth200']:.0f}% > EMA200"])
     add([""])
     add(["BACKTEST (real NSE data, 2019 se, same engine)"], "title")
@@ -376,7 +376,8 @@ def publish(action: tuple, status: tuple, ry: tuple | None = None, v38: tuple | 
     if v42 is not None:
         _write_tab(book, CFG.v42_tab, *v42)
     if os.getenv("CLEAN_EXTRA_TABS", "0") == "1":
-        keep = {CFG.action_tab, CFG.status_tab, CFG.positions_tab, CFG.ry_tab, CFG.v38_tab, CFG.v42_tab}
+        keep = {CFG.action_tab, CFG.status_tab, CFG.positions_tab, CFG.delivery_tab, CFG.intraday_tab,
+                CFG.ry_tab, CFG.v38_tab, CFG.v42_tab}
         for ws in _retry(book.worksheets):
             if ws.title not in keep:
                 try:
@@ -384,5 +385,5 @@ def publish(action: tuple, status: tuple, ry: tuple | None = None, v38: tuple | 
                     time.sleep(1.5)
                 except Exception as e:  # noqa: BLE001
                     print("extra tab delete warning:", ws.title, e)
-    print("PUBLISHED: ACTION PLAN + SYSTEM STATUS + RY + RY V38")
+    print(f"PUBLISHED: {CFG.action_tab} + {CFG.status_tab}" + (" + research tabs" if (ry or v38 or v42) else ""))
     return True

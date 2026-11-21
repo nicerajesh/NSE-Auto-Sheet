@@ -171,7 +171,7 @@ def test_clean_extra_tabs_keeps_positions_tab(monkeypatch):
     ws = MagicMock(); ws.row_count = 500; ws.col_count = 30; ws.id = 1
     book.worksheet.return_value = ws
     tabs = []
-    for t in ("ACTION PLAN", "SYSTEM STATUS", "MY POSITIONS", "OLD JUNK"):
+    for t in (CFG.action_tab, "SYSTEM STATUS", "MY POSITIONS", "OLD JUNK"):
         m = MagicMock(); m.title = t; tabs.append(m)
     book.worksheets.return_value = tabs
     from test_pipeline import _ctx
@@ -249,7 +249,7 @@ def test_publish_writes_ry_tab_and_keeps_it_on_clean(monkeypatch):
     ws = MagicMock(); ws.row_count = 500; ws.col_count = 30; ws.id = 1
     book.worksheet.return_value = ws
     tabs = []
-    for t in ("ACTION PLAN", "SYSTEM STATUS", "MY POSITIONS", "RY", "JUNK"):
+    for t in (CFG.action_tab, "SYSTEM STATUS", "MY POSITIONS", "RY", "JUNK"):
         m = MagicMock(); m.title = t; tabs.append(m)
     book.worksheets.return_value = tabs
     pb.publish(pb.build_action_rows(ctx), pb.build_status_rows(ctx), pb.build_ry_rows(ctx), book=book)
@@ -284,7 +284,7 @@ def test_publish_writes_v38_tab_and_keeps_it_on_clean(monkeypatch):
     ws = MagicMock(); ws.row_count = 500; ws.col_count = 30; ws.id = 1
     book.worksheet.return_value = ws
     tabs = []
-    for t in ("ACTION PLAN", "SYSTEM STATUS", "MY POSITIONS", "RY", "RY V38", "JUNK"):
+    for t in (CFG.action_tab, "SYSTEM STATUS", "MY POSITIONS", "RY", "RY V38", "JUNK"):
         m = MagicMock(); m.title = t; tabs.append(m)
     book.worksheets.return_value = tabs
     pb.publish(pb.build_action_rows(ctx), pb.build_status_rows(ctx), pb.build_ry_rows(ctx), pb.build_v38_rows(ctx), book=book)
@@ -344,7 +344,7 @@ def test_publish_writes_v42_tab_and_keeps_it_on_clean(monkeypatch):
     ws = MagicMock(); ws.row_count = 500; ws.col_count = 30; ws.id = 1
     book.worksheet.return_value = ws
     tabs = []
-    for t in ("ACTION PLAN", "SYSTEM STATUS", "MY POSITIONS", "RY", "RY V38", "RY V42", "JUNK"):
+    for t in (CFG.action_tab, "SYSTEM STATUS", "MY POSITIONS", "RY", "RY V38", "RY V42", "JUNK"):
         m = MagicMock(); m.title = t; tabs.append(m)
     book.worksheets.return_value = tabs
     pb.publish(pb.build_action_rows(ctx), pb.build_status_rows(ctx), pb.build_ry_rows(ctx),

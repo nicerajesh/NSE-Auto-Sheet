@@ -32,7 +32,7 @@ def _symbol_features(d: pd.DataFrame) -> pd.DataFrame:
     tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
     d["ATR"] = _wilder(tr, 14)
     for n in (20, 50, 200):
-        d[f"EMA{n}"] = c.ewm(span=n, adjust=False, min_periods=min(n, 30)).mean()
+        d[f"EMA{n}"] = c.ewm(span=n, adjust=False, min_periods=n).mean()   # pura warm-up (pehle EMA200 sirf 30 bar par valid maana jaata tha)
     delta = c.diff()
     up, dn = delta.clip(lower=0), -delta.clip(upper=0)
     d["RSI"] = 100 - 100 / (1 + _wilder(up, 14) / _wilder(dn, 14).replace(0, np.nan))

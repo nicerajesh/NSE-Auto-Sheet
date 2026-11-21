@@ -1,3 +1,33 @@
+# RY APEX v3 - 3 report sheets: SWING | DELIVERY | INTRADAY (Nov 19, 2026)
+
+| Sheet | Kya | Data | Kab update |
+|---|---|---|---|
+| **SWING** (pehle ACTION PLAN) | strict BUY + WATCH BUY, SL, T1/T2/T3 (2R/4R/6R staircase), QTY, meri positions ka HOLD/SL RAISE/EXIT, paper scoreboard, watchlist | eod2 + NSE bhavcopy (EOD) | roz 20:15 IST (`daily.yml`) |
+| **DELIVERY** | monthly momentum rotation: top-20 BUY zone, rank 21-40 HOLD zone, disaster SL, T1-T3, QTY | wahi EOD data | roz (par trade mahine me ek baar) |
+| **INTRADAY** | 5-min ORB + VWAP + volume + NIFTY direction: BUY/SELL, entry, SL, T1/T2/T3 (1R/2R/3R), QTY, live STATUS | **Angel One SmartAPI** 5-min candles | har 5-10 min (server cron ya `intraday.yml`) |
+
+Support tabs: `SYSTEM STATUS`, `MY POSITIONS`. RY / RY V38 / RY V42 ab default me **publish nahi hote** (research-only; chalane ke liye Variable `PUBLISH_RESEARCH_TABS=1`).
+
+## V3 setup (15 min)
+1. Zip ki files repo me copy karo (overwrite), commit + push. `AUDIT.md` padho (kya galat tha, kya badla).
+2. Pehle ki tarah `GCP_CREDENTIALS` secret rahega. Naye optional Variables: `DELIVERY_CAPITAL` (default 5,00,000), `INTRADAY_CAPITAL` (default 2,00,000), `INTRADAY_RISK_PCT` (0.25).
+3. **Angel One secrets** (Settings -> Secrets -> Actions): `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PIN`, `ANGEL_TOTP_SECRET`
+   (SmartAPI app Angel ke developer portal se; TOTP secret = authenticator setup ke time wala base32 text key).
+   Ye key sirf **data padhti hai - system kabhi order nahi lagata**. Phir bhi trading/IP restrictions Angel ke portal par dekh lo.
+4. Actions -> **RY APEX Daily** -> Run workflow (SWING + DELIVERY banenge; `clean_extra_tabs` tick karo to purane tabs hat jayenge).
+5. **Intraday: PEHLE BACKTEST.** Actions -> *RY Intraday Scan* -> Run workflow -> `backtest_days = 60` (ya server par `python src/intraday_run.py --backtest 60`).
+   Jab tak **150+ trades aur PF > 1.2 (cost ke baad)** na dikhe, INTRADAY sheet ko sirf paper-trade ke liye use karo.
+6. Live intraday ke liye apna server behtar hai (GitHub schedule late hota hai): `deploy/crontab.txt`.
+
+## Intraday rules (config.py me sab badal sakte ho)
+Pehle 15 min (09:15-09:30) ki range -> 5-min bar uske upar/neeche close kare, VWAP ke sahi taraf, volume >= 1.5x, prev-close ke sahi taraf, NIFTY din ke open ke sahi taraf. Window 09:30-11:30. SL = range ki doosri taraf (0.4%-1.0% ke beech). T1/T2/T3 = 1R/2R/3R (T1 par SL entry par, T2 par SL T1 par, T3 par poora exit). 15:15 square-off. Din me max 3 trade. Risk 0.25%/trade, leverage cap 3x. Signal stateless-replay se bante hain (no look-ahead, backtest = live).
+
+## Sach (intraday)
+- Ye engine **abhi tak real data par validate nahi hua** (Angel credentials ke bina yahan test nahi ho sakta). Logic synthetic data par 33 tests se check hua hai; paisa lagane se pehle `--backtest` aur 3-4 hafte paper.
+- Intraday me zyadatar retail traders paisa gawate hain (SEBI studies). "Zero loss" ya "100% accurate" koi system nahi hota.
+
+---
+
 # RY APEX v2 (NSE Auto Sheet) - saaf-suthra version
 
 ## Kya badla (39 files -> 8 files, 4 yml -> 1 yml)
@@ -18,7 +48,7 @@
 | `src/notify.py` | Telegram alerts (optional) |
 | `src/publish.py` | Google Sheet: ACTION PLAN, SYSTEM STATUS, RY (retry ke saath) |
 | `src/run.py` | poora pipeline |
-| `tests/` | 36 tests |
+| `tests/` | 104 tests |
 
 ## Install (5 minute)
 1. Purane repo me `src/`, `tests/`, `.github/workflows/` ki saari purani files delete karo. `requirements.txt` replace.

@@ -15,7 +15,9 @@ import backtest as bt          # noqa: E402
 import data as dt              # noqa: E402
 import ledger as lg            # noqa: E402
 import notify as nt            # noqa: E402
+import delivery as dv          # noqa: E402
 import positions as ps         # noqa: E402
+import sheets3 as s3           # noqa: E402
 import publish as pb           # noqa: E402
 from config import CFG         # noqa: E402
 from engine import add_features, latest_candidates, position_size  # noqa: E402
@@ -26,8 +28,14 @@ STATE = Path(os.getenv("NSE_STATE_DIR", ROOT / "state"))
 OUT = Path(os.getenv("NSE_OUTPUT_DIR", ROOT / "output"))
 
 
-def notes(by_year: pd.DataFrame, summ: dict) -> list[str]:
+def notes(by_year: pd.DataFrame, summ: dict, wf: tuple | None = None) -> list[str]:
     weak = by_year[(by_year["pf"] < 1.0)]["YEAR"].astype(int).tolist() if not by_year.empty else []
+    wf_note = []
+    if wf and wf[1].get("trades"):
+        a, b = wf
+        wf_note = [f"7) Walk-forward: in-sample (<{CFG.oos_start[:4]}) PF {a.get('pf')} ({a.get('trades')} trades) | out-of-sample ({CFG.oos_start[:4]}+) "
+                   f"PF {b.get('pf')} ({b.get('trades')} trades). Rules in-sample par chune gaye the, isliye OOS wala number zyada sachha hai; "
+                   f"OOS PF < {CFG.oos_min_pf} ho to BUY apne aap band."]
     return [
         "1) Backtest universe AAJ ka Nifty 500 hai (jo stocks fail/delist hue wo nahi) -> numbers asli se zyada achhe dikhte hain.",
         f"2) Kamai kuch hi saalon se aayi. Jin saalon me PF < 1 tha: {', '.join(map(str, weak)) or 'koi nahi'}. Regime kharab ho to lambe losing patch aate hain "
@@ -36,7 +44,7 @@ def notes(by_year: pd.DataFrame, summ: dict) -> list[str]:
         "4) Chalu saal ki row adhoori hai: jo winners abhi khule hain wo closed-trade stats me nahi aate, sirf jaldi SL hue losers aate hain.",
         "5) Health 'WEAK REGIME' ho to size aadha. Real money me SIZE_STAGE_PCT se chhote size (25%) se shuru karo; 4-6 hafte LIVE SCOREBOARD dekh kar badhao.",
         "6) Ye research tool hai, investment advice nahi. Position size aisa rakho ki lagataar 10 SL hit bhi jhel sako.",
-    ]
+    ] + wf_note
 
 
 def main(argv=None) -> int:
@@ -99,6 +107,7 @@ def main(argv=None) -> int:
         sz = buy_v38.apply(lambda r: pd.Series(position_size(r["CLOSE"], r["STOP"], mult_total * CFG.v38_size_mult)), axis=1)
         buy_v38 = pd.concat([buy_v38, sz], axis=1)
         buy_v38 = buy_v38[buy_v38["QTY"] > 0]
+    deliv = dv.delivery_candidates(f) if not stale else pd.DataFrame()
     buy_v42 = latest_v42_candidates(f)
     if not buy_v42.empty:
         # V42 tier: apna score-engine (0-100), NIFTY ki jagah apna equal-weight universe regime proxy.
@@ -133,17 +142,18 @@ def main(argv=None) -> int:
     score = lg.scoreboard(led)
 
     last = f[f.DATE == asof]
-    ctx = dict(asof=asof, banner=banner, buy_ok=buy_ok, mult=hl["mult"], mult_total=mult_total, mine=mine, mine_sum=msum, mine_problems=pos_problems, health_label=hl["label"], health=hl,
+    ctx = dict(asof=asof, stale=stale, banner=banner, buy_ok=buy_ok, mult=hl["mult"], mult_total=mult_total, mine=mine, mine_sum=msum, mine_problems=pos_problems, health_label=hl["label"], health=hl,
                buy=buy, buy_watch=buy_watch, buy_v38=buy_v38, buy_v42=buy_v42, watch=watch, open=open_t, slots_free=slots_free, bt=summ, by_year=yearly, score=score,
                n_symbols=hist.SYMBOL.nunique(), n_sessions=hist.DATE.nunique(),
                breadth50=float((last.CLOSE > last.EMA50).mean() * 100), breadth200=float((last.CLOSE > last.EMA200).mean() * 100),
-               notes=notes(yearly, summ))
+               notes=notes(yearly, summ, bt.split_summary(trades)))
 
     # CSV artifacts (hamesha)
     (buy if buy_ok else buy.head(0)).to_csv(OUT / "action_plan_buy.csv", index=False)
     (buy_watch if buy_ok else buy_watch.head(0)).to_csv(OUT / "action_plan_buy_watch.csv", index=False)
     (buy_v38 if buy_ok else buy_v38.head(0)).to_csv(OUT / "action_plan_buy_v38.csv", index=False)
     (buy_v42 if buy_ok else buy_v42.head(0)).to_csv(OUT / "action_plan_buy_v42.csv", index=False)
+    deliv.to_csv(OUT / "delivery_candidates.csv", index=False)
     watch.head(CFG.watch_rows).to_csv(OUT / "watchlist.csv", index=False)
     open_t.to_csv(OUT / "open_signals.csv", index=False)
     mine.to_csv(OUT / "my_positions_status.csv", index=False)
@@ -152,10 +162,15 @@ def main(argv=None) -> int:
     led.to_csv(OUT / "signal_ledger.csv", index=False)
     print(f"RESULT | {banner} | new BUY {len(buy) if buy_ok else 0} | watch {len(watch)} | open {int(led.STATUS.isin(['ACTIVE','PENDING']).sum())}")
     print(f"BACKTEST | {summ}")
+    print(f"WALK-FORWARD | in-sample {bt.split_summary(trades)[0]} | out-of-sample {bt.split_summary(trades)[1]}")
 
     if not a.no_publish:
-        ok = pb.publish(pb.build_action_rows(ctx), pb.build_status_rows(ctx), pb.build_ry_rows(ctx),
-                        pb.build_v38_rows(ctx), pb.build_v42_rows(ctx), book=book)
+        research = CFG.publish_research_tabs      # RY / RY V38 / RY V42 sirf research ke liye (PUBLISH_RESEARCH_TABS=1)
+        ok = pb.publish(pb.build_action_rows(ctx), pb.build_status_rows(ctx),
+                        pb.build_ry_rows(ctx) if research else None,
+                        pb.build_v38_rows(ctx) if research else None,
+                        pb.build_v42_rows(ctx) if research else None, book=book)
+        s3.publish_tab(CFG.delivery_tab, s3.build_delivery_rows(ctx, deliv), book=book)
         if nt.send(nt.build_message(ctx)):
             print("TELEGRAM: alert bheja")
         if not ok and os.getenv("GITHUB_ACTIONS"):

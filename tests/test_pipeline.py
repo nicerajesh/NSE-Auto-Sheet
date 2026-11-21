@@ -92,3 +92,19 @@ def test_ledger_lifecycle():
     tbl = lg.open_table(led, f.DATE.max())
     sb = lg.scoreboard(led)
     assert "closed" in sb
+
+
+def test_edge_gate_blocks_when_out_of_sample_is_negative():
+    import backtest as bt
+    rng = np.random.default_rng(1)
+    d_is = pd.date_range("2019-03-01", periods=350, freq="3D")
+    d_oos = pd.date_range("2023-03-01", periods=120, freq="5D")
+    win_is = rng.random(350) < 0.6
+    ret_is = np.where(win_is, 8.0, -3.0)
+    ret_oos = np.where(rng.random(120) < 0.2, 5.0, -4.0)            # OOS me edge gayab
+    t = pd.DataFrame({"EXIT_DATE": list(d_is) + list(d_oos), "RET_PCT": list(ret_is) + list(ret_oos),
+                      "R": list(ret_is / 4) + list(ret_oos / 4)})
+    ok, why = bt.edge_gate(t)
+    assert not ok and "OUT-OF-SAMPLE" in why
+    ok2, _ = bt.edge_gate(t[t.EXIT_DATE < "2023-01-01"])
+    assert ok2                                                      # sirf in-sample dekho to gate pass (yahi circular problem tha)

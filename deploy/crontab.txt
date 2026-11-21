@@ -1,0 +1,9 @@
+# Intraday scan apne Ubuntu server par (server ki timezone IST honi chahiye: sudo timedatectl set-timezone Asia/Kolkata)
+# Setup:
+#   git clone <repo> /opt/NSE-Auto-Sheet && cd /opt/NSE-Auto-Sheet
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-intraday.txt
+#   cp deploy/env.example /opt/NSE-Auto-Sheet/.env && chmod 600 .env     # ANGEL_* bharo
+#   cp <gcp-service-account>.json /opt/secrets/gcp.json && chmod 600 /opt/secrets/gcp.json
+#   mkdir -p logs
+# crontab -e me ye ek line (loop 15:35 par khud band ho jaata hai):
+18 9 * * 1-5 cd /opt/NSE-Auto-Sheet && set -a && . ./.env && set +a && export GCP_CREDENTIALS="$(cat /opt/secrets/gcp.json)" && .venv/bin/python src/intraday_run.py --loop >> logs/intraday.log 2>&1

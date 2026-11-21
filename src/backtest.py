@@ -90,10 +90,23 @@ def health(t: pd.DataFrame, asof: pd.Timestamp) -> dict:
     return dict(mult=CFG.health_size_mult, n=len(w), avg_r=round(avg_r, 3), label="WEAK REGIME - half size")
 
 
+def split_summary(t: pd.DataFrame, split: str | None = None) -> tuple[dict, dict]:
+    """(in-sample, out-of-sample) summary. Split date se pehle exit hue trades = in-sample."""
+    split = pd.Timestamp(split or CFG.oos_start)
+    if t is None or t.empty:
+        return summarize(None), summarize(None)
+    return summarize(t[t.EXIT_DATE < split]), summarize(t[t.EXIT_DATE >= split])
+
+
 def edge_gate(t: pd.DataFrame) -> tuple[bool, str]:
     s = summarize(t)
     if s["trades"] < CFG.edge_min_trades:
         return False, f"INSUFFICIENT HISTORY ({s['trades']} trades < {CFG.edge_min_trades})"
     if not (s["pf"] >= CFG.edge_min_pf):
         return False, f"NO EDGE (profit factor {s['pf']} < {CFG.edge_min_pf})"
+    # walk-forward: parameters in-sample par chune gaye the, isliye gate sirf poore-sample PF par nahi - OOS par bhi
+    if "EXIT_DATE" in t:
+        _, oos = split_summary(t)
+        if oos["trades"] >= CFG.oos_min_trades and not (oos["pf"] >= CFG.oos_min_pf):
+            return False, f"NO EDGE OUT-OF-SAMPLE (PF {oos['pf']} since {CFG.oos_start}, {oos['trades']} trades)"
     return True, "PASS"
