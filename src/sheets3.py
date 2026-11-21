@@ -4,6 +4,8 @@ SWING tab publish.build_action_rows se banta hai (CFG.action_tab = "SWING").
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -17,7 +19,68 @@ def _qty(q) -> object:
 
 
 # --------------------------------------------------------------------------- DELIVERY
-def build_delivery_rows(ctx: dict, cand: pd.DataFrame) -> tuple[list[list], dict]:
+def build_delivery_rows(ctx: dict, cand: pd.DataFrame, detail: bool | None = None) -> tuple[list[list], dict]:
+    """Default = SIMPLE view (sirf wo stocks jo abhi kharide ja sakte hain). DELIVERY_DETAIL=1 -> poora purana table."""
+    if detail is None:
+        detail = os.getenv("DELIVERY_DETAIL", "0") == "1"
+    return (_delivery_detail if detail else _delivery_simple)(ctx, cand)
+
+
+def _delivery_simple(ctx: dict, cand: pd.DataFrame) -> tuple[list[list], dict]:
+    rows: list[list] = []
+    marks = {"title": [], "header": []}
+
+    def add(r, kind=None):
+        rows.append(r)
+        if kind:
+            marks[kind].append(len(rows) - 1)
+
+    asof = ctx["asof"]
+    show = int(os.getenv("DELIVERY_SHOW", "10") or 10)
+    add([f"DELIVERY - AAJ KYA KHARIDNA HAI | Data: {asof:%d-%b-%Y} | Agla rebalance: {next_rebalance(asof):%d-%b-%Y}"], "title")
+    add([f"Market: {ctx.get('health_label', '')} | {ctx.get('breadth200', float('nan')):.0f}% stocks EMA200 ke upar | "
+         f"Capital Rs {CFG.delivery_capital:,.0f} (abhi {CFG.stage_pct:.0f}% use)"])
+    if ctx.get("stale"):
+        add(["DATA PURANA HAI - aaj kharidne ki list band."])
+    add([""])
+    add(["KHARIDO (mahine ke pehle trading din; jo pehle se hai use dobara mat kharido)"], "title")
+    add(["#", "STOCK", "KHARIDO (~)", "STOP LOSS", "TARGET 1", "TARGET 2", "TARGET 3", "QTY", "RISK Rs"], "header")
+    skipped = []
+    n = 0
+    if cand is not None and not cand.empty:
+        for _, r in cand[cand["ZONE"] == "BUY"].iterrows():
+            if not (isinstance(r["QTY"], (int, float, np.integer, np.floating)) and r["QTY"] >= 1):
+                skipped.append(str(r["SYMBOL"]))
+                continue
+            if n >= show:
+                break
+            n += 1
+            add([n, r["SYMBOL"], r["CLOSE"], r["STOP"], r["T1"], r["T2"], r["T3"], int(r["QTY"]), r["RISK_AMT"]])
+    if n == 0:
+        add(["", "Aaj kharidne layak koi stock nahi."])
+    add([""])
+    if cand is not None and not cand.empty:
+        hold = cand[cand["ZONE"] == "HOLD"]["SYMBOL"].tolist()
+        if hold:
+            add(["Pehle se hai to HOLD rakho (rank 21-40): " + ", ".join(map(str, hold))])
+        if skipped:
+            add([f"Slot chhota hone se list me nahi aaye ({len(skipped)}): " + ", ".join(skipped) + " - capital/stage badhao to aayenge."])
+        if (cand[cand["ZONE"] == "BUY"]["MOM"] > 300).any():
+            add(["Dhyan: 300%+ momentum wale small-cap bahut volatile hote hain - unka size aur chhota rakho."])
+    add([""])
+    add(["KAISE BECHNA HAI"], "title")
+    for t in (
+        "1) STOP LOSS ka order kharidte hi lagao. SL touch hua to bech do - bahas nahi.",
+        "2) Target 1 chhua to SL ko kharid bhav par le aao. Target 2 par SL Target 1 par. Target 3 par SL Target 2 par. Jab tak SL na toote, hold.",
+        f"3) Rank {CFG.delivery_hold_n} se bahar nikle ya Close EMA200 ke neeche gaya to bech do (mahine me ek baar dekho).",
+        "4) 100% kaam karne wali koi strategy nahi hoti. Kai stocks SL par jayenge - kamai kuch bade winners se aati hai, isliye SL lagao aur size chhota rakho.",
+    ):
+        add([t])
+    width = max(len(r) for r in rows)
+    return pb._pad(rows, width), marks
+
+
+def _delivery_detail(ctx: dict, cand: pd.DataFrame) -> tuple[list[list], dict]:
     rows: list[list] = []
     marks = {"title": [], "header": []}
 
