@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write     # sirf data/signal_ledger.csv commit karne ke liye
 
 jobs:
   daily:
@@ -45,6 +45,11 @@ jobs:
           key: nse-state-v2-none
           restore-keys: nse-state-v2-
 
+      - name: Restore ledger from repo (cache evict ho gaya ho to)
+        run: |
+          mkdir -p state
+          if [ ! -f state/signal_ledger.csv ] && [ -f data/signal_ledger.csv ]; then cp data/signal_ledger.csv state/signal_ledger.csv; fi
+
       - name: Run engine and publish
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
@@ -52,6 +57,8 @@ jobs:
           CAPITAL_BASE: ${{ vars.CAPITAL_BASE }}
           RISK_PER_TRADE_PCT: ${{ vars.RISK_PER_TRADE_PCT }}
           MAX_CONCURRENT_POSITIONS: ${{ vars.MAX_CONCURRENT_POSITIONS }}
+          DELIVERY_CAPITAL: ${{ vars.DELIVERY_CAPITAL }}
+          PUBLISH_RESEARCH_TABS: ${{ vars.PUBLISH_RESEARCH_TABS }}
         run: python src/run.py ${{ inputs.rebuild_history && '--rebuild-history' || '' }}
 
       - name: Save history + ledger cache
@@ -60,6 +67,16 @@ jobs:
         with:
           path: state
           key: nse-state-v2-${{ github.run_id }}
+
+      - name: Commit ledger (cache evict ho to bhi live scoreboard bacha rahe; repo bhi 'active' rehta hai)
+        if: success()
+        run: |
+          mkdir -p data
+          cp state/signal_ledger.csv data/signal_ledger.csv 2>/dev/null || true
+          git config user.name "ry-apex-bot"
+          git config user.email "ry-apex-bot@users.noreply.github.com"
+          git add data/signal_ledger.csv
+          git diff --cached --quiet || (git commit -m "ledger $(date -u +%F)" && git push)
 
       - name: Upload CSV outputs
         if: always()
