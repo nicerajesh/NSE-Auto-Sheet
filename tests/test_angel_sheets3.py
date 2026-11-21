@@ -68,12 +68,12 @@ def test_delivery_rows_shape_and_slot_label():
              QTY=10, CAPITAL_USED=1000.0, RISK_AMT=120.0, EXIT_BELOW=80.0, ADX=30.0),
         dict(RANK=21, ZONE="HOLD", SYMBOL="BBB", CLOSE=9000.0, MOM=20.0, STOP=8000.0, RISK_PCT=11.0, T1=11000.0, T2=13000.0, T3=15000.0,
              QTY=0, CAPITAL_USED=0.0, RISK_AMT=0.0, EXIT_BELOW=7000.0, ADX=22.0)])
-    rows, marks = s3.build_delivery_rows(_ctx(), cand)
+    rows, marks = s3.build_delivery_rows(_ctx(), cand, detail=True)
     assert len({len(r) for r in rows}) == 1                       # sab rows same width
     flat = [str(x) for r in rows for x in r]
     assert "AAA" in flat and "BBB" in flat and "SLOT CHHOTA" in flat
     assert marks["title"] and marks["header"]
-    rows2, _ = s3.build_delivery_rows(_ctx(), pd.DataFrame())
+    rows2, _ = s3.build_delivery_rows(_ctx(), pd.DataFrame(), detail=True)
     assert any("nahi" in str(x) for r in rows2 for x in r)
 
 
@@ -184,3 +184,42 @@ def test_intraday_publish_path_with_fake_book(tmp_path, monkeypatch):
     assert kw["value_input_option"] == "RAW" and kw["range_name"] == "A1"
     flat = " ".join(str(x) for r in kw["values"] for x in r)
     assert "AAA" in flat and "PENDING" in flat and "RY INTRADAY" in flat
+
+
+def _cand_rows():
+    base = dict(CLOSE=100.0, MOM=50.0, STOP=88.0, RISK_PCT=12.0, T1=124.0, T2=148.0, T3=172.0, CAPITAL_USED=1000.0, RISK_AMT=120.0, EXIT_BELOW=80.0, ADX=30.0)
+    rows = [dict(RANK=1, ZONE="BUY", SYMBOL="AAA", QTY=10, **base),
+            dict(RANK=2, ZONE="BUY", SYMBOL="BIGPRICE", QTY=0, **{**base, "CLOSE": 9000.0}),
+            dict(RANK=3, ZONE="BUY", SYMBOL="HOTSTOCK", QTY=5, **{**base, "MOM": 411.0}),
+            dict(RANK=21, ZONE="HOLD", SYMBOL="OLDHOLD", QTY=3, **base)]
+    return pd.DataFrame(rows)
+
+
+def test_delivery_simple_view_only_actionable_and_compact(monkeypatch):
+    monkeypatch.delenv("DELIVERY_DETAIL", raising=False)
+    rows, marks = s3.build_delivery_rows(_ctx(), _cand_rows())
+    assert len({len(r) for r in rows}) == 1 and len(rows[0]) <= 9
+    table = [r for r in rows if r and isinstance(r[0], int)]
+    assert [r[1] for r in table] == ["AAA", "HOTSTOCK"]               # BIGPRICE (qty 0) table me nahi
+    assert all(isinstance(r[7], int) and r[7] >= 1 for r in table)
+    flat = " ".join(str(x) for r in rows for x in r)
+    assert "BIGPRICE" in flat and "Slot chhota" in flat               # par neeche ek line me bataya
+    assert "OLDHOLD" in flat and "HOLD rakho" in flat
+    assert "300%+" in flat and "100% kaam karne wali koi strategy nahi" in flat
+    assert marks["title"] and marks["header"]
+
+
+def test_delivery_simple_respects_show_limit_and_empty(monkeypatch):
+    monkeypatch.setenv("DELIVERY_SHOW", "1")
+    rows, _ = s3.build_delivery_rows(_ctx(), _cand_rows())
+    assert len([r for r in rows if r and isinstance(r[0], int)]) == 1
+    rows, _ = s3.build_delivery_rows(_ctx(), pd.DataFrame())
+    assert any("koi stock nahi" in str(x) for r in rows for x in r)
+    rows, _ = s3.build_delivery_rows({**_ctx(), "stale": True}, _cand_rows())
+    assert any("DATA PURANA" in str(x) for r in rows for x in r)
+
+
+def test_delivery_detail_env_switch(monkeypatch):
+    monkeypatch.setenv("DELIVERY_DETAIL", "1")
+    rows, _ = s3.build_delivery_rows(_ctx(), _cand_rows())
+    assert len(rows[0]) == 15
