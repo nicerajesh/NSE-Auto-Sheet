@@ -1,0 +1,46 @@
+name: RY Delivery 20 Percent Research
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/delivery20.py'
+      - 'src/delivery20_run.py'
+      - 'tests/test_delivery20.py'
+      - '.github/workflows/delivery20-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delivery20-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore NSE history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: nse-state-v2-none
+          restore-keys: |
+            nse-state-v2-
+      - name: Run Delivery 20 research
+        run: python src/delivery20_run.py
+      - name: Upload Delivery 20 research
+        uses: actions/upload-artifact@v4
+        with:
+          name: ry-delivery-20-research
+          path: output/delivery20_*.csv
+          if-no-files-found: error
+          retention-days: 30
