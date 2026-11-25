@@ -95,7 +95,7 @@ def backtest_delivery20(f: pd.DataFrame, cost_pct: float = 0.35,
                 "MOM_RANK": float(row.MOM_RANK), "TARGET_PCT": float(target_pct),
                 "GROSS_RETURN_PCT": gross,
                 "NET_RETURN_PCT": net, "REASON": reason,
-                "HOLD_SESSIONS": exit_i - (i + 1),
+                "HOLD_SESSIONS": exit_i - i,
             })
             i = exit_i + 1
     return pd.DataFrame(trades)
