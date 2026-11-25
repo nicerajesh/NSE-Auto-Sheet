@@ -77,13 +77,13 @@ def run_portfolio_v5(
         for sym, pos in positions.items():
             bar = rows.get(sym)
             px = float(bar["CLOSE"]) if bar and np.isfinite(float(bar["CLOSE"])) else pos["LAST_CLOSE"]
-            value += pos["QTY"] * px
+            value += pos["QTY"] * px * (1 - cost_pct / 200.0)
         return value
 
     def close_position(sym, pos, date, px, reason):
         nonlocal cash, total_exit_fees
         notional = pos["QTY"] * px
-        fee = notional * cost_pct / 20000.0
+        fee = notional * cost_pct / 200.0
         pnl_gross = pos["QTY"] * (px - pos["ENTRY"])
         cash += notional - fee
         total_exit_fees += fee
@@ -154,12 +154,12 @@ def run_portfolio_v5(
             max_value = equity_now * max_position_pct / 100
             qty_risk = math.floor(min(risk_budget, remaining_risk) / risk_per_share)
             qty_value = math.floor(max_value / entry)
-            qty_cash = math.floor(cash / (entry * (1 + cost_pct / 20000.0)))
+            qty_cash = math.floor(cash / (entry * (1 + cost_pct / 200.0)))
             qty = min(qty_risk, qty_value, qty_cash)
             if qty <= 0:
                 continue
             used = qty * entry
-            entry_fee = used * cost_pct / 20000.0
+            entry_fee = used * cost_pct / 200.0
             cash -= used + entry_fee
             total_entry_fees += entry_fee
             pos = {
