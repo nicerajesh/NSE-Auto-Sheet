@@ -92,6 +92,8 @@ def bootstrap_history(symbols: list[str], base: str | None = None, workers: int 
     if not parts:
         raise RuntimeError("History bootstrap fail: koi symbol load nahi hua")
     print(f"BOOTSTRAP: loaded {len(parts)} | missing {len(missing)}")
+    if missing:
+        print("BOOTSTRAP MISSING SYMBOLS: " + ", ".join(missing))
     return pd.concat(parts, ignore_index=True)
 
 
