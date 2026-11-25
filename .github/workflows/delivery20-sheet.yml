@@ -1,0 +1,43 @@
+name: RY Delivery20 Research Sheet
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/pit-benchmark-v1]
+    paths:
+      - 'src/delivery20_publish.py'
+      - 'src/delivery20.py'
+      - 'src/pit_universe.py'
+      - '.github/workflows/delivery20-sheet.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delivery20-sheet-research
+  cancel-in-progress: true
+
+jobs:
+  publish-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore NSE history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: nse-state-v2-none
+          restore-keys: |
+            nse-state-v2-
+      - name: Run tests
+        run: python -m pytest -q tests
+      - name: Publish separate DELIVERY20 research tab
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: python src/delivery20_publish.py
