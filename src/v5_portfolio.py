@@ -32,16 +32,17 @@ def run_portfolio_v5(
     missing = required - set(features.columns)
     if missing:
         raise ValueError(f"Portfolio backtest missing columns: {sorted(missing)}")
-    f = features.sort_values(["DATE", "SYMBOL"]).copy()
+    keep = ["SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE",
+            "TURNOVER_CR", "V5_BUY", "V5_STOP", "V5_SCORE"]
+    if "V5_SETUP" in features.columns:
+        keep.append("V5_SETUP")
+    f = features[keep].sort_values(["DATE", "SYMBOL"]).copy()
     f["DATE"] = pd.to_datetime(f["DATE"]).dt.normalize()
     f = f[f["DATE"] >= pd.Timestamp(start)]
     if f.empty:
         raise ValueError("No V5 feature rows in requested portfolio backtest period")
 
-    # Build daily symbol lookup and next-session signal queue.
-    day_rows = {}
-    for date, group in f.groupby("DATE", sort=True):
-        day_rows[date] = group.set_index("SYMBOL").to_dict("index")
+    # Keep only the signal queue in memory; build each day's tiny OHLC lookup on demand.
     entry_queue: dict[pd.Timestamp, list[dict]] = {}
     for symbol, group in f.groupby("SYMBOL", sort=False):
         g = group.sort_values("DATE").reset_index(drop=True)
@@ -70,7 +71,7 @@ def run_portfolio_v5(
     max_concurrent = 0
     total_entry_fees = 0.0
     total_exit_fees = 0.0
-    dates = sorted(day_rows)
+    dates = sorted(pd.Timestamp(x).normalize() for x in f["DATE"].unique())
 
     def mark_equity(rows):
         value = cash
@@ -104,7 +105,8 @@ def run_portfolio_v5(
         last_exit_date[sym] = date
 
     for date in dates:
-        rows = day_rows[date]
+        day = f[f["DATE"] == date][["SYMBOL", "OPEN", "HIGH", "LOW", "CLOSE"]]
+        rows = day.set_index("SYMBOL").to_dict("index")
 
         # Existing positions: conservative stop-first daily-bar execution.
         for sym in list(positions):
@@ -195,12 +197,9 @@ def run_portfolio_v5(
         })
 
     # Mark remaining positions at final available close; do not pretend they are closed trades.
-    final_date = dates[-1]
-    final_rows = day_rows[final_date]
     open_rows = []
     for sym, pos in positions.items():
-        bar = final_rows.get(sym)
-        last_px = float(bar["CLOSE"]) if bar else pos["LAST_CLOSE"]
+        last_px = pos["LAST_CLOSE"]
         open_rows.append({
             "SYMBOL": sym, "ENTRY_DATE": pos["ENTRY_DATE"], "ENTRY": pos["ENTRY"],
             "LAST_CLOSE": last_px, "STOP": pos["STOP"], "TARGET": pos["TARGET"],
