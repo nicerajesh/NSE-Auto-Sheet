@@ -8,7 +8,7 @@
 - DELIVERY (monthly momentum rotation)
 - INTRADAY (separate Angel One data workflow; see its dedicated workflow/configuration)
 
-The existing production signal engine and Google Sheet publishing are not changed by Delivery 20 research.
+The existing SWING/DELIVERY production signal engine and Google Sheet publishing are preserved. The optional intraday module is not part of this delivery research workflow.
 
 ### New isolated Delivery 20 research
 Purpose: find historical NSE delivery setups where a stock may reach a **+20% target** after entry.
@@ -22,7 +22,7 @@ Files:
 Outputs:
 - `delivery20_trades.csv`
 - `delivery20_latest_candidates.csv`
-- `delivery20_summary.csv`
+- `delivery20_summary.csv`\n- `delivery20_yearly.csv` (year-by-year performance)
 
 ### Delivery 20 rules (research hypotheses, not guaranteed returns)
 - Trend: Close > EMA20 > EMA50 > EMA200, with EMA50 and EMA200 rising.
