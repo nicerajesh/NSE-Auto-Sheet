@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: delivery20-research-v2
-  cancel-in-progress: false
+  group: delivery20-research-v3
+  cancel-in-progress: true
 
 jobs:
   research:
