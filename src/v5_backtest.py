@@ -96,7 +96,8 @@ def summarize_v5(trades: pd.DataFrame) -> dict:
     if trades is None or trades.empty:
         return {"trades": 0, "win_pct": np.nan, "pf": np.nan, "avg_r": np.nan,
                 "avg_ret_pct": np.nan, "max_drawdown_pct": np.nan}
-    t = trades.sort_values(["EXIT_DATE", "SYMBOL"]).copy()
+    sort_cols = ["EXIT_DATE"] + (["SYMBOL"] if "SYMBOL" in trades.columns else [])
+    t = trades.sort_values(sort_cols).copy()
     wins = t.loc[t.RET_PCT > 0, "RET_PCT"].sum()
     losses = -t.loc[t.RET_PCT < 0, "RET_PCT"].sum()
     # Trade-sequence equity curve is illustrative (not portfolio-weighted due to overlapping symbols).
