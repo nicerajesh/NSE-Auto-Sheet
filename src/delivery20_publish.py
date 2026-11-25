@@ -101,10 +101,10 @@ if not watch and buys.empty:
 # not a BUY signal: high volume near lows can mean accumulation OR distribution.
 low_volume_rows = [
     [f"RY 52-WEEK LOW + HEAVY VOLUME | Data: {asof:%d-%b-%Y}"],
-    ["Purpose: identify stocks near their 252-session low with unusually high volume; NOT a BUY recommendation."],
-    ["Rule: close within 10% of rolling 252-session lowest LOW; volume ratio >= 1.5x; at least 200 sessions of history."],
-    ["Review price action/support and company news separately. High volume near lows can mean accumulation OR distribution."],
-    ["STOCK", "CLOSE", "52W LOW", "DISTANCE FROM 52W LOW %", "VOLUME", "20D AVG VOLUME", "VOLUME RATIO", "DAY CHANGE %", "AVG TURNOVER Cr", "ADX", "DATA DATE"]
+    ["Purpose: spot possible accumulation near 52W low; NOT a BUY signal. Heavy volume can also be distribution."],
+    ["Discovery: within 10% of rolling 252-session LOW; volume >=1.5x 20D average; minimum 200 sessions."],
+    ["Confirmation clues: strong close in candle range, rising OBV, MFI recovery, then price breakout. No single clue proves accumulation."],
+    ["STOCK", "CLOSE", "52W LOW", "DISTANCE %", "VOLUME", "20D AVG VOL", "VOLUME x", "DAY CHANGE %", "CLOSE LOCATION %", "OBV vs 20D", "MFI14", "READING", "AVG TURNOVER Cr", "ADX", "DATA DATE"]
 ]
 low_candidates = []
 for symbol, raw in signals.groupby("SYMBOL", sort=False):
@@ -120,23 +120,45 @@ for symbol, raw in signals.groupby("SYMBOL", sort=False):
         prev_close = float(d.iloc[-2]["CLOSE"]) if len(d) > 1 else close
         day_change = (close / prev_close - 1.0) * 100 if prev_close else 0.0
         avg_vol = float(r["VOLUME"]) / vol_ratio if vol_ratio > 0 else 0.0
+        candle_range = float(r["HIGH"]) - float(r["LOW"])
+        close_loc = (close - float(r["LOW"])) / candle_range if candle_range > 0 else 0.5
+        signed_volume = (d["VOLUME"].astype(float) * d["CLOSE"].astype(float).diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0)))
+        obv = signed_volume.cumsum()
+        obv_up = len(obv) >= 21 and float(obv.iloc[-1]) > float(obv.iloc[-21])
+        tp = (d["HIGH"].astype(float) + d["LOW"].astype(float) + d["CLOSE"].astype(float)) / 3
+        flow = tp * d["VOLUME"].astype(float)
+        direction = tp.diff()
+        positive = flow.where(direction > 0, 0.0).rolling(14, min_periods=14).sum()
+        negative = flow.where(direction < 0, 0.0).rolling(14, min_periods=14).sum()
+        mfi_ratio = positive.iloc[-1] / negative.iloc[-1] if negative.iloc[-1] > 0 else float("inf")
+        mfi = 100 - (100 / (1 + mfi_ratio)) if pd.notna(mfi_ratio) else float("nan")
+        if close_loc >= 0.70 and day_change > 0 and obv_up and mfi >= 50:
+            reading = "ACCUMULATION CLUES"
+        elif close_loc <= 0.30 and day_change < 0:
+            reading = "DISTRIBUTION RISK"
+        else:
+            reading = "NEEDS CONFIRMATION"
         low_candidates.append({
             "symbol": symbol, "close": close, "low": low_52,
             "distance": distance, "volume": float(r["VOLUME"]),
             "avg_volume": avg_vol, "vol_ratio": vol_ratio,
-            "day_change": day_change, "turnover": float(r["TURNOVER_CR"]),
-            "adx": float(r["ADX"])
+            "day_change": day_change, "close_loc": close_loc * 100,
+            "obv": "RISING" if obv_up else "NOT RISING",
+            "mfi": mfi, "reading": reading,
+            "turnover": float(r["TURNOVER_CR"]), "adx": float(r["ADX"])
         })
 low_candidates.sort(key=lambda x: (x["vol_ratio"], -x["distance"]), reverse=True)
 for x in low_candidates:
     low_volume_rows.append([
         x["symbol"], x["close"], x["low"], round(x["distance"], 2),
         x["volume"], round(x["avg_volume"]), round(x["vol_ratio"], 2),
-        round(x["day_change"], 2), round(x["turnover"], 2), round(x["adx"], 2),
+        round(x["day_change"], 2), round(x["close_loc"], 1), x["obv"],
+        round(x["mfi"], 1) if pd.notna(x["mfi"]) else "",
+        x["reading"], round(x["turnover"], 2), round(x["adx"], 2),
         asof.strftime("%d-%b-%Y")
     ])
 if not low_candidates:
-    low_volume_rows.append(["", "NO STOCK MATCHED TODAY"] + [""] * 9)
+    low_volume_rows.append(["", "NO STOCK MATCHED TODAY"] + [""] * 13)
 
 book = pb.open_book()
 if book is None:
