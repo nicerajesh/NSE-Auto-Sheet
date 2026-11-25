@@ -45,12 +45,11 @@ if not closed.empty:
             "TARGET_HIT_PCT": round(float((group.REASON == "TARGET_20").mean() * 100), 2),
             "PROFIT_FACTOR": round(float(wins / losses), 3) if losses else (float("inf") if wins else 0.0),
             "AVG_NET_RETURN_PCT": round(float(group.NET_RETURN_PCT.mean()), 3),
-            "COMPOUNDED_EVENT_RETURN_PCT": round(float(((1 + group.NET_RETURN_PCT / 100).prod() - 1) * 100), 2),
         })
     yearly = pd.DataFrame(yearly_rows)
 else:
     yearly = pd.DataFrame(columns=["YEAR", "TRADES", "WIN_RATE_PCT", "TARGET_HIT_PCT",
-                                   "PROFIT_FACTOR", "AVG_NET_RETURN_PCT", "COMPOUNDED_EVENT_RETURN_PCT"])
+                                   "PROFIT_FACTOR", "AVG_NET_RETURN_PCT"])
 yearly.to_csv(out / "delivery20_yearly.csv", index=False)
 print("DELIVERY20 EVENT-LEVEL SUMMARY", summary)
 print("ASOF", hist.DATE.max(), "SYMBOLS", hist.SYMBOL.nunique(), "CANDIDATES", len(latest))
