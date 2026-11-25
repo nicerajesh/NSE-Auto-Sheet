@@ -40,24 +40,30 @@ def _weekly_bullish(d: pd.DataFrame) -> pd.Series:
     atr = _wilder(tr, 7)
     mid = (x["HIGH"] + x["LOW"]) / 2
     upper, lower = mid + 2 * atr, mid - 2 * atr
+    final_upper = pd.Series(index=x.index, dtype=float)
+    final_lower = pd.Series(index=x.index, dtype=float)
     st = pd.Series(index=x.index, dtype=float)
-    direction = pd.Series(index=x.index, dtype=bool)
+    bullish = pd.Series(index=x.index, dtype=bool)
     for i in range(len(x)):
-        if i == 0 or not np.isfinite(atr.iloc[i]):
-            st.iloc[i] = np.nan
-            direction.iloc[i] = False
+        if not np.isfinite(atr.iloc[i]):
             continue
+        basic_u, basic_l = upper.iloc[i], lower.iloc[i]
+        if i == 0 or not np.isfinite(final_upper.iloc[i-1]):
+            final_upper.iloc[i], final_lower.iloc[i] = basic_u, basic_l
+            st.iloc[i], bullish.iloc[i] = basic_u, False
+            continue
+        prev_close = x["CLOSE"].iloc[i-1]
+        prev_fu, prev_fl = final_upper.iloc[i-1], final_lower.iloc[i-1]
+        final_upper.iloc[i] = basic_u if (basic_u < prev_fu or prev_close > prev_fu) else prev_fu
+        final_lower.iloc[i] = basic_l if (basic_l > prev_fl or prev_close < prev_fl) else prev_fl
         prev_st = st.iloc[i-1]
-        prev_dir = bool(direction.iloc[i-1])
-        final_upper = min(upper.iloc[i], upper.iloc[i-1]) if x["CLOSE"].iloc[i-1] <= upper.iloc[i-1] else upper.iloc[i]
-        final_lower = max(lower.iloc[i], lower.iloc[i-1]) if x["CLOSE"].iloc[i-1] >= lower.iloc[i-1] else lower.iloc[i]
-        if not prev_dir:
-            direction.iloc[i] = not (x["CLOSE"].iloc[i] > final_upper)
+        if prev_st == prev_fu:
+            st.iloc[i] = final_upper.iloc[i] if x["CLOSE"].iloc[i] <= final_upper.iloc[i] else final_lower.iloc[i]
         else:
-            direction.iloc[i] = x["CLOSE"].iloc[i] >= final_lower
-        st.iloc[i] = final_lower if direction.iloc[i] else final_upper
+            st.iloc[i] = final_lower.iloc[i] if x["CLOSE"].iloc[i] >= final_lower.iloc[i] else final_upper.iloc[i]
+        bullish.iloc[i] = st.iloc[i] == final_lower.iloc[i]
     # only previous completed weekly candle; merge_asof backward
-    w = pd.DataFrame({"WEEK_BULL": (x["CLOSE"] > x["WEMA25"]) & direction}).shift(1)
+    w = pd.DataFrame({"WEEK_BULL": (x["CLOSE"] > x["WEMA25"]) & bullish}).shift(1)
     daily = pd.DataFrame({"DATE": pd.to_datetime(d["DATE"]), "_i": d.index}).sort_values("DATE")
     weekly = w.reset_index().rename(columns={w.index.name or "index": "WEEK_DATE"})
     weekly["WEEK_DATE"] = pd.to_datetime(weekly.iloc[:, 0])
