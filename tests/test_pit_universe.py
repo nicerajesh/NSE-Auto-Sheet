@@ -24,9 +24,9 @@ def test_membership_uses_only_disclosed_snapshot():
     m = sample_membership()
     assert membership_available_on(m, "2024-02-09").empty
     feb = membership_available_on(m, "2024-02-10")
-    assert set(feb.isin) == {"INE000A01001", "INE000B01001"}
+    assert set(feb["isin"]) == {"INE000A01001", "INE000B01001"}
     mar = membership_available_on(m, "2024-03-10")
-    assert set(mar.isin) == {"INE000B01001", "INE000C01001"}
+    assert set(mar["isin"]) == {"INE000B01001", "INE000C01001"}
 
 
 def test_loader_rejects_future_availability_before_snapshot(tmp_path):
