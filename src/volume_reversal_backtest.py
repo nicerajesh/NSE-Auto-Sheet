@@ -67,27 +67,33 @@ def build_events(hist: pd.DataFrame) -> pd.DataFrame:
       "F_MFI_ONLY":near&spike&absorption&mfi,
     }
     out=[]
+    last_signal={}
+    symbol_frames={s:g.sort_values("DATE").reset_index(drop=True) for s,g in f.groupby("SYMBOL",sort=False)}
     for tier,mask in tiers.items():
-      ix=np.flatnonzero(mask.fillna(False).to_numpy())
-      for i in ix:
-        row=f.iloc[i]
-        # Avoid overlapping repeat alerts per symbol/tier for 10 sessions.
-        if out and any(x["SYMBOL"]==row.SYMBOL and x["TIER"]==tier and
-                       (row.DATE-x["SIGNAL_DATE"]).days<14 for x in out): continue
-        rec={"SYMBOL":row.SYMBOL,"TIER":tier,"SIGNAL_DATE":row.DATE,
-             "SIGNAL_CLOSE":float(row.CLOSE),"VOL_X":float(row.VOL_X),
-             "DIST_LOW_PCT":float(row.DIST_LOW_PCT),"CLOSE_LOC":float(row.CLOSE_LOC),
-             "MFI14":float(row.MFI14) if pd.notna(row.MFI14) else np.nan}
-        for n in (20,40,60):
-          future=f[(f.SYMBOL==row.SYMBOL)&(f.DATE>row.DATE)].head(n)
-          if len(future)<n:
-            rec[f"FWD{n}_RET_PCT"]=np.nan; rec[f"FWD{n}_MAX_HIGH_PCT"]=np.nan
-            rec[f"FWD{n}_MIN_LOW_PCT"]=np.nan
-          else:
-            rec[f"FWD{n}_RET_PCT"]=(float(future.iloc[-1].CLOSE)/rec["SIGNAL_CLOSE"]-1)*100
-            rec[f"FWD{n}_MAX_HIGH_PCT"]=(float(future.HIGH.max())/rec["SIGNAL_CLOSE"]-1)*100
-            rec[f"FWD{n}_MIN_LOW_PCT"]=(float(future.LOW.min())/rec["SIGNAL_CLOSE"]-1)*100
-        out.append(rec)
+      for sym, group in f.groupby("SYMBOL",sort=False):
+        local_mask=mask.loc[group.index].fillna(False).to_numpy()
+        ix=np.flatnonzero(local_mask)
+        d=symbol_frames[sym]
+        for i in ix:
+          row=d.iloc[i]
+          key=(sym,tier)
+          if key in last_signal and (row.DATE-last_signal[key]).days<14: continue
+          last_signal[key]=row.DATE
+          rec={"SYMBOL":sym,"TIER":tier,"SIGNAL_DATE":row.DATE,
+               "SIGNAL_CLOSE":float(row.CLOSE),"VOL_X":float(row.VOL_X),
+               "DIST_LOW_PCT":float(row.DIST_LOW_PCT),"CLOSE_LOC":float(row.CLOSE_LOC),
+               "MFI14":float(row.MFI14) if pd.notna(row.MFI14) else np.nan}
+          future=d.iloc[i+1:i+61]
+          for n in (20,40,60):
+            fw=future.head(n)
+            if len(fw)<n:
+              rec[f"FWD{n}_RET_PCT"]=np.nan; rec[f"FWD{n}_MAX_HIGH_PCT"]=np.nan
+              rec[f"FWD{n}_MIN_LOW_PCT"]=np.nan
+            else:
+              rec[f"FWD{n}_RET_PCT"]=(float(fw.iloc[-1].CLOSE)/rec["SIGNAL_CLOSE"]-1)*100
+              rec[f"FWD{n}_MAX_HIGH_PCT"]=(float(fw.HIGH.max())/rec["SIGNAL_CLOSE"]-1)*100
+              rec[f"FWD{n}_MIN_LOW_PCT"]=(float(fw.LOW.min())/rec["SIGNAL_CLOSE"]-1)*100
+          out.append(rec)
     return pd.DataFrame(out)
 
 def summarize(events: pd.DataFrame) -> pd.DataFrame:
