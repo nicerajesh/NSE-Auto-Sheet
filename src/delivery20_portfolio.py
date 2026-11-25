@@ -194,7 +194,7 @@ def run_delivery20_portfolio(
     open_positions = pd.DataFrame(open_rows)
 
     if not equity_curve.empty:
-        equity_curve["PEAK"] = equity_curve["EQUITY"].cummax()
+        equity_curve["PEAK"] = np.maximum(equity_curve["EQUITY"].cummax(), initial_capital)
         equity_curve["DRAWDOWN_PCT"] = (
             equity_curve["EQUITY"] / equity_curve["PEAK"] - 1
         ) * 100
@@ -234,6 +234,9 @@ def run_delivery20_portfolio(
         "total_entry_fees": round(total_entry_fees, 2),
         "total_exit_fees": round(total_exit_fees, 2),
         "total_fees": round(total_entry_fees + total_exit_fees, 2),
+        "max_gross_exposure_pct": round(float((equity_curve.GROSS_EXPOSURE / equity_curve.EQUITY.replace(0, np.nan)).max() * 100), 2) if not equity_curve.empty else 0.0,
+        "max_open_risk_pct": round(float((equity_curve.OPEN_RISK / equity_curve.EQUITY.replace(0, np.nan)).max() * 100), 2) if not equity_curve.empty else 0.0,
+        "average_gross_exposure_pct": round(float((equity_curve.GROSS_EXPOSURE / equity_curve.EQUITY.replace(0, np.nan)).mean() * 100), 2) if not equity_curve.empty else 0.0,
     }
 
     yearly_rows = []
