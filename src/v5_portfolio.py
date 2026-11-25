@@ -254,13 +254,15 @@ def run_portfolio_v5(
             ywin = float((ytrades.NET_PNL > 0).mean() * 100) if not ytrades.empty else np.nan
             yloss = -float(ytrades.loc[ytrades.NET_PNL < 0, "NET_PNL"].sum()) if not ytrades.empty else 0.0
             ywin_sum = float(ytrades.loc[ytrades.NET_PNL > 0, "NET_PNL"].sum()) if not ytrades.empty else 0.0
+            year_peak = g["EQUITY"].cummax().clip(lower=prev_equity)
+            year_dd = (g["EQUITY"] / year_peak - 1) * 100
             yearly_rows.append({
                 "YEAR": int(year), "START_EQUITY": round(prev_equity, 2),
                 "END_EQUITY": round(end_eq, 2),
                 "PORTFOLIO_RETURN_PCT": round((end_eq / prev_equity - 1) * 100, 2) if prev_equity else np.nan,
                 "TRADES_CLOSED": int(len(ytrades)), "WIN_PCT": round(ywin, 2) if np.isfinite(ywin) else np.nan,
                 "PROFIT_FACTOR": round(ywin_sum / yloss, 3) if yloss > 0 else (float("inf") if ywin_sum > 0 else np.nan),
-                "MAX_DRAWDOWN_WITHIN_YEAR_PCT": round(float(g.DRAWDOWN_PCT.min()), 2),
+                "MAX_DRAWDOWN_WITHIN_YEAR_PCT": round(float(year_dd.min()), 2),
             })
             prev_equity = end_eq
     yearly = pd.DataFrame(yearly_rows)
