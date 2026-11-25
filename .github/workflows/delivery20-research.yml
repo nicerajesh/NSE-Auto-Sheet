@@ -28,7 +28,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Restore NSE history cache
+      - name: Run full test suite\n        run: pytest -q\n      - name: Restore NSE history cache
         uses: actions/cache/restore@v4
         with:
           path: state
