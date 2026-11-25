@@ -86,4 +86,5 @@ else:
 yearly.to_csv(out / "delivery20_yearly.csv", index=False)
 print("DELIVERY20 EVENT-LEVEL SUMMARY", summary)
 print("ASOF", hist.DATE.max(), "SYMBOLS", hist.SYMBOL.nunique(), "CANDIDATES", len(latest))
-print("NOTE: event-level results are separate from the capital-constrained portfolio simulation.")\nprint("DELIVERY20 PORTFOLIO:", portfolio_summaries)
+print("NOTE: event-level results are separate from the capital-constrained portfolio simulation.")
+print("DELIVERY20 PORTFOLIO:", portfolio_summaries)
