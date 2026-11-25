@@ -22,7 +22,7 @@ Files:
 Outputs:
 - `delivery20_trades.csv`
 - `delivery20_latest_candidates.csv`
-- `delivery20_summary.csv`\n- `delivery20_yearly.csv` (year-by-year performance)
+- `delivery20_summary.csv`\n- `delivery20_yearly.csv` (year-by-year performance)\n- `delivery20_target_sensitivity.csv` (20%, 30%, 40% target comparison)
 
 ### Delivery 20 rules (research hypotheses, not guaranteed returns)
 - Trend: Close > EMA20 > EMA50 > EMA200, with EMA50 and EMA200 rising.
