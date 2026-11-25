@@ -21,7 +21,8 @@ def simulate_symbol(g:pd.DataFrame)->list[dict]:
    elif hi>=entry+2*risk:stop_now=max(stop_now,entry+risk)
    elif hi>=entry+risk:stop_now=max(stop_now,entry)
   if exit_i is None:
-   if i+1+CFG.max_hold<len(g):exit_i=i+CFG.max_hold; exit_px=float(g.CLOSE.iloc[exit_i]); why="TIME"
+   exit_i=i+CFG.max_hold
+   if exit_i<len(g):exit_px=float(g.CLOSE.iloc[exit_i]); why="TIME"
    else:continue
   ret=(exit_px/entry-1)*100-CFG.cost_pct; out.append({"SYMBOL":r.SYMBOL,"SIGNAL_DATE":r.DATE,"ENTRY_DATE":g.DATE.iloc[i+1],"EXIT_DATE":g.DATE.iloc[exit_i],"ENTRY":entry,"EXIT":exit_px,"RET_PCT":ret,"R":ret/((risk/entry)*100),"REASON":why,"SCORE":score}); active_until=exit_i
  return out
