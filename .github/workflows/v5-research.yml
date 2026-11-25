@@ -1,6 +1,15 @@
 name: RY APEX V5 Historical Research
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/v5_portfolio.py'
+      - 'src/v5_strategy.py'
+      - 'src/v5_backtest.py'
+      - 'src/run.py'
+      - 'tests/test_v5_portfolio.py'
+      - '.github/workflows/v5-research.yml'
   workflow_dispatch:
     inputs:
       rebuild_history:
