@@ -27,7 +27,11 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-      - run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run full test suite
+        run: pytest -q
+      - name: Restore NSE history cache
         uses: actions/cache/restore@v4
         with:
           path: state
@@ -43,5 +47,3 @@ jobs:
           path: output/delivery20_*.csv
           if-no-files-found: error
           retention-days: 30
-      - name: Run full test suite
-        run: pytest -q
