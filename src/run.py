@@ -54,7 +54,6 @@ def main(argv=None) -> int:
     ap.add_argument("--rebuild-history", action="store_true")
     ap.add_argument("--positions-csv", default=os.getenv("POSITIONS_CSV", ""), help="Sheet ke bina positions (testing)")
     ap.add_argument("--symbols", default="", help="comma list (testing); default Nifty 500")
-    ap.add_argument("--v5-research", action="store_true", help="Run isolated V5 historical research only; never publish or alter production signals")
     a = ap.parse_args(argv)
 
     OUT.mkdir(parents=True, exist_ok=True)
@@ -66,58 +65,6 @@ def main(argv=None) -> int:
     f = add_v42_features(f)
     asof = f["DATE"].max()
     print(f"DATA: {hist.SYMBOL.nunique()} symbols | {hist.DATE.nunique()} sessions | latest {asof:%Y-%m-%d}")
-
-    # Isolated V5 research path. Existing production engine and Google Sheet publishing
-    # remain untouched; all results are CSV artifacts for independent review.
-    if a.v5_research:
-        import v5_backtest as v5bt
-        from v5_strategy import add_v5_features, latest_v5_candidates
-        v5f = add_v5_features(f)
-        v5trades = v5bt.run_v5_backtest(v5f)
-        v5summary = v5bt.summarize_v5(v5trades)
-        v5yearly = v5bt.yearly_v5(v5trades)
-        v5latest = latest_v5_candidates(v5f)
-        from v5_portfolio import run_portfolio_v5
-        (v5p_trades, v5p_equity, v5p_yearly, v5p_open,
-         v5p_summary) = run_portfolio_v5(
-            v5f, initial_capital=CFG.capital,
-            risk_per_trade_pct=CFG.risk_per_trade_pct,
-            max_positions=CFG.max_positions,
-            max_position_pct=CFG.max_single_position_pct,
-            max_open_risk_pct=CFG.max_open_risk_pct,
-            max_new_per_day=CFG.max_new_per_day,
-            target_r=3.0, max_hold=60,
-            max_gap_pct=CFG.max_gap_pct,
-            min_turnover_cr=CFG.min_turnover_cr,
-            cost_pct=CFG.cost_pct,
-        )
-        v5p_trades.to_csv(OUT / "v5_portfolio_trades.csv", index=False)
-        v5p_equity.to_csv(OUT / "v5_portfolio_equity.csv", index=False)
-        v5p_yearly.to_csv(OUT / "v5_portfolio_yearly.csv", index=False)
-        v5p_open.to_csv(OUT / "v5_portfolio_open_positions.csv", index=False)
-        pd.DataFrame([{"METRIC": k, "VALUE": v} for k, v in v5p_summary.items()]).to_csv(
-            OUT / "v5_portfolio_summary.csv", index=False
-        )
-        v5trades.to_csv(OUT / "v5_backtest_trades.csv", index=False)
-        v5yearly.to_csv(OUT / "v5_backtest_by_year.csv", index=False)
-        v5latest.to_csv(OUT / "v5_latest_candidates.csv", index=False)
-        pd.DataFrame([{"METRIC": k, "VALUE": v} for k, v in v5summary.items()]).to_csv(
-            OUT / "v5_backtest_summary.csv", index=False
-        )
-        pd.DataFrame([{
-            "ASOF": asof, "SYMBOLS": hist.SYMBOL.nunique(), "SESSIONS": hist.DATE.nunique(),
-            "BENCHMARK_RS": "DISABLED - no verified NIFTY 500 series supplied",
-            "UNIVERSE_BIAS": "CURRENT NIFTY 500 universe; survivorship bias remains",
-            "DRAWDOWN_NOTE": "Event trade-sequence drawdown is not portfolio drawdown; see v5_portfolio_equity.csv for portfolio-level daily mark-to-market",
-            "PORTFOLIO_MODEL": f"Cash-account simulation; next-session open; {CFG.risk_per_trade_pct}% equity risk/trade; max {CFG.max_positions} positions; max {CFG.max_single_position_pct}% capital/position; max {CFG.max_open_risk_pct}% open risk; {CFG.cost_pct}% round-trip costs; stop-first daily bars",
-            "PORTFOLIO_SUMMARY": str(v5p_summary),
-            "DATA_MISSING_SYMBOLS": ", ".join(sorted(set(symbols) - set(hist.SYMBOL.unique()))) or "None",
-            "SURVIVORSHIP_BIAS": "CURRENT NIFTY 500 universe; historical membership and delisted names unavailable",
-        }]).to_csv(OUT / "v5_research_metadata.csv", index=False)
-        print(f"V5 EVENT RESEARCH | {v5summary} | latest candidates {len(v5latest)}")
-        print(f"V5 PORTFOLIO RESEARCH | {v5p_summary}")
-        print("V5 NOTE | Portfolio simulation remains a historical model, not a live BUY recommendation.")
-        return 0
 
     trades = bt.run_backtest(f)
     summ = bt.summarize(trades)
