@@ -89,21 +89,14 @@ def _one_symbol(d: pd.DataFrame) -> pd.DataFrame:
     macd = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
     hist = macd - macd.ewm(span=9, adjust=False).mean()
     d["V5_MACD_HIST"] = hist
-    # confirmed higher-low pivots
+    # Confirmed pivot events are causal: a low is marked only after 'right' bars.
+    # Vectorized last-two-pivot comparison avoids an O(n^2) scan per symbol.
     piv = _pivot_low_flags(l)
-    pivot_prices = l.where(piv).ffill()
-    prior_pivot = pivot_prices.groupby(piv.cumsum()).transform("first").shift(1)
-    # robustly compare last two confirmed pivots using rolling event values
-    piv_vals = l.where(piv)
-    last_vals = piv_vals.ffill()
-    second_vals = piv_vals.ffill().where(piv_vals.notna()).ffill()
-    pivot_count = piv.cumsum()
-    previous_pivot = pd.Series(np.nan, index=d.index)
-    for j in range(len(d)):
-        ix = np.flatnonzero(piv.to_numpy()[:j+1])
-        if len(ix) >= 2:
-            previous_pivot.iloc[j] = l.iloc[ix[-2]]
-    higher_low = last_vals > previous_pivot
+    pivot_event = l.where(piv)
+    last_pivot = pivot_event.ffill()
+    pivot_group = piv.cumsum()
+    previous_pivot = last_pivot.shift(1).groupby(pivot_group).transform("first")
+    higher_low = last_pivot > previous_pivot
 
     d["V5_TREND"] = trend
     d["V5_HIGHER_LOW"] = higher_low
