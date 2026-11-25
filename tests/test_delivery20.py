@@ -38,7 +38,7 @@ def test_recent_unfinished_trade_is_not_counted_as_closed():
         "OPEN": [100, 100, 105], "HIGH": [101, 110, 112],
         "LOW": [99, 98, 103], "CLOSE": [100, 105, 110],
         "D20_BUY": [True, False, False], "D20_STOP": [90] * 3,
-        "D20_TARGET": [120] * 3, "D20_RISK_PCT": [10] * 3, "D20_SCORE": [90] * 3,
+        "D20_TARGET": [120] * 3, "D20_RISK_PCT": [10] * 3, "MOM_RANK": [95] * 3,
     })
     trades = backtest_delivery20(d, cost_pct=0.35, max_hold=120)
     summary = summarize_delivery20(trades)
