@@ -71,7 +71,7 @@ def run_portfolio_v5(
     max_concurrent = 0
     total_entry_fees = 0.0
     total_exit_fees = 0.0
-    dates = sorted(pd.Timestamp(x).normalize() for x in f["DATE"].unique())
+    dates = pd.DatetimeIndex(f["DATE"].drop_duplicates().sort_values())
 
     def mark_equity(rows):
         value = cash
@@ -104,9 +104,9 @@ def run_portfolio_v5(
         })
         last_exit_date[sym] = date
 
-    for date in dates:
-        day = f[f["DATE"] == date][["SYMBOL", "OPEN", "HIGH", "LOW", "CLOSE"]]
-        rows = day.set_index("SYMBOL").to_dict("index")
+    for date_raw, day_group in f.groupby("DATE", sort=True):
+        date = pd.Timestamp(date_raw).normalize()
+        rows = day_group[["SYMBOL", "OPEN", "HIGH", "LOW", "CLOSE"]].set_index("SYMBOL").to_dict("index")
 
         # Existing positions: conservative stop-first daily-bar execution.
         for sym in list(positions):
