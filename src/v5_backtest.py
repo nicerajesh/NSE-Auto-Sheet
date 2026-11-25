@@ -52,7 +52,7 @@ def _trade_result(d, si, ei, xi, fill, exit_px, risk, reason, cost_pct):
         "EXIT_DATE": pd.Timestamp(d.iloc[xi]["DATE"]),
         "ENTRY": fill, "EXIT": exit_px, "STOP": fill - risk,
         "R": net / (risk / fill * 100), "RET_PCT": net,
-        "HOLD": xi - ei + 1, "REASON": reason,
+        "HOLD": xi - ei + 1, "REASON": reason, "_EXIT_INDEX": xi,
     }
 
 
@@ -79,11 +79,11 @@ def run_v5_backtest(features: pd.DataFrame, start="2019-01-01", target_r=3.0,
             trade = simulate_v5_trade(d, int(i), stop, target_r, max_hold, cost_pct, max_gap_pct)
             if trade is None:
                 continue
+            last_exit = int(trade.pop("_EXIT_INDEX")) + cooldown
             trade["SYMBOL"] = symbol
             trade["SETUP"] = d.iloc[i].get("V5_SETUP", "V5")
             trade["V5_SCORE"] = float(d.iloc[i]["V5_SCORE"])
             rows.append(trade)
-            last_exit = int(i) + cooldown
     cols = ["SYMBOL", "SIGNAL_DATE", "ENTRY_DATE", "EXIT_DATE", "ENTRY", "EXIT",
             "STOP", "RET_PCT", "R", "HOLD", "REASON", "SETUP", "V5_SCORE"]
     out = pd.DataFrame(rows, columns=cols)
