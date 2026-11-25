@@ -17,12 +17,18 @@ symbols = dt.fetch_universe()
 hist = dt.load_history(state / "history.csv.gz", symbols)
 base = add_features(hist)
 research = add_delivery20_signals(base)
-trades = backtest_delivery20(research)
+trades = backtest_delivery20(research, target_pct=20.0)
 latest = research[research.DATE == research.DATE.max()].copy()
-latest = latest[latest.D20_BUY].sort_values(["D20_SCORE", "MOM_RANK"], ascending=False)
+latest = latest[latest.D20_BUY].sort_values("MOM_RANK", ascending=False)
 trades.to_csv(out / "delivery20_trades.csv", index=False)
 latest.to_csv(out / "delivery20_latest_candidates.csv", index=False)
 summary = summarize_delivery20(trades)
+sensitivity_rows = []
+for target_pct in (20.0, 30.0, 40.0):
+    target_trades = trades if target_pct == 20.0 else backtest_delivery20(research, target_pct=target_pct)
+    target_summary = summarize_delivery20(target_trades)
+    sensitivity_rows.append({"TARGET_PCT": target_pct, **target_summary})
+pd.DataFrame(sensitivity_rows).to_csv(out / "delivery20_target_sensitivity.csv", index=False)
 pd.DataFrame([{"METRIC": k, "VALUE": v} for k, v in summary.items()]).to_csv(
     out / "delivery20_summary.csv", index=False
 )
