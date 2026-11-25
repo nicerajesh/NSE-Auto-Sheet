@@ -88,7 +88,8 @@ def backtest_delivery20(f: pd.DataFrame, cost_pct: float = 0.35,
                     exit_i, exit_px, reason = j, max(op, target), "TARGET_20"
                     break
             if exit_i is None:
-                exit_i, exit_px, reason = last, float(d.iloc[last].CLOSE), "TIME_EXIT"
+                exit_i, exit_px = last, float(d.iloc[last].CLOSE)
+                reason = "TIME_EXIT" if i + max_hold < len(d) else "OPEN"
             gross = (exit_px / entry - 1) * 100
             net = gross - cost_pct
             trades.append({
@@ -108,15 +109,17 @@ def summarize_delivery20(trades: pd.DataFrame) -> dict:
     if trades.empty:
         return {"trades": 0, "win_rate_pct": 0.0, "target_hit_pct": 0.0,
                 "profit_factor": 0.0, "avg_net_return_pct": 0.0}
-    wins = trades.loc[trades.NET_RETURN_PCT > 0, "NET_RETURN_PCT"].sum()
-    losses = -trades.loc[trades.NET_RETURN_PCT < 0, "NET_RETURN_PCT"].sum()
+    closed = trades[trades.REASON != "OPEN"]
+    wins = closed.loc[closed.NET_RETURN_PCT > 0, "NET_RETURN_PCT"].sum()
+    losses = -closed.loc[closed.NET_RETURN_PCT < 0, "NET_RETURN_PCT"].sum()
     return {
-        "trades": int(len(trades)),
-        "win_rate_pct": round(float((trades.NET_RETURN_PCT > 0).mean() * 100), 2),
-        "target_hit_pct": round(float((trades.REASON == "TARGET_20").mean() * 100), 2),
+        "trades": int(len(closed)),
+        "open_positions": int((trades.REASON == "OPEN").sum()),
+        "win_rate_pct": round(float((closed.NET_RETURN_PCT > 0).mean() * 100), 2) if not closed.empty else 0.0,
+        "target_hit_pct": round(float((closed.REASON == "TARGET_20").mean() * 100), 2) if not closed.empty else 0.0,
         "profit_factor": round(float(wins / losses), 3) if losses else (float("inf") if wins else 0.0),
-        "avg_net_return_pct": round(float(trades.NET_RETURN_PCT.mean()), 3),
-        "median_net_return_pct": round(float(trades.NET_RETURN_PCT.median()), 3),
-        "stop_pct": round(float((trades.REASON == "STOP").mean() * 100), 2),
-        "time_exit_pct": round(float((trades.REASON == "TIME_EXIT").mean() * 100), 2),
+        "avg_net_return_pct": round(float(closed.NET_RETURN_PCT.mean()), 3) if not closed.empty else 0.0,
+        "median_net_return_pct": round(float(closed.NET_RETURN_PCT.median()), 3) if not closed.empty else 0.0,
+        "stop_pct": round(float((closed.REASON == "STOP").mean() * 100), 2) if not closed.empty else 0.0,
+        "time_exit_pct": round(float((closed.REASON == "TIME_EXIT").mean() * 100), 2) if not closed.empty else 0.0,
     }
