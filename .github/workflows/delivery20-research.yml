@@ -1,6 +1,8 @@
 name: RY Delivery 20 Percent Research
 
 on:
+  schedule:
+    - cron: '15 15 * * 1-5' # 21:00 IST weekdays, after daily pipeline
   push:
     branches: [main]
     paths:
