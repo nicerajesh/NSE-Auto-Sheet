@@ -6,7 +6,9 @@ on:
     paths:
       - 'src/delivery20.py'
       - 'src/delivery20_run.py'
+      - 'src/delivery20_portfolio.py'
       - 'tests/test_delivery20.py'
+      - 'tests/test_delivery20_portfolio.py'
       - '.github/workflows/delivery20-research.yml'
   workflow_dispatch:
 
