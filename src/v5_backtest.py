@@ -34,7 +34,7 @@ def simulate_v5_trade(d: pd.DataFrame, signal_idx: int, stop: float,
             exit_px, reason = min(float(row["OPEN"]), stop), "STOP"
             return _trade_result(d, signal_idx, entry_idx, j, fill, exit_px, risk, reason, cost_pct)
         if float(row["HIGH"]) >= target:
-            exit_px, reason = max(float(row["OPEN"]), target), "TARGET_3R"
+            exit_px, reason = max(float(row["OPEN"]), target), f"TARGET_{target_r:g}R"
             return _trade_result(d, signal_idx, entry_idx, j, fill, exit_px, risk, reason, cost_pct)
     if entry_idx + max_hold <= len(d):
         j = end - 1
@@ -73,7 +73,9 @@ def run_v5_backtest(features: pd.DataFrame, start="2019-01-01", target_r=3.0,
             if i <= last_exit or i + 1 >= len(d):
                 continue
             close, atr = float(d.iloc[i]["CLOSE"]), float(d.iloc[i]["ATR"])
-            stop = close - 2.0 * atr
+            # Use the exact stop that qualified the V5 signal; do not backtest
+            # a different ATR-only stop than the one shown to the user.
+            stop = float(d.iloc[i]["V5_STOP"]) if "V5_STOP" in d.columns else close - 2.0 * atr
             if not np.isfinite(stop) or stop <= 0 or stop >= close:
                 continue
             trade = simulate_v5_trade(d, int(i), stop, target_r, max_hold, cost_pct, max_gap_pct)
