@@ -145,7 +145,7 @@ def run_delivery20_portfolio(
                 risk_budget / risk_per_share,
                 risk_room / risk_per_share,
                 position_cap / op,
-                qty_capital / op,
+                qty_capital,
             ))))
             if qty < 1:
                 continue
