@@ -97,7 +97,8 @@ if not watch and buys.empty:
     rows.append(["", "NO VALID WATCHLIST DATA"] + [""] * 17)
 
 
-# Separate 52-week-low + heavy-volume monitor. This is a reversal watch,
+# Separate 52-week-low + heavy-volume monitor. Includes OBV, MFI and candle-location diagnostics.
+# These are transparent accumulation/distribution clues, not institutional-flow proof.
 # not a BUY signal: high volume near lows can mean accumulation OR distribution.
 low_volume_rows = [
     [f"RY 52-WEEK LOW + HEAVY VOLUME | Data: {asof:%d-%b-%Y}"],
