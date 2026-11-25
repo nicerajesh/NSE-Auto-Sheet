@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: nse-v5-research-portfolio
+  group: nse-v5-research-streamed
   cancel-in-progress: false
 
 jobs:
