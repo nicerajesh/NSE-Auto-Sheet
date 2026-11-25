@@ -48,7 +48,7 @@ for target_pct in (20.0, 30.0, 40.0):
         p_yearly.insert(0, "TARGET_PCT", target_pct)
         portfolio_years.append(p_yearly)
     if not p_trades.empty:
-        p_trades.insert(0, "TARGET_PCT", target_pct)
+        # The portfolio simulator already writes TARGET_PCT on every trade row.
         portfolio_trades.append(p_trades)
     if not p_equity.empty:
         p_equity.insert(0, "TARGET_PCT", target_pct)
