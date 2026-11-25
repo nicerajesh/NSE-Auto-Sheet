@@ -96,8 +96,52 @@ for item in watch:
 if not watch and buys.empty:
     rows.append(["", "NO VALID WATCHLIST DATA"] + [""] * 17)
 
+
+# Separate 52-week-low + heavy-volume monitor. This is a reversal watch,
+# not a BUY signal: high volume near lows can mean accumulation OR distribution.
+low_volume_rows = [
+    [f"RY 52-WEEK LOW + HEAVY VOLUME | Data: {asof:%d-%b-%Y}"],
+    ["Purpose: identify stocks near their 252-session low with unusually high volume; NOT a BUY recommendation."],
+    ["Rule: close within 10% of rolling 252-session lowest LOW; volume ratio >= 1.5x; at least 200 sessions of history."],
+    ["Review price action/support and company news separately. High volume near lows can mean accumulation OR distribution."],
+    ["STOCK", "CLOSE", "52W LOW", "DISTANCE FROM 52W LOW %", "VOLUME", "20D AVG VOLUME", "VOLUME RATIO", "DAY CHANGE %", "AVG TURNOVER Cr", "ADX", "DATA DATE"]
+]
+low_candidates = []
+for symbol, raw in signals.groupby("SYMBOL", sort=False):
+    d = raw.sort_values("DATE")
+    if pd.Timestamp(d.iloc[-1]["DATE"]) != asof or len(d) < 200:
+        continue
+    r = d.iloc[-1]
+    low_52 = float(d["LOW"].tail(252).min())
+    close = float(r["CLOSE"])
+    vol_ratio = float(r["VOL_RATIO"])
+    distance = (close / low_52 - 1.0) * 100 if low_52 > 0 else float("inf")
+    if 0 <= distance <= 10 and vol_ratio >= 1.5:
+        prev_close = float(d.iloc[-2]["CLOSE"]) if len(d) > 1 else close
+        day_change = (close / prev_close - 1.0) * 100 if prev_close else 0.0
+        avg_vol = float(r["VOLUME"]) / vol_ratio if vol_ratio > 0 else 0.0
+        low_candidates.append({
+            "symbol": symbol, "close": close, "low": low_52,
+            "distance": distance, "volume": float(r["VOLUME"]),
+            "avg_volume": avg_vol, "vol_ratio": vol_ratio,
+            "day_change": day_change, "turnover": float(r["TURNOVER_CR"]),
+            "adx": float(r["ADX"])
+        })
+low_candidates.sort(key=lambda x: (x["vol_ratio"], -x["distance"]), reverse=True)
+for x in low_candidates:
+    low_volume_rows.append([
+        x["symbol"], x["close"], x["low"], round(x["distance"], 2),
+        x["volume"], round(x["avg_volume"]), round(x["vol_ratio"], 2),
+        round(x["day_change"], 2), round(x["turnover"], 2), round(x["adx"], 2),
+        asof.strftime("%d-%b-%Y")
+    ])
+if not low_candidates:
+    low_volume_rows.append(["", "NO STOCK MATCHED TODAY"] + [""] * 9)
+
 book = pb.open_book()
 if book is None:
     raise RuntimeError("Google Sheets publish skipped: GCP_CREDENTIALS missing or invalid")
 pb._write_tab(book, "DELIVERY20", rows, {"title": [0, 1, 2, 3, 4], "header": [5]})
+pb._write_tab(book, "52W LOW VOLUME", low_volume_rows, {"title": [0, 1, 2, 3], "header": [4]})
 print(f"PUBLISHED DELIVERY20: {len(buys)} research BUY candidates | {len(watch)} watchlist names | {asof:%Y-%m-%d}")
+print(f"PUBLISHED 52W LOW VOLUME: {len(low_candidates)} candidates | {asof:%Y-%m-%d}")
