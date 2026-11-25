@@ -54,6 +54,7 @@ def main(argv=None) -> int:
     ap.add_argument("--rebuild-history", action="store_true")
     ap.add_argument("--positions-csv", default=os.getenv("POSITIONS_CSV", ""), help="Sheet ke bina positions (testing)")
     ap.add_argument("--symbols", default="", help="comma list (testing); default Nifty 500")
+    ap.add_argument("--v5-research", action="store_true", help="Run isolated V5 historical research only; never publish or alter production signals")
     a = ap.parse_args(argv)
 
     OUT.mkdir(parents=True, exist_ok=True)
@@ -65,6 +66,32 @@ def main(argv=None) -> int:
     f = add_v42_features(f)
     asof = f["DATE"].max()
     print(f"DATA: {hist.SYMBOL.nunique()} symbols | {hist.DATE.nunique()} sessions | latest {asof:%Y-%m-%d}")
+
+    # Isolated V5 research path. Existing production engine and Google Sheet publishing
+    # remain untouched; all results are CSV artifacts for independent review.
+    if a.v5_research:
+        import v5_backtest as v5bt
+        from v5_strategy import add_v5_features, latest_v5_candidates
+        v5f = add_v5_features(f)
+        v5trades = v5bt.run_v5_backtest(v5f)
+        v5summary = v5bt.summarize_v5(v5trades)
+        v5yearly = v5bt.yearly_v5(v5trades)
+        v5latest = latest_v5_candidates(v5f)
+        v5trades.to_csv(OUT / "v5_backtest_trades.csv", index=False)
+        v5yearly.to_csv(OUT / "v5_backtest_by_year.csv", index=False)
+        v5latest.to_csv(OUT / "v5_latest_candidates.csv", index=False)
+        pd.DataFrame([{"METRIC": k, "VALUE": v} for k, v in v5summary.items()]).to_csv(
+            OUT / "v5_backtest_summary.csv", index=False
+        )
+        pd.DataFrame([{
+            "ASOF": asof, "SYMBOLS": hist.SYMBOL.nunique(), "SESSIONS": hist.DATE.nunique(),
+            "BENCHMARK_RS": "DISABLED - no verified NIFTY 500 series supplied",
+            "UNIVERSE_BIAS": "CURRENT NIFTY 500 universe; survivorship bias remains",
+            "DRAWDOWN_NOTE": "Trade-sequence illustration only; not portfolio drawdown",
+        }]).to_csv(OUT / "v5_research_metadata.csv", index=False)
+        print(f"V5 RESEARCH | {v5summary} | latest candidates {len(v5latest)}")
+        print("V5 NOTE | Event-level research only; not portfolio simulation or a live BUY recommendation.")
+        return 0
 
     trades = bt.run_backtest(f)
     summ = bt.summarize(trades)
