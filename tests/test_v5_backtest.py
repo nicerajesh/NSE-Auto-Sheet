@@ -17,7 +17,7 @@ def test_next_session_entry_and_target_exit():
     d = bars()
     trade = simulate_v5_trade(d, 0, 99, target_r=2, cost_pct=0)
     assert trade["ENTRY"] == 101
-    assert trade["REASON"] == "TARGET_3R"
+    assert trade["REASON"] == "TARGET_2R"
     assert trade["EXIT"] == 105
 
 
