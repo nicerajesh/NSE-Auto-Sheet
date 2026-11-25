@@ -46,3 +46,19 @@ def test_recent_unfinished_trade_is_not_counted_as_closed():
     assert trades.iloc[0].REASON == "OPEN"
     assert summary["trades"] == 0
     assert summary["open_positions"] == 1
+
+
+def test_delivery20_target_is_configurable():
+    dates = pd.bdate_range("2025-01-01", periods=3)
+    d = pd.DataFrame({
+        "SYMBOL": ["AAA"] * 3, "DATE": dates,
+        "OPEN": [100, 100, 100], "HIGH": [101, 135, 110],
+        "LOW": [99, 99, 99], "CLOSE": [100, 130, 105],
+        "D20_BUY": [True, False, False], "D20_STOP": [90] * 3,
+        "D20_TARGET": [120] * 3, "D20_RISK_PCT": [10] * 3,
+        "MOM_RANK": [95] * 3,
+    })
+    trades = backtest_delivery20(d, cost_pct=0.35, target_pct=30)
+    assert len(trades) == 1
+    assert trades.iloc[0].REASON == "TARGET_30"
+    assert round(trades.iloc[0].NET_RETURN_PCT, 2) == 29.65
