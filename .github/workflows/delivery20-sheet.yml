@@ -9,6 +9,7 @@ on:
     paths:
       - 'src/delivery20_publish.py'
       - 'src/delivery20.py'
+      - 'src/volume_reversal_backtest.py'
       - 'src/pit_universe.py'
       - '.github/workflows/delivery20-sheet.yml'
 
@@ -39,6 +40,14 @@ jobs:
             nse-state-v2-
       - name: Run tests
         run: python -m pytest -q tests
+      - name: Backtest 52-week-low volume reversal tiers
+        run: python src/volume_reversal_backtest.py --state state/history.csv.gz --out artifacts/52w_volume_backtest
+      - name: Upload 52-week-low backtest results
+        uses: actions/upload-artifact@v4
+        with:
+          name: 52w-volume-reversal-backtest
+          path: artifacts/52w_volume_backtest/
+          retention-days: 30
       - name: Publish separate DELIVERY20 research tab
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
