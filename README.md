@@ -24,7 +24,9 @@ Outputs:
 - `delivery20_latest_candidates.csv`
 - `delivery20_summary.csv`
 - `delivery20_yearly.csv` (year-by-year performance)
-- `delivery20_target_sensitivity.csv` (20%, 30%, 40% target comparison)
+- `delivery20_target_sensitivity.csv` (20%, 30%, 40% event-level target comparison)
+- `delivery20_portfolio_summary.csv` and `delivery20_portfolio_yearly.csv` (capital-constrained results)
+- `delivery20_portfolio_trades.csv`, `delivery20_portfolio_equity.csv`, `delivery20_portfolio_open_positions.csv`
 
 ### Delivery 20 rules (research hypotheses, not guaranteed returns)
 - Trend: Close > EMA20 > EMA50 > EMA200, with EMA50 and EMA200 rising.
@@ -37,7 +39,7 @@ Outputs:
 - Conservative daily-bar simulation: stop is checked before target if both are touched.
 - Estimated round-trip costs: 0.35%; maximum holding period: 120 sessions.
 
-A 20% target is an objective, **not a promise**. Backtest outputs must be reviewed for sample size, profit factor, stop rate, drawdown, recent-year performance, data quality and survivorship bias before paper trading. No live order execution is implemented by this research module.
+A 20% target is an objective, **not a promise**. The portfolio model assumes ₹5 lakh capital, 0.5% equity risk per trade, at most 10 positions, 10% capital per stock, 5% total planned open risk, 3 new entries/day and 0.35% round-trip costs. Backtest outputs must be reviewed for sample size, profit factor, stop rate, portfolio drawdown, recent-year performance, data quality and survivorship bias before paper trading. No live order execution is implemented by this research module.
 
 ## Run manually
 
