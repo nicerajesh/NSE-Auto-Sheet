@@ -80,7 +80,7 @@ def backtest_delivery20(f: pd.DataFrame, cost_pct: float = 0.35,
                     exit_i, exit_px, reason = j, min(op, stop), "STOP"
                     break
                 if hi >= target:
-                    exit_i, exit_px, reason = j, max(op, target), "TARGET_20"
+                    exit_i, exit_px, reason = j, max(op, target), f"TARGET_{target_pct:g}"
                     break
             if exit_i is None:
                 exit_i, exit_px = last, float(d.iloc[last].CLOSE)
