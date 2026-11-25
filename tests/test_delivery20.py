@@ -9,7 +9,7 @@ def test_delivery20_target_and_stop_first():
         "OPEN": [100, 100, 100, 100], "HIGH": [101, 125, 110, 110],
         "LOW": [99, 99, 99, 99], "CLOSE": [100, 120, 105, 105],
         "D20_BUY": [True, False, False, False], "D20_STOP": [90] * 4,
-        "D20_TARGET": [120] * 4, "D20_RISK_PCT": [10] * 4, "D20_SCORE": [90] * 4,
+        "D20_TARGET": [120] * 4, "D20_RISK_PCT": [10] * 4, "MOM_RANK": [95] * 4,
     })
     trades = backtest_delivery20(d, cost_pct=0.35)
     assert len(trades) == 1
@@ -25,7 +25,7 @@ def test_delivery20_stop_first_if_both_touch():
         "OPEN": [100, 100, 100], "HIGH": [101, 125, 110],
         "LOW": [99, 85, 99], "CLOSE": [100, 110, 105],
         "D20_BUY": [True, False, False], "D20_STOP": [90] * 3,
-        "D20_TARGET": [120] * 3, "D20_RISK_PCT": [10] * 3, "D20_SCORE": [90] * 3,
+        "D20_TARGET": [120] * 3, "D20_RISK_PCT": [10] * 3, "MOM_RANK": [95] * 3,
     })
     trades = backtest_delivery20(d, cost_pct=0)
     assert trades.iloc[0].REASON == "STOP"
