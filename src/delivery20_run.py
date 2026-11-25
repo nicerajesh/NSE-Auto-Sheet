@@ -47,4 +47,5 @@ else:
                                    "PROFIT_FACTOR", "AVG_NET_RETURN_PCT", "COMPOUNDED_EVENT_RETURN_PCT"])
 yearly.to_csv(out / "delivery20_yearly.csv", index=False)
 print("DELIVERY20 EVENT-LEVEL SUMMARY", summary)
-print("ASOF", hist.DATE.max(), "SYMBOLS", hist.SYMBOL.nunique(), "CANDIDATES", len(latest))\nprint("NOTE: event-level results; overlapping stocks are not capital-constrained portfolio returns.")
+print("ASOF", hist.DATE.max(), "SYMBOLS", hist.SYMBOL.nunique(), "CANDIDATES", len(latest))
+print("NOTE: event-level results; overlapping stocks are not capital-constrained portfolio returns.")
