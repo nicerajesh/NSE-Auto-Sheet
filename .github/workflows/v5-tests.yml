@@ -1,6 +1,8 @@
 name: RY APEX V5 Strategy Tests
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
