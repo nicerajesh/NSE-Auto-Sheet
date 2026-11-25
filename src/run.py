@@ -109,9 +109,9 @@ def main(argv=None) -> int:
             "BENCHMARK_RS": "DISABLED - no verified NIFTY 500 series supplied",
             "UNIVERSE_BIAS": "CURRENT NIFTY 500 universe; survivorship bias remains",
             "DRAWDOWN_NOTE": "Event trade-sequence drawdown is not portfolio drawdown; see v5_portfolio_equity.csv for portfolio-level daily mark-to-market",
-            "PORTFOLIO_MODEL": "Cash-account simulation; next-session open; 0.5% equity risk/trade; max 12 positions; max 15% capital/position; max 6% open risk; 0.35% round-trip costs; stop-first daily bars",
+            "PORTFOLIO_MODEL": f"Cash-account simulation; next-session open; {CFG.risk_per_trade_pct}% equity risk/trade; max {CFG.max_positions} positions; max {CFG.max_single_position_pct}% capital/position; max {CFG.max_open_risk_pct}% open risk; {CFG.cost_pct}% round-trip costs; stop-first daily bars",
             "PORTFOLIO_SUMMARY": str(v5p_summary),
-            "DATA_MISSING_SYMBOLS": "4 symbols missing from historical bootstrap; names not emitted by source loader",
+            "DATA_MISSING_SYMBOLS": ", ".join(sorted(set(symbols) - set(hist.SYMBOL.unique()))) or "None",
             "SURVIVORSHIP_BIAS": "CURRENT NIFTY 500 universe; historical membership and delisted names unavailable",
         }]).to_csv(OUT / "v5_research_metadata.csv", index=False)
         print(f"V5 EVENT RESEARCH | {v5summary} | latest candidates {len(v5latest)}")
