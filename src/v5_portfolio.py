@@ -210,7 +210,7 @@ def run_portfolio_v5(
 
     eq = pd.DataFrame(equity_rows)
     if not eq.empty:
-        eq["PEAK"] = eq["EQUITY"].cummax()
+        eq["PEAK"] = eq["EQUITY"].cummax().clip(lower=initial_capital)
         eq["DRAWDOWN_PCT"] = (eq["EQUITY"] / eq["PEAK"] - 1) * 100
         eq["DAILY_RETURN_PCT"] = eq["EQUITY"].pct_change().fillna(0) * 100
     t = pd.DataFrame(trades)
