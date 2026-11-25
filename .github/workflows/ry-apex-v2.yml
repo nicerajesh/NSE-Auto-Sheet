@@ -1,0 +1,38 @@
+name: RY APEX V2 Research Scanner
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 15 * * 1-5'
+permissions:
+  contents: read
+concurrency:
+  group: ry-apex-v2
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-v2.txt
+      - uses: actions/cache@v4
+        with:
+          path: state_v2
+          key: ry-v2-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ry-v2-${{ runner.os }}-
+      - run: pip install -r requirements-v2.txt
+      - run: python -m pytest -q tests_v2
+      - run: python -m ry_apex_v2.run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ry-apex-v2-research
+          path: |
+            output_v2/*.csv
+            output_v2/*.json
+          if-no-files-found: error
+          retention-days: 30
