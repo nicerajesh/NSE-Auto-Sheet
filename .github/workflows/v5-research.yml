@@ -8,6 +8,7 @@ on:
       - 'src/v5_strategy.py'
       - 'src/v5_backtest.py'
       - 'src/run.py'
+      - 'src/data.py'
       - 'tests/test_v5_portfolio.py'
       - '.github/workflows/v5-research.yml'
   workflow_dispatch:
@@ -49,6 +50,13 @@ jobs:
 
       - name: Run isolated V5 historical research
         run: python src/run.py --v5-research --no-publish ${{ inputs.rebuild_history && '--rebuild-history' || '' }}
+
+      - name: Save refreshed NSE history cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: nse-state-v2-${{ github.run_id }}
 
       - name: Upload V5 research outputs
         if: always()
