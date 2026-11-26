@@ -27,6 +27,27 @@ The previous 2.1.0 run used daily close signals, next-session open entries, shar
 
 Important: although the all-period portfolio simulation was positive, the recent 2025+ event holdout was negative (PF 0.867, expectancy -0.602%, 304 events). The live BUY gate therefore remained **false** and allocated BUYs were zero. This is why the all-period return is not sufficient to approve the strategy.
 
+## Exact rules recovered for the two leading independent models
+
+These are copied from the independent strategy lab implementation, not reconstructed guesses:
+
+- **M — Momentum Rotation:** 63-session return ranked cross-sectionally on each signal date; rank must be at least the 85th percentile; close above EMA50; EMA50 above EMA200; close above the prior 20-session high; volume divided by its 20-session average at least 1.1.
+- **J — Donchian Trend:** close above EMA200; EMA50 above EMA200; close above the prior 55-session high; volume divided by its 20-session average at least 1.3; close location within the daily range at least 0.65.
+- Both models use a 15-calendar-day per-symbol signal cooldown. Signal is calculated after the completed close; entry is next session OPEN; event exits are the 10th, 20th or 40th future session CLOSE; 0.35% round-trip cost is deducted. There is no stop-loss or portfolio sizing rule in this independent event-test code.
+
+### 40-session event holdout results
+
+| Period | Strategy | Events | Win rate | Average net return | Profit factor |
+|---|---|---:|---:|---:|---:|
+| 2018–2022 train | M Momentum Rotation | 2,043 | 54.87% | +5.909% | 2.077 |
+| 2018–2022 train | J Donchian Trend | 2,978 | 53.96% | +4.767% | 1.909 |
+| 2023–2024 validation | M Momentum Rotation | 1,433 | 62.25% | +8.618% | 3.230 |
+| 2023–2024 validation | J Donchian Trend | 2,624 | 62.16% | +7.273% | 3.116 |
+| 2025+ holdout | M Momentum Rotation | 1,148 | 51.39% | +1.735% | 1.330 |
+| 2025+ holdout | J Donchian Trend | 1,304 | 46.55% | +0.751% | 1.146 |
+
+These are overlapping event returns, not portfolio returns. The very high 2023–24 validation results and current-universe survivorship bias require caution. The 2025+ holdout is more recent and is positive for M/J, but does not establish investable portfolio performance.
+
 ## Research limitations
 - The equity universe is the current 497-symbol history universe; historical point-in-time index constituents are not available. Survivorship bias is possible.
 - Momentum ranks are cross-sectional ranks within the available universe. A true Nifty 50/Nifty 500 benchmark-relative strength series still needs a clean index total-return history.
