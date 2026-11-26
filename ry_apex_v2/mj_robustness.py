@@ -103,8 +103,13 @@ def _simulate(history: pd.DataFrame, signals: pd.DataFrame, strategy: str,
                 })
                 del positions[sym]
 
-        equity = cash + sum(p["qty"] * float(today.loc[sym].CLOSE)
-                            for sym, p in positions.items() if sym in today.index)
+        # Mark open positions net of their full round-trip cost reserve so
+        # unrealized equity and drawdown are comparable with realized trades.
+        equity = cash + sum(
+            p["qty"] * float(today.loc[sym].CLOSE)
+            - p["entry"] * p["qty"] * cost_pct / 100.0
+            for sym, p in positions.items() if sym in today.index
+        )
         curve.append({"date": day, "equity": equity})
         pending = by_signal.get(day, pd.DataFrame()).copy()
 
