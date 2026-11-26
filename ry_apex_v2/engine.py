@@ -39,6 +39,30 @@ def score_row(r:pd.Series)->tuple[int,str,str]:
  if pts>=CFG.buy_score:return int(pts),"APEX BUY",setup
  if pts>=CFG.watch_score:return int(pts),"WATCH",setup
  return int(pts),"REJECT","QUALITY SCORE TOO LOW"
+def score_relative_strength_row(r:pd.Series)->tuple[int,str,str]:
+    """Market-regime-tolerant leadership score; rank is cross-sectional and date-local."""
+    keys=["CLOSE","EMA20","EMA50","ATR_PCT","ADX14","MOM_RANK","RS_RANK","ROC126","TURNOVER_CR","VOL_RATIO","BREADTH50","BREADTH200"]
+    if not np.isfinite([float(r[k]) for k in keys]).all(): return 0,"WATCH","INSUFFICIENT DATA"
+    c=float(r.CLOSE); atrp=float(r.ATR_PCT)
+    rs=float(r.RS_RANK); mom=float(r.MOM_RANK); roc=float(r.ROC126)
+    trend=(c>float(r.EMA50)) and bool(r.EMA50_RISING)
+    setup=bool(r.BREAKOUT) or bool(r.PULLBACK)
+    score=0
+    score+=25 if rs>=95 else (20 if rs>=90 else (15 if rs>=85 else 0))
+    score+=20 if mom>=90 else (15 if mom>=85 else (10 if mom>=80 else 0))
+    score+=15 if trend else 0
+    score+=10 if roc>15 else (7 if roc>5 else (4 if roc>0 else 0))
+    score+=10 if float(r.ADX14)>=25 else (6 if float(r.ADX14)>=18 else 0)
+    score+=10 if bool(r.BREAKOUT) else (7 if bool(r.PULLBACK) else 0)
+    score+=5 if 1.2<=float(r.VOL_RATIO)<=5 else 0
+    score+=5 if 1.0<=atrp<=7.0 else 0
+    if float(r.TURNOVER_CR)<CFG.min_turnover_cr: return int(score),"REJECT","LOW LIQUIDITY"
+    if not 1.0<=atrp<=7.0: return int(score),"REJECT","ATR RISK FILTER"
+    if not trend or not setup or roc<=0: return int(score),"WATCH","NO RELATIVE-STRENGTH TRIGGER"
+    if rs<85 or mom<80 or float(r.ADX14)<18: return int(score),"WATCH","LEADERSHIP FILTER"
+    # Crucially, no blanket rejection for weak market breadth: only risk is reduced.
+    return int(score),"APEX RS BUY","RELATIVE STRENGTH LEADER"
+
 def generate_signals(f:pd.DataFrame)->pd.DataFrame:
  d=f[f.DATE==f.DATE.max()].copy(); vals=d.apply(score_row,axis=1,result_type="expand"); vals.columns=["SCORE","SIGNAL","REASON"]; d=pd.concat([d,vals],axis=1)
  d["STOP"]=d.CLOSE-CFG.stop_atr*d.ATR14; d["STOP_PCT"]=(d.CLOSE-d.STOP)/d.CLOSE*100; d["ENTRY_TRIGGER"]=np.where(d.SIGNAL.eq("APEX BUY"),d.CLOSE*1.002,np.nan); d["T1"]=d.CLOSE+2*(d.CLOSE-d.STOP); d["T2"]=d.CLOSE+3*(d.CLOSE-d.STOP); d["T3"]=d.CLOSE+4*(d.CLOSE-d.STOP)
