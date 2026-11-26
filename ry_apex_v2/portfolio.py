@@ -44,6 +44,7 @@ def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:flo
     if missing: raise ValueError(f"Missing portfolio columns: {sorted(missing)}")
     f=features.copy(); f["DATE"]=pd.to_datetime(f.DATE); f=f.sort_values(["DATE","SYMBOL"])
     dates=sorted(f.DATE.unique()); by_day={d:g.set_index("SYMBOL",drop=False) for d,g in f.groupby("DATE",sort=True)}
+    if signal_cache is None: signal_cache=build_signal_cache(f,strategy)
     cash=float(capital); positions={}; pending=[]; trades=[]; curve=[]
     for day_i,day in enumerate(dates):
         today=by_day[day]
@@ -97,10 +98,7 @@ def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:flo
         pending=[]
         # Today's close generates orders for the next trading session only.
         if day_i<len(dates)-1:
-            if signal_cache is None:
-                pending=build_signal_cache(f,strategy).get(pd.Timestamp(day),[])
-            else:
-                pending=signal_cache.get(pd.Timestamp(day),[])
+            pending=list(signal_cache.get(pd.Timestamp(day),[]))
         equity=cash+sum(pos["qty"]*float(today.loc[s]["CLOSE"]) for s,pos in positions.items() if s in today.index)
         curve.append({"DATE":day,"CASH":cash,"OPEN_POSITIONS":len(positions),"EQUITY":equity,"OPEN_RISK_RS":sum(pos["qty"]*max(0,pos["entry"]-pos["stop"]) for pos in positions.values())})
     # Conservative end-of-test liquidation at final close.
