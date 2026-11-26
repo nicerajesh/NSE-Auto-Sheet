@@ -6,7 +6,7 @@ def test_relative_strength_keeps_leaders_during_weak_breadth(monkeypatch):
     row=pd.Series({
         "CLOSE":120.0,"EMA20":115.0,"EMA50":110.0,"EMA50_RISING":True,
         "ATR_PCT":3.0,"ADX14":25.0,"MOM_RANK":92.0,"RS_RANK":96.0,
-        "ROC126":24.0,"TURNOVER_CR":5.0,"VOL_RATIO":2.0,
+        "ROC126":24.0,"TURNOVER_CR":20.0,"VOL_RATIO":2.0,
         "BREADTH50":22.0,"BREADTH200":18.0,"BREAKOUT":True,"PULLBACK":False
     })
     score,signal,reason=score_relative_strength_row(row)
