@@ -20,4 +20,5 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - run: pip install -r requirements-v2.txt
-      - run: python -m pytest -q tests tests_v2
+      - run: python -m pytest -q tests
+      - run: python -m pytest -q tests_v2
