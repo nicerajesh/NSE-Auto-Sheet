@@ -10,6 +10,8 @@ on:
       - 'src/delivery20_publish.py'
       - 'src/delivery20.py'
       - 'src/volume_reversal_backtest.py'
+      - 'src/volume_reversal_portfolio.py'
+      - 'src/volume_reversal_portfolio_run.py'
       - 'src/pit_universe.py'
       - '.github/workflows/delivery20-sheet.yml'
 
