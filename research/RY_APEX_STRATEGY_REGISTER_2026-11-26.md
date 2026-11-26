@@ -48,6 +48,26 @@ These are copied from the independent strategy lab implementation, not reconstru
 
 These are overlapping event returns, not portfolio returns. The very high 2023–24 validation results and current-universe survivorship bias require caution. The 2025+ holdout is more recent and is positive for M/J, but does not establish investable portfolio performance.
 
+## Portfolio simulation comparison (V2.2, ₹5 lakh scenario)
+
+This is the daily, cash-constrained simulation using next-session OPEN entries, ATR stop/trailing exits, 0.5% equity risk per trade, 3% aggregate open stop risk, max 8 positions, max 15% per position and 0.60% round-trip cost. It is a different model from the independent M/J fixed-horizon event test above.
+
+| Metric | APEX Quality Trend | Relative Strength Growth |
+|---|---:|---:|
+| Ending equity | ₹7,76,588 | ₹9,78,749 |
+| Net profit | ₹2,76,588 | ₹4,78,749 |
+| Total return | 55.32% | 95.75% |
+| CAGR | 5.32% | 8.24% |
+| Trades | 506 | 615 |
+| Win rate | 31.23% | 30.24% |
+| Profit factor | 1.308 | 1.453 |
+| Max drawdown | -21.25% | -20.28% |
+| Annualised daily volatility | 11.50% | 15.11% |
+
+Recent holdout (trades exiting in 2025 onward): APEX 125 trades, PF 0.887, net trade P&L -₹27,990; Relative Strength 172 trades, PF 1.123, net trade P&L +₹42,242. Relative Strength 2025 return was -3.16%, followed by +6.06% in 2026. The stronger return comes with higher daily volatility; it is not a risk-free improvement.
+
+**Decision:** Relative Strength is the current research leader, not a live-approved strategy. The 497-stock current-universe ranking is not a true Nifty benchmark-relative strength measure. Point-in-time constituents, corporate actions/dividends and realistic market impact remain unresolved.
+
 ## Research limitations
 - The equity universe is the current 497-symbol history universe; historical point-in-time index constituents are not available. Survivorship bias is possible.
 - Momentum ranks are cross-sectional ranks within the available universe. A true Nifty 50/Nifty 500 benchmark-relative strength series still needs a clean index total-return history.
