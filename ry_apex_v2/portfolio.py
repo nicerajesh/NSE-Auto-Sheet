@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pandas as pd
 from .config import CFG
-from .engine import score_row
+from .engine import score_row,score_relative_strength_row
 
 def allocate_candidates(signals:pd.DataFrame,capital:float,risk_pct:float,max_total_risk_pct:float,max_positions:int,max_position_pct:float)->pd.DataFrame:
     d=signals.copy(); d["QTY"]=0; d["CAPITAL_REQUIRED"]=0.0; d["RISK_RS"]=0.0; d["BUY_PRIORITY"]=0
@@ -20,7 +20,7 @@ def allocate_candidates(signals:pd.DataFrame,capital:float,risk_pct:float,max_to
         cash-=used; risk_left-=risk; accepted+=1
     return d.sort_values(["SIGNAL","SCORE"],ascending=[True,False])
 
-def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:float=0.5,max_total_risk_pct:float=3.0,max_positions:int=8,max_position_pct:float=15.0,cost_pct:float=0.60,max_hold:int=60)->tuple[pd.DataFrame,pd.DataFrame,dict]:
+def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:float=0.5,max_total_risk_pct:float=3.0,max_positions:int=8,max_position_pct:float=15.0,cost_pct:float=0.60,max_hold:int=60,strategy:str="apex")->tuple[pd.DataFrame,pd.DataFrame,dict]:
     """Daily close signal -> next-session open entry, shared cash and risk, concurrent holdings."""
     required={"SYMBOL","DATE","OPEN","HIGH","LOW","CLOSE","ATR14"}
     missing=required-set(features.columns)
@@ -52,14 +52,18 @@ def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:flo
         # Enter yesterday's ranked signals at today's open; shared cash and risk constrain all symbols.
         for cand in pending:
             sym=cand["SYMBOL"]
-            if sym in positions or sym not in today.index or len(positions)>=max_positions: continue
+            weak_regime = strategy=="relative_strength" and (float(today.BREADTH50.iloc[0])<40 or float(today.BREADTH200.iloc[0])<30)
+            slot_limit = min(4,max_positions) if weak_regime else max_positions
+            if sym in positions or sym not in today.index or len(positions)>=slot_limit: continue
             r=today.loc[sym]; entry=float(r.OPEN); stop=float(cand["STOP"])
             if not np.isfinite(entry) or entry<=0 or entry<=stop: continue
             gap=(entry/float(cand["SIGNAL_CLOSE"])-1)*100
             if gap>CFG.max_entry_gap_pct: continue
             equity=cash+sum(pos["qty"]*float(today.loc[s]["CLOSE"]) for s,pos in positions.items() if s in today.index)
             risk_used=sum(pos["qty"]*max(0,pos["entry"]-pos["stop"]) for pos in positions.values())
-            risk_budget=max(0,min(equity*risk_pct/100,equity*max_total_risk_pct/100-risk_used))
+            active_risk_pct = (0.25 if weak_regime else risk_pct) if strategy=="relative_strength" else risk_pct
+            active_total_risk_pct = (1.5 if weak_regime else max_total_risk_pct) if strategy=="relative_strength" else max_total_risk_pct
+            risk_budget=max(0,min(equity*active_risk_pct/100,equity*active_total_risk_pct/100-risk_used))
             per_share=entry-stop
             qty=min(math.floor(risk_budget/per_share),math.floor(equity*max_position_pct/100/entry),math.floor(cash/entry))
             if qty<1: continue
@@ -75,9 +79,10 @@ def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:flo
         # Today's close generates orders for the next trading session only.
         if day_i<len(dates)-1:
             for _,r in today.iterrows():
-                try: score,signal,_=score_row(r)
+                try:
+                    score,signal,_=(score_relative_strength_row(r) if strategy=="relative_strength" else score_row(r))
                 except Exception: continue
-                if signal=="APEX BUY":
+                if signal==("APEX RS BUY" if strategy=="relative_strength" else "APEX BUY"):
                     pending.append({"SYMBOL":r.SYMBOL,"SIGNAL_DATE":day,"SIGNAL_CLOSE":float(r.CLOSE),"STOP":float(r.CLOSE-CFG.stop_atr*r.ATR14),"SCORE":score})
             pending.sort(key=lambda x:(x["SCORE"],x["SYMBOL"]),reverse=True)
         equity=cash+sum(pos["qty"]*float(today.loc[s]["CLOSE"]) for s,pos in positions.items() if s in today.index)
@@ -98,5 +103,12 @@ def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:flo
     daily_ret=e.EQUITY.pct_change().dropna() if not e.empty else pd.Series(dtype=float)
     gross_win=float(t.loc[t.NET_PNL>0,"NET_PNL"].sum()) if not t.empty else 0.0
     gross_loss=float(-t.loc[t.NET_PNL<0,"NET_PNL"].sum()) if not t.empty else 0.0
-    stats={"starting_capital":round(capital,2),"ending_equity":round(final_equity,2),"net_pnl":round(final_equity-capital,2),"total_return_pct":round((final_equity/capital-1)*100,2) if capital else 0.0,"cagr_pct":round(((final_equity/capital)**(365.25/elapsed)-1)*100,2) if capital and final_equity>0 else -100.0,"trades":len(t),"win_rate_pct":round((t.NET_PNL>0).mean()*100,2) if not t.empty else 0.0,"profit_factor":round(gross_win/gross_loss,3) if gross_loss else (float("inf") if gross_win else 0.0),"avg_trade_pnl_rs":round(float(t.NET_PNL.mean()),2) if not t.empty else 0.0,"max_drawdown_pct":round(float(e.DRAWDOWN_PCT.min()),2) if not e.empty else 0.0,"max_open_positions":int(e.OPEN_POSITIONS.max()) if not e.empty else 0,"max_open_risk_rs":round(float(e.OPEN_RISK_RS.max()),2) if not e.empty else 0.0,"daily_volatility_pct":round(float(daily_ret.std()*np.sqrt(252)*100),2) if len(daily_ret)>1 else 0.0,"cost_pct_round_trip":cost_pct}
+    annual_returns={}
+    if not e.empty:
+        annual_end=e.assign(YEAR=pd.to_datetime(e.DATE).dt.year).groupby("YEAR").EQUITY.last()
+        prev=float(capital)
+        for yr,val in annual_end.items():
+            annual_returns[str(int(yr))]=round((float(val)/prev-1)*100,2)
+            prev=float(val)
+    stats={"annual_returns_pct":annual_returns,"strategy":strategy,"starting_capital":round(capital,2),"ending_equity":round(final_equity,2),"net_pnl":round(final_equity-capital,2),"total_return_pct":round((final_equity/capital-1)*100,2) if capital else 0.0,"cagr_pct":round(((final_equity/capital)**(365.25/elapsed)-1)*100,2) if capital and final_equity>0 else -100.0,"trades":len(t),"win_rate_pct":round((t.NET_PNL>0).mean()*100,2) if not t.empty else 0.0,"profit_factor":round(gross_win/gross_loss,3) if gross_loss else (float("inf") if gross_win else 0.0),"avg_trade_pnl_rs":round(float(t.NET_PNL.mean()),2) if not t.empty else 0.0,"max_drawdown_pct":round(float(e.DRAWDOWN_PCT.min()),2) if not e.empty else 0.0,"max_open_positions":int(e.OPEN_POSITIONS.max()) if not e.empty else 0,"max_open_risk_rs":round(float(e.OPEN_RISK_RS.max()),2) if not e.empty else 0.0,"daily_volatility_pct":round(float(daily_ret.std()*np.sqrt(252)*100),2) if len(daily_ret)>1 else 0.0,"cost_pct_round_trip":cost_pct}
     return t,e,stats
