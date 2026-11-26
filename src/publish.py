@@ -72,7 +72,9 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
 
     add(["B) NAYE BUY - agle session ke OPEN par kharido (open signal close se 2% se upar ho to SKIP)"], "title")
     hdr = ["#", "STOCK", "SETUP", "BUY PRICE (approx)", "MAX BUY", "STOP LOSS", "T1 (2R)", "T2 (4R)", "T3 (6R)",
-           "RISK %", "QTY", "CAPITAL Rs", "RISK Rs", "MOMENTUM RANK", "EXIT PLAN"]
+           "RISK %", "QTY", "CAPITAL Rs", "RISK Rs", "MOMENTUM RANK",
+           "T1 MOVE %", "T2 MOVE %", "T3 MOVE %", "HIST SAMPLE (2023+)", "HIST WIN % (2023+)",
+           "HIST AVG NET % (2023+)", "MEDIAN HOLD (SESSIONS)", "2025+ AVG NET %", "EXIT PLAN"]
     add(hdr, "header")
     buy = ctx["buy"]
     if ctx["buy_ok"] and buy is not None and not buy.empty:
@@ -80,7 +82,11 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
             plan = ("T1 touch -> SL entry par | T2 touch -> SL T1 par | T3 touch -> SL T2 par. "
                     "Koi fixed target nahi; SL hit hone tak hold (max 90 din).")
             add([i, r["SYMBOL"], r["SETUP"], r["CLOSE"], r["CLOSE"] * (1 + CFG.max_gap_pct / 100), r["STOP"], r["T1"],
-                 r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"], plan])
+                 r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"],
+                 r.get("T1_MOVE_PCT", ""), r.get("T2_MOVE_PCT", ""), r.get("T3_MOVE_PCT", ""),
+                 r.get("HIST_SAMPLE_2023_PLUS", ""), r.get("HIST_WIN_PCT_2023_PLUS", ""),
+                 r.get("HIST_AVG_RETURN_PCT_2023_PLUS", ""), r.get("HIST_MEDIAN_HOLD_SESSIONS", ""),
+                 r.get("HIST_2025_PLUS_AVG_RETURN_PCT", ""), plan])
     else:
         add(["", "KOI NAYA BUY NAHI" if ctx["buy_ok"] else "BUY BAND: " + ctx["banner"]])
     add([""])
@@ -93,7 +99,11 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
         for i, (_, r) in enumerate(bw.iterrows(), 1):
             plan = "T1/T2/T3 ka staircase SL - jaisa strict BUY me hai. Size aadha rakha gaya hai (kam PF ki wajah se)."
             add([i, r["SYMBOL"], r["SETUP"], r["CLOSE"], r["CLOSE"] * (1 + CFG.max_gap_pct / 100), r["STOP"], r["T1"],
-                 r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"], plan])
+                 r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"],
+                 r.get("T1_MOVE_PCT", ""), r.get("T2_MOVE_PCT", ""), r.get("T3_MOVE_PCT", ""),
+                 r.get("HIST_SAMPLE_2023_PLUS", ""), r.get("HIST_WIN_PCT_2023_PLUS", ""),
+                 r.get("HIST_AVG_RETURN_PCT_2023_PLUS", ""), r.get("HIST_MEDIAN_HOLD_SESSIONS", ""),
+                 r.get("HIST_2025_PLUS_AVG_RETURN_PCT", ""), plan])
     else:
         add(["", "Aaj koi WATCH BUY bhi nahi (bahut kamzor din)" if ctx["buy_ok"] else "BUY BAND: " + ctx["banner"]])
     add([""])
