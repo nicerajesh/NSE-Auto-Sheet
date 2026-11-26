@@ -58,9 +58,14 @@ def _simulate(history: pd.DataFrame, signals: pd.DataFrame, strategy: str,
                 positions[sym] = {
                     "qty": qty, "entry": entry, "entry_date": day,
                     "signal_date": sig.SIGNAL_DATE, "bars": 0,
-                    "high_water": max(entry, float(row.HIGH)),
+                    # A trailing stop starts below entry; today's high is only
+                    # allowed to raise tomorrow's stop after today's stop check.
+                    "high_water": entry,
                     "stop": entry * (1 - (0.08 if stop_mode.endswith("8") else 0.12))
-                            if stop_mode.startswith("fixed") else None,
+                            if stop_mode.startswith("fixed") else (
+                                entry * (1 - (0.08 if stop_mode == "trailing_8" else 0.10))
+                                if stop_mode.startswith("trailing") else None
+                            ),
                 }
 
         for sym in list(positions):
@@ -70,18 +75,19 @@ def _simulate(history: pd.DataFrame, signals: pd.DataFrame, strategy: str,
             row = today.loc[sym]
             p["bars"] += 1
             high, low, opn, close = map(float, (row.HIGH, row.LOW, row.OPEN, row.CLOSE))
-            p["high_water"] = max(p["high_water"], high)
+            # Evaluate the stop carried into this session before incorporating
+            # today's high; OHLC alone cannot reveal whether high preceded low.
             stop = p["stop"]
-            if stop_mode.startswith("trailing"):
-                trail = 0.08 if stop_mode == "trailing_8" else 0.10
-                candidate = p["high_water"] * (1 - trail)
-                stop = candidate if stop is None else max(stop, candidate)
             exit_px, reason = None, None
             if stop is not None and low <= stop:
                 exit_px = min(opn, stop) if opn < stop else stop
                 reason = "STOP"
             elif p["bars"] >= HOLD_SESSIONS:
                 exit_px, reason = close, "TIME"
+            if exit_px is None and stop_mode.startswith("trailing"):
+                trail = 0.08 if stop_mode == "trailing_8" else 0.10
+                p["high_water"] = max(p["high_water"], high)
+                p["stop"] = max(stop, p["high_water"] * (1 - trail))
             if exit_px is not None:
                 qty = p["qty"]
                 gross = (exit_px - p["entry"]) * qty
