@@ -32,7 +32,10 @@ def features_one(g: pd.DataFrame) -> pd.DataFrame:
     pos = flow.where(tp.diff()>0,0).rolling(14,min_periods=14).sum()
     neg = flow.where(tp.diff()<0,0).rolling(14,min_periods=14).sum()
     ratio = pos / neg.replace(0,np.nan)
-    d["MFI14"] = 100 - 100/(1+ratio)
+    mfi = 100 - 100/(1+ratio)
+    # No negative money flow with positive flow is a valid MFI reading of 100.
+    mfi = mfi.mask((neg == 0) & (pos > 0), 100.0)
+    d["MFI14"] = mfi
     d["MFI_RISE3"] = d["MFI14"] > d["MFI14"].shift(3)
     d["EMA20"] = c.ewm(span=20,adjust=False,min_periods=20).mean()
     d["EMA50"] = c.ewm(span=50,adjust=False,min_periods=50).mean()
@@ -96,14 +99,19 @@ def build_events(hist: pd.DataFrame) -> pd.DataFrame:
           out.append(rec)
     return pd.DataFrame(out)
 
-def summarize(events: pd.DataFrame) -> pd.DataFrame:
+def summarize(events: pd.DataFrame, period_col: str | None = None) -> pd.DataFrame:
     rows=[]
-    for tier,g in events.groupby("TIER"):
+    group_cols = ["TIER"] if period_col is None else [period_col, "TIER"]
+    for keys,g in events.groupby(group_cols):
+      if period_col is None:
+        period, tier = "ALL", keys
+      else:
+        period, tier = keys
       for n in (20,40,60):
         x=g[f"FWD{n}_RET_PCT"].dropna()
         if x.empty: continue
         pos=x[x>0].sum(); neg=-x[x<0].sum()
-        rows.append({"TIER":tier,"HORIZON":n,"N":len(x),
+        rows.append({"PERIOD":period,"TIER":tier,"HORIZON":n,"N":len(x),
           "WIN_RATE_PCT":round((x>0).mean()*100,2),
           "AVG_RETURN_PCT":round(x.mean(),2),"MEDIAN_RETURN_PCT":round(x.median(),2),
           "PROFIT_FACTOR":round(pos/neg,3) if neg else np.inf,
@@ -121,11 +129,24 @@ def main():
     hist=pd.read_csv(p,parse_dates=["DATE"])
     events=build_events(hist)
     summary=summarize(events) if not events.empty else pd.DataFrame()
+    segmented = pd.DataFrame()
+    if not events.empty:
+        events["PERIOD"] = np.select(
+            [events.SIGNAL_DATE.dt.year <= 2022,
+             events.SIGNAL_DATE.dt.year.between(2023, 2024),
+             events.SIGNAL_DATE.dt.year >= 2025],
+            ["TRAIN_2018_2022", "VALIDATION_2023_2024", "HOLDOUT_2025_PLUS"],
+            default="OUT_OF_RANGE")
+        segmented = summarize(events, "PERIOD")
     out=Path(a.out); out.mkdir(parents=True,exist_ok=True)
     events.to_csv(out/"events.csv",index=False)
     summary.to_csv(out/"summary.csv",index=False)
+    segmented.to_csv(out/"period_summary.csv",index=False)
     print("UNIVERSE: current Nifty 500 constituents only; survivorship bias remains.")
     print(f"History: {hist.DATE.min().date()} to {hist.DATE.max().date()} | symbols={hist.SYMBOL.nunique()}")
     print(f"Events: {len(events)}")
+    print("POOLED SUMMARY")
     print(summary.to_string(index=False) if not summary.empty else "NO EVENTS")
+    print("OUT-OF-SAMPLE PERIOD SUMMARY (train <=2022; validation 2023-24; holdout 2025+)")
+    print(segmented.to_string(index=False) if not segmented.empty else "NO PERIOD RESULTS")
 if __name__=="__main__": main()
