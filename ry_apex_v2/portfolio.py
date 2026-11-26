@@ -22,7 +22,7 @@ def allocate_candidates(signals:pd.DataFrame,capital:float,risk_pct:float,max_to
 
 def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:float=0.5,max_total_risk_pct:float=3.0,max_positions:int=8,max_position_pct:float=15.0,cost_pct:float=0.60,max_hold:int=60)->tuple[pd.DataFrame,pd.DataFrame,dict]:
     """Daily close signal -> next-session open entry, shared cash and risk, concurrent holdings."""
-    required={"SYMBOL","DATE","OPEN","HIGH","LOW","CLOSE","ATR14","SCORE","SIGNAL","STOP"}
+    required={"SYMBOL","DATE","OPEN","HIGH","LOW","CLOSE","ATR14"}
     missing=required-set(features.columns)
     if missing: raise ValueError(f"Missing portfolio columns: {sorted(missing)}")
     f=features.copy(); f["DATE"]=pd.to_datetime(f.DATE); f=f.sort_values(["DATE","SYMBOL"])
