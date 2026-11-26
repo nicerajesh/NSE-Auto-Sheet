@@ -65,6 +65,12 @@ def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:flo
             if qty<1: continue
             cash-=qty*entry
             positions[sym]={"qty":qty,"entry":entry,"entry_date":day,"signal_date":cand["SIGNAL_DATE"],"stop":stop,"initial_stop":stop,"risk_per_share":per_share,"high_water":entry,"bars":0,"score":cand["SCORE"]}
+            # Apply stop on the entry session too; conservative stop-first OHLC ordering.
+            if float(r.LOW)<=stop:
+                exit_px=min(entry,stop); gross=(exit_px-entry)*qty; fees=entry*qty*cost_pct/100
+                cash+=qty*exit_px-fees
+                trades.append({"SYMBOL":sym,"SIGNAL_DATE":cand["SIGNAL_DATE"],"ENTRY_DATE":day,"EXIT_DATE":day,"ENTRY":entry,"EXIT":exit_px,"QTY":qty,"GROSS_PNL":gross,"COST_RS":fees,"NET_PNL":gross-fees,"RET_PCT":((exit_px/entry-1)*100)-cost_pct,"REASON":"ENTRY_DAY_STOP","SCORE":cand["SCORE"]})
+                del positions[sym]
         pending=[]
         # Today's close generates orders for the next trading session only.
         if day_i<len(dates)-1:
