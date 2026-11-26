@@ -57,8 +57,11 @@ def build_signals(history: pd.DataFrame) -> pd.DataFrame:
         d = _features(g)
         d["SYMBOL"] = symbol
         frames.append(d)
+    # A no-signal sample is a valid outcome; preserve the output schema.
+    output_columns = ["SYMBOL", "TIER", "SIGNAL_DATE", "SIGNAL_CLOSE", "VOL_X",
+                      *[f"RET{n}_NET_PCT" for n in HORIZONS]]
     if not frames:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=output_columns)
     f = pd.concat(frames, ignore_index=True)
     # Cross-sectional momentum rank uses only same-date returns known at close.
     f["MOM_RANK"] = f.groupby("DATE")["RET63"].rank(pct=True)
@@ -100,7 +103,7 @@ def build_signals(history: pd.DataFrame) -> pd.DataFrame:
                     exit_price = float(future.iloc[n-1]["CLOSE"])
                     rec[f"RET{n}_NET_PCT"] = (exit_price / entry - 1) * 100 - COST_PCT if entry > 0 else np.nan
                 records.append(rec)
-    return pd.DataFrame(records)
+    return pd.DataFrame.from_records(records, columns=output_columns)
 
 
 def summarize(events: pd.DataFrame) -> pd.DataFrame:
