@@ -107,6 +107,34 @@ def main(argv=None) -> int:
         sz = buy_v38.apply(lambda r: pd.Series(position_size(r["CLOSE"], r["STOP"], mult_total * CFG.v38_size_mult)), axis=1)
         buy_v38 = pd.concat([buy_v38, sz], axis=1)
         buy_v38 = buy_v38[buy_v38["QTY"] > 0]
+    # Historical setup-matched context for the Google Sheet. These are past outcomes,
+    # not predictions or guaranteed target dates.
+    forecast_profiles = bt.forecast_profiles(trades, asof)
+
+    def add_trade_context(frame):
+        if frame is None or frame.empty:
+            return frame
+        frame = frame.copy()
+        for col in ("T1_MOVE_PCT", "T2_MOVE_PCT", "T3_MOVE_PCT", "HIST_SAMPLE_2023_PLUS",
+                    "HIST_WIN_PCT_2023_PLUS", "HIST_AVG_RETURN_PCT_2023_PLUS",
+                    "HIST_MEDIAN_HOLD_SESSIONS", "HIST_2025_PLUS_AVG_RETURN_PCT"):
+            frame[col] = np.nan
+        for idx, row in frame.iterrows():
+            p = forecast_profiles.get(str(row.get("SETUP", "")), {})
+            close = float(row["CLOSE"])
+            for target in ("T1", "T2", "T3"):
+                frame.loc[idx, f"{target}_MOVE_PCT"] = (float(row[target]) / close - 1) * 100
+            if p:
+                frame.loc[idx, "HIST_SAMPLE_2023_PLUS"] = p["sample"]
+                frame.loc[idx, "HIST_WIN_PCT_2023_PLUS"] = p["win_pct"]
+                frame.loc[idx, "HIST_AVG_RETURN_PCT_2023_PLUS"] = p["avg_ret_pct"]
+                frame.loc[idx, "HIST_MEDIAN_HOLD_SESSIONS"] = p["median_hold_sessions"]
+                frame.loc[idx, "HIST_2025_PLUS_AVG_RETURN_PCT"] = p["recent_avg_ret_pct"]
+        return frame
+
+    buy = add_trade_context(buy)
+    buy_watch = add_trade_context(buy_watch)
+
     deliv = dv.delivery_candidates(f) if not stale else pd.DataFrame()
     buy_v42 = latest_v42_candidates(f)
     if not buy_v42.empty:
