@@ -17,7 +17,7 @@ def main():
     hist = pd.read_csv(args.state, parse_dates=["DATE"])
     events = pd.read_csv(args.events, parse_dates=["SIGNAL_DATE"])
     summaries, curves, trades = [], [], []
-    for tier in ("A_DISCOVERY", "B_ABSORPTION"):
+    for tier in ("A_DISCOVERY", "B_ABSORPTION", "G_TREND_PULLBACK", "H_CONTRACTION_BREAKOUT", "I_RS_LEADER_BREAKOUT"):
         for horizon in (20, 40, 60):
             metrics, curve, ledger = simulate_portfolio(
                 hist, events, tier, horizon, initial_capital=args.capital,
