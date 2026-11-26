@@ -44,6 +44,38 @@ def features_one(g: pd.DataFrame) -> pd.DataFrame:
     d["RET1"] = c.pct_change()*100
     return d
 
+def execution_metrics(future: pd.DataFrame, horizon: int, cost_pct: float = 0.35) -> dict:
+    """Next-session OPEN entry, horizon-session CLOSE exit, round-trip costs."""
+    fw = future.head(horizon)
+    if len(fw) < horizon or fw.empty:
+        return {f"EXEC{horizon}_RET_NET_PCT": np.nan, f"EXEC{horizon}_MAX_HIGH_PCT": np.nan, f"EXEC{horizon}_MIN_LOW_PCT": np.nan}
+    entry = float(fw.iloc[0]["OPEN"])
+    if not np.isfinite(entry) or entry <= 0:
+        return {f"EXEC{horizon}_RET_NET_PCT": np.nan, f"EXEC{horizon}_MAX_HIGH_PCT": np.nan, f"EXEC{horizon}_MIN_LOW_PCT": np.nan}
+    return {f"EXEC{horizon}_RET_NET_PCT": (float(fw.iloc[-1]["CLOSE"]) / entry - 1) * 100 - cost_pct,
+            f"EXEC{horizon}_MAX_HIGH_PCT": (float(fw["HIGH"].max()) / entry - 1) * 100,
+            f"EXEC{horizon}_MIN_LOW_PCT": (float(fw["LOW"].min()) / entry - 1) * 100}
+
+
+def summarize_execution(events: pd.DataFrame, period_col: str | None = None) -> pd.DataFrame:
+    rows = []
+    group_cols = ["TIER"] if period_col is None else [period_col, "TIER"]
+    for keys, g in events.groupby(group_cols):
+        period, tier = ("ALL", keys) if period_col is None else keys
+        for n in (20, 40, 60):
+            x = g[f"EXEC{n}_RET_NET_PCT"].dropna()
+            if x.empty:
+                continue
+            wins, losses = x[x > 0].sum(), -x[x < 0].sum()
+            rows.append({"PERIOD": period, "TIER": tier, "HORIZON": n, "N": len(x),
+                "WIN_RATE_PCT": round((x > 0).mean() * 100, 2),
+                "AVG_NET_RETURN_PCT": round(x.mean(), 2), "MEDIAN_NET_RETURN_PCT": round(x.median(), 2),
+                "PROFIT_FACTOR": round(wins / losses, 3) if losses else np.inf,
+                "AVG_MAX_HIGH_PCT": round(g.loc[x.index, f"EXEC{n}_MAX_HIGH_PCT"].mean(), 2),
+                "AVG_MAX_DRAWDOWN_PCT": round(g.loc[x.index, f"EXEC{n}_MIN_LOW_PCT"].mean(), 2)})
+    return pd.DataFrame(rows).sort_values(["HORIZON", "PROFIT_FACTOR"], ascending=[True, False])
+
+
 def build_events(hist: pd.DataFrame) -> pd.DataFrame:
     frames=[]
     for sym,g in hist.groupby("SYMBOL",sort=False):
@@ -96,6 +128,7 @@ def build_events(hist: pd.DataFrame) -> pd.DataFrame:
               rec[f"FWD{n}_RET_PCT"]=(float(fw.iloc[-1].CLOSE)/rec["SIGNAL_CLOSE"]-1)*100
               rec[f"FWD{n}_MAX_HIGH_PCT"]=(float(fw.HIGH.max())/rec["SIGNAL_CLOSE"]-1)*100
               rec[f"FWD{n}_MIN_LOW_PCT"]=(float(fw.LOW.min())/rec["SIGNAL_CLOSE"]-1)*100
+            rec.update(execution_metrics(future, n))
           out.append(rec)
     return pd.DataFrame(out)
 
@@ -130,6 +163,8 @@ def main():
     events=build_events(hist)
     summary=summarize(events) if not events.empty else pd.DataFrame()
     segmented = pd.DataFrame()
+    execution_summary = pd.DataFrame()
+    execution_segmented = pd.DataFrame()
     if not events.empty:
         events["PERIOD"] = np.select(
             [events.SIGNAL_DATE.dt.year <= 2022,
@@ -138,10 +173,16 @@ def main():
             ["TRAIN_2018_2022", "VALIDATION_2023_2024", "HOLDOUT_2025_PLUS"],
             default="OUT_OF_RANGE")
         segmented = summarize(events, "PERIOD")
+        execution_summary = summarize_execution(events)
+        execution_segmented = summarize_execution(events, "PERIOD")
     out=Path(a.out); out.mkdir(parents=True,exist_ok=True)
     events.to_csv(out/"events.csv",index=False)
     summary.to_csv(out/"summary.csv",index=False)
     segmented.to_csv(out/"period_summary.csv",index=False)
+    execution_summary.to_csv(out/"execution_summary.csv",index=False)
+    execution_segmented.to_csv(out/"execution_period_summary.csv",index=False)
+    print("EXECUTABLE PROXY: next-session OPEN entry, horizon CLOSE exit, 0.35% round-trip costs; no stop/target or portfolio constraints.")
+    print(execution_segmented.to_string(index=False) if not execution_segmented.empty else "NO EXECUTION RESULTS")
     print("UNIVERSE: current Nifty 500 constituents only; survivorship bias remains.")
     print(f"History: {hist.DATE.min().date()} to {hist.DATE.max().date()} | symbols={hist.SYMBOL.nunique()}")
     print(f"Events: {len(events)}")
