@@ -1,5 +1,7 @@
 name: RY APEX V2 Research Scanner
 on:
+  push:
+    branches: [ry-apex-v2-rebuild]
   workflow_dispatch:
   schedule:
     - cron: '30 15 * * 1-5'
