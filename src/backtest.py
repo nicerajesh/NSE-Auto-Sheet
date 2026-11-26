@@ -98,6 +98,31 @@ def split_summary(t: pd.DataFrame, split: str | None = None) -> tuple[dict, dict
     return summarize(t[t.EXIT_DATE < split]), summarize(t[t.EXIT_DATE >= split])
 
 
+
+def forecast_profiles(t: pd.DataFrame, asof: pd.Timestamp) -> dict:
+    """Historical context for today's signal; descriptive only, never a promised forecast.
+    Uses completed, out-of-sample trades since 2023 grouped by the same setup.
+    """
+    result = {}
+    if t is None or t.empty:
+        return result
+    x = t.copy()
+    x["SIGNAL_DATE"] = pd.to_datetime(x["SIGNAL_DATE"])
+    x["EXIT_DATE"] = pd.to_datetime(x["EXIT_DATE"])
+    x = x[(x["SIGNAL_DATE"] >= pd.Timestamp("2023-01-01")) & (x["EXIT_DATE"] < pd.Timestamp(asof))]
+    for setup, g in x.groupby("SETUP"):
+        recent = g[g["SIGNAL_DATE"] >= pd.Timestamp("2025-01-01")]
+        result[str(setup)] = {
+            "sample": int(len(g)),
+            "win_pct": round(float((g["RET_PCT"] > 0).mean()) * 100, 1),
+            "avg_ret_pct": round(float(g["RET_PCT"].mean()), 2),
+            "median_hold_sessions": round(float(g["HOLD"].median()), 1),
+            "recent_sample": int(len(recent)),
+            "recent_avg_ret_pct": round(float(recent["RET_PCT"].mean()), 2) if len(recent) else np.nan,
+        }
+    return result
+
+
 def edge_gate(t: pd.DataFrame) -> tuple[bool, str]:
     s = summarize(t)
     if s["trades"] < CFG.edge_min_trades:
