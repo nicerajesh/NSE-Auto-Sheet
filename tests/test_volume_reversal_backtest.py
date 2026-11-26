@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from volume_reversal_backtest import features_one, summarize, execution_metrics, summarize_execution
+from volume_reversal_backtest import features_one, summarize, execution_metrics, summarize_execution, build_events
 
 
 def test_mfi_is_100_when_positive_flow_has_no_negative_flow():
@@ -82,3 +82,25 @@ def test_execution_summary_keeps_holdout_separate():
     twenty = result[result["HORIZON"] == 20].set_index("PERIOD")
     assert twenty.loc["TRAIN", "AVG_NET_RETURN_PCT"] == 1.5
     assert twenty.loc["HOLDOUT", "AVG_NET_RETURN_PCT"] == 3.0
+
+
+
+def test_new_strategy_features_are_calculated_without_future_data():
+    n = 320
+    close = np.linspace(100, 220, n)
+    frame = pd.DataFrame({
+        "DATE": pd.bdate_range("2024-01-01", periods=n),
+        "OPEN": close * 0.995,
+        "HIGH": close * 1.015,
+        "LOW": close * 0.985,
+        "CLOSE": close,
+        "VOLUME": np.full(n, 100000),
+        "SYMBOL": ["ABC"] * n,
+    })
+    result = features_one(frame)
+    for column in ("EMA200", "RSI14", "ATR14", "ATR_PCT_MED60",
+                   "RET63", "HIGH20_PREV", "HIGH55_PREV"):
+        assert column in result.columns
+        assert result[column].notna().any()
+    # Prior-high reference must exclude the current candle.
+    assert result.loc[100, "HIGH55_PREV"] < result.loc[100, "HIGH"]
