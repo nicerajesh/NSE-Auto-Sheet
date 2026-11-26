@@ -19,6 +19,13 @@ jobs:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: requirements-v2.txt
+      - name: Restore existing scanner history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: nse-state-v2-none
+          restore-keys: |
+            nse-state-v2-
       - uses: actions/cache@v4
         with:
           path: state_v2
