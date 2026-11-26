@@ -20,7 +20,22 @@ def allocate_candidates(signals:pd.DataFrame,capital:float,risk_pct:float,max_to
         cash-=used; risk_left-=risk; accepted+=1
     return d.sort_values(["SIGNAL","SCORE"],ascending=[True,False])
 
-def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:float=0.5,max_total_risk_pct:float=3.0,max_positions:int=8,max_position_pct:float=15.0,cost_pct:float=0.60,max_hold:int=60,strategy:str="apex")->tuple[pd.DataFrame,pd.DataFrame,dict]:
+def build_signal_cache(features:pd.DataFrame,strategy:str="apex")->dict:
+    scorer=score_relative_strength_row if strategy=="relative_strength" else score_row
+    cache={}
+    for day,group in features.groupby("DATE",sort=True):
+        picks=[]
+        for _,r in group.iterrows():
+            try: score,signal,_=scorer(r)
+            except Exception: continue
+            wanted="APEX RS BUY" if strategy=="relative_strength" else "APEX BUY"
+            if signal==wanted:
+                picks.append({"SYMBOL":r.SYMBOL,"SIGNAL_DATE":day,"SIGNAL_CLOSE":float(r.CLOSE),"STOP":float(r.CLOSE-CFG.stop_atr*r.ATR14),"SCORE":score})
+        picks.sort(key=lambda x:(x["SCORE"],x["SYMBOL"]),reverse=True)
+        cache[pd.Timestamp(day)]=picks
+    return cache
+
+def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:float=0.5,max_total_risk_pct:float=3.0,max_positions:int=8,max_position_pct:float=15.0,cost_pct:float=0.60,max_hold:int=60,strategy:str="apex",signal_cache:dict|None=None)->tuple[pd.DataFrame,pd.DataFrame,dict]:
     """Daily close signal -> next-session open entry, shared cash and risk, concurrent holdings."""
     required={"SYMBOL","DATE","OPEN","HIGH","LOW","CLOSE","ATR14"}
     if strategy=="relative_strength":
@@ -82,13 +97,10 @@ def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:flo
         pending=[]
         # Today's close generates orders for the next trading session only.
         if day_i<len(dates)-1:
-            for _,r in today.iterrows():
-                try:
-                    score,signal,_=(score_relative_strength_row(r) if strategy=="relative_strength" else score_row(r))
-                except Exception: continue
-                if signal==("APEX RS BUY" if strategy=="relative_strength" else "APEX BUY"):
-                    pending.append({"SYMBOL":r.SYMBOL,"SIGNAL_DATE":day,"SIGNAL_CLOSE":float(r.CLOSE),"STOP":float(r.CLOSE-CFG.stop_atr*r.ATR14),"SCORE":score})
-            pending.sort(key=lambda x:(x["SCORE"],x["SYMBOL"]),reverse=True)
+            if signal_cache is None:
+                pending=build_signal_cache(f,strategy).get(pd.Timestamp(day),[])
+            else:
+                pending=signal_cache.get(pd.Timestamp(day),[])
         equity=cash+sum(pos["qty"]*float(today.loc[s]["CLOSE"]) for s,pos in positions.items() if s in today.index)
         curve.append({"DATE":day,"CASH":cash,"OPEN_POSITIONS":len(positions),"EQUITY":equity,"OPEN_RISK_RS":sum(pos["qty"]*max(0,pos["entry"]-pos["stop"]) for pos in positions.values())})
     # Conservative end-of-test liquidation at final close.
