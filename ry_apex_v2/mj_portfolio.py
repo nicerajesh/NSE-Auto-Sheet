@@ -71,7 +71,7 @@ def build_mj_signals(history: pd.DataFrame) -> pd.DataFrame:
                     "VOL_X": float(row.VOL_X), "MOM_RANK": float(row.MOM_RANK),
                     "CLOSE_LOC": float(row.CLOSE_LOC),
                 })
-    return pd.DataFrame(out)
+    return pd.DataFrame(out, columns=cols)
 
 
 def simulate_mj_portfolio(history: pd.DataFrame, signals: pd.DataFrame,
