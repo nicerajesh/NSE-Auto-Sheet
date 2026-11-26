@@ -23,6 +23,8 @@ def allocate_candidates(signals:pd.DataFrame,capital:float,risk_pct:float,max_to
 def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:float=0.5,max_total_risk_pct:float=3.0,max_positions:int=8,max_position_pct:float=15.0,cost_pct:float=0.60,max_hold:int=60,strategy:str="apex")->tuple[pd.DataFrame,pd.DataFrame,dict]:
     """Daily close signal -> next-session open entry, shared cash and risk, concurrent holdings."""
     required={"SYMBOL","DATE","OPEN","HIGH","LOW","CLOSE","ATR14"}
+    if strategy=="relative_strength":
+        required.update({"BREADTH50","BREADTH200"})
     missing=required-set(features.columns)
     if missing: raise ValueError(f"Missing portfolio columns: {sorted(missing)}")
     f=features.copy(); f["DATE"]=pd.to_datetime(f.DATE); f=f.sort_values(["DATE","SYMBOL"])
@@ -52,7 +54,9 @@ def simulate_portfolio(features:pd.DataFrame,capital:float=500000.0,risk_pct:flo
         # Enter yesterday's ranked signals at today's open; shared cash and risk constrain all symbols.
         for cand in pending:
             sym=cand["SYMBOL"]
-            weak_regime = strategy=="relative_strength" and (float(today.BREADTH50.iloc[0])<40 or float(today.BREADTH200.iloc[0])<30)
+            breadth50=float(today["BREADTH50"].iloc[0]) if strategy=="relative_strength" else 100.0
+            breadth200=float(today["BREADTH200"].iloc[0]) if strategy=="relative_strength" else 100.0
+            weak_regime = strategy=="relative_strength" and (not np.isfinite(breadth50) or not np.isfinite(breadth200) or breadth50<40 or breadth200<30)
             slot_limit = min(4,max_positions) if weak_regime else max_positions
             if sym in positions or sym not in today.index or len(positions)>=slot_limit: continue
             r=today.loc[sym]; entry=float(r.OPEN); stop=float(cand["STOP"])
