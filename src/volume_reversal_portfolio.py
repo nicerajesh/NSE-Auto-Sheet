@@ -51,12 +51,14 @@ def simulate_portfolio(hist: pd.DataFrame, events: pd.DataFrame, tier: str,
                 gross = (exit_price / p["entry_price"] - 1.0) * 100.0
                 net = gross - cost_pct
                 proceeds = p["shares"] * exit_price
-                cash += proceeds
+                exit_cost = proceeds * (cost_pct / 20000.0)
+                cash += proceeds - exit_cost
+                entry_cost = p["notional"] * (cost_pct / 20000.0)
                 trades.append({"SYMBOL": p["symbol"], "SIGNAL_DATE": p["signal_date"],
                     "ENTRY_DATE": p["entry_date"], "EXIT_DATE": day, "TIER": tier,
                     "HORIZON": horizon, "ENTRY_PRICE": p["entry_price"],
                     "EXIT_PRICE": exit_price, "GROSS_RETURN_PCT": gross,
-                    "NET_RETURN_PCT": net, "P_AND_L": proceeds - p["notional"]})
+                    "NET_RETURN_PCT": net, "P_AND_L": (proceeds - exit_cost) - (p["notional"] + entry_cost)})
             else:
                 still_open.append(p)
         positions = still_open
@@ -80,11 +82,12 @@ def simulate_portfolio(hist: pd.DataFrame, events: pd.DataFrame, tier: str,
                 ploc = pg.index[pg["DATE"] == day]
                 if len(ploc):
                     marked += p["shares"] * float(pg.iloc[int(ploc[0])]["CLOSE"])
-            notional = min(marked / max_positions, cash)
+            notional = min(marked / max_positions, cash / (1 + cost_pct / 20000.0))
             if notional <= 0:
                 break
             shares = notional / entry_price
-            cash -= notional
+            entry_cost = notional * (cost_pct / 20000.0)
+            cash -= notional + entry_cost
             positions.append({"symbol": sym, "entry_i": entry_i,
                 "exit_i": entry_i + horizon - 1, "entry_price": entry_price,
                 "entry_date": day, "signal_date": signal_date,
