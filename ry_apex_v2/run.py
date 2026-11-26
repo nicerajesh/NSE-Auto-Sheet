@@ -6,7 +6,7 @@ from .config import CFG
 from .data import universe,load_history
 from .engine import build_features,generate_signals
 from .backtest import run_backtest,metrics,walk_forward
-from .portfolio import allocate_candidates,simulate_portfolio
+from .portfolio import allocate_candidates,simulate_portfolio,build_signal_cache
 
 def main():
  out=Path(CFG.output_dir); out.mkdir(parents=True,exist_ok=True); syms=universe(); hist=load_history(syms); f=build_features(hist); asof=pd.to_datetime(f.DATE).max()
@@ -17,16 +17,19 @@ def main():
  elif not gate:signals.loc[signals.SIGNAL.eq("APEX BUY"),["SIGNAL","REASON"]]=["WATCH","BACKTEST GATE FAILED - PAPER ONLY"]
  signals=allocate_candidates(signals,CFG.starting_capital,CFG.risk_per_trade_pct,CFG.max_portfolio_risk_pct,CFG.max_positions,CFG.max_position_pct)
  signals.to_csv(out/"signals.csv",index=False); trades.to_csv(out/"backtest_trades.csv",index=False)
+ # Precompute rankings once, then reuse them across capital scenarios.
+ apex_cache=build_signal_cache(f,"apex")
+ rs_cache=build_signal_cache(f,"relative_strength")
  # User has not specified deployable capital: publish a capital sensitivity grid, not an assumed account size.
  scenarios={}
  for capital in (100000,300000,500000,1000000):
-  pt,curve,stats=simulate_portfolio(f,capital=capital,risk_pct=CFG.risk_per_trade_pct,max_total_risk_pct=CFG.max_portfolio_risk_pct,max_positions=CFG.max_positions,max_position_pct=CFG.max_position_pct,cost_pct=CFG.cost_pct,max_hold=CFG.max_hold)
+  pt,curve,stats=simulate_portfolio(f,capital=capital,risk_pct=CFG.risk_per_trade_pct,max_total_risk_pct=CFG.max_portfolio_risk_pct,max_positions=CFG.max_positions,max_position_pct=CFG.max_position_pct,cost_pct=CFG.cost_pct,max_hold=CFG.max_hold,signal_cache=apex_cache)
   tag=f"{capital//1000}k"
   pt.to_csv(out/f"portfolio_trades_{tag}.csv",index=False); curve.to_csv(out/f"portfolio_equity_{tag}.csv",index=False)
   scenarios[str(capital)]=stats
  relative_strength_scenarios={}
  for capital in (100000,300000,500000,1000000):
-  rpt,req,rs_stats=simulate_portfolio(f,capital=capital,risk_pct=CFG.risk_per_trade_pct,max_total_risk_pct=CFG.max_portfolio_risk_pct,max_positions=CFG.max_positions,max_position_pct=CFG.max_position_pct,cost_pct=CFG.cost_pct,max_hold=CFG.max_hold,strategy="relative_strength")
+  rpt,req,rs_stats=simulate_portfolio(f,capital=capital,risk_pct=CFG.risk_per_trade_pct,max_total_risk_pct=CFG.max_portfolio_risk_pct,max_positions=CFG.max_positions,max_position_pct=CFG.max_position_pct,cost_pct=CFG.cost_pct,max_hold=CFG.max_hold,strategy="relative_strength",signal_cache=rs_cache)
   tag=f"{capital//1000}k"
   rpt.to_csv(out/f"rs_portfolio_trades_{tag}.csv",index=False); req.to_csv(out/f"rs_portfolio_equity_{tag}.csv",index=False)
   relative_strength_scenarios[str(capital)]=rs_stats
