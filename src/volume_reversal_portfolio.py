@@ -74,8 +74,12 @@ def simulate_portfolio(hist: pd.DataFrame, events: pd.DataFrame, tier: str,
             if not np.isfinite(entry_price) or entry_price <= 0:
                 continue
             # Equal-weight target based on current marked equity; never borrow.
-            marked = cash + sum(p["shares"] * float(prices[p["symbol"]].iloc[date_pos[day]]["CLOSE"])
-                                for p in positions if date_pos[day] < len(prices[p["symbol"]]))
+            marked = cash
+            for p in positions:
+                pg = prices[p["symbol"]]
+                ploc = pg.index[pg["DATE"] == day]
+                if len(ploc):
+                    marked += p["shares"] * float(pg.iloc[int(ploc[0])]["CLOSE"])
             notional = min(marked / max_positions, cash)
             if notional <= 0:
                 break
