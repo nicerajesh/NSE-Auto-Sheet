@@ -40,8 +40,8 @@ def build_mj_signals(history: pd.DataFrame) -> pd.DataFrame:
         d["CLOSE_LOC"] = ((c - l) / (h - l).replace(0, np.nan)).fillna(0.5)
         d["SYMBOL"] = str(symbol)
         frames.append(d)
-    cols = ["SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOL_X",
-            "MOM_RANK", "CLOSE_LOC", "STRATEGY"]
+    cols = ["SYMBOL", "STRATEGY", "SIGNAL_DATE", "SIGNAL_CLOSE",
+            "VOL_X", "MOM_RANK", "CLOSE_LOC"]
     if not frames:
         return pd.DataFrame(columns=cols)
     f = pd.concat(frames, ignore_index=True)
