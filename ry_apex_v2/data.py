@@ -23,7 +23,15 @@ def load_history(symbols:list[str],cache:str="state_v2/history.csv.gz")->pd.Data
  if p.exists():
   try:hist=pd.read_csv(p,parse_dates=["DATE"])
   except Exception:hist=pd.DataFrame()
- else:hist=pd.DataFrame()
+ else:
+  # Reuse the already-populated production history cache before any network
+  # bootstrap. GitHub Actions restores this cache from the existing scanner.
+  legacy=Path("state/history.csv.gz")
+  try:
+   hist=pd.read_csv(legacy,parse_dates=["DATE"]) if legacy.exists() else pd.DataFrame()
+   required={"SYMBOL","DATE","OPEN","HIGH","LOW","CLOSE","VOLUME"}
+   if not required.issubset(hist.columns):hist=pd.DataFrame()
+  except Exception:hist=pd.DataFrame()
  have=set(hist.SYMBOL.unique()) if not hist.empty else set(); missing=[s for s in symbols if s not in have]
  if missing:
   with ThreadPoolExecutor(max_workers=12) as ex:parts=[x for x in ex.map(_history_one,missing) if x is not None and not x.empty]
