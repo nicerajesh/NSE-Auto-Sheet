@@ -24,7 +24,7 @@ def main():
   tag=f"{capital//1000}k"
   pt.to_csv(out/f"portfolio_trades_{tag}.csv",index=False); curve.to_csv(out/f"portfolio_equity_{tag}.csv",index=False)
   scenarios[str(capital)]=stats
-  relative_strength_scenarios={}
+ relative_strength_scenarios={}
  for capital in (100000,300000,500000,1000000):
   rpt,req,rs_stats=simulate_portfolio(f,capital=capital,risk_pct=CFG.risk_per_trade_pct,max_total_risk_pct=CFG.max_portfolio_risk_pct,max_positions=CFG.max_positions,max_position_pct=CFG.max_position_pct,cost_pct=CFG.cost_pct,max_hold=CFG.max_hold,strategy="relative_strength")
   tag=f"{capital//1000}k"
