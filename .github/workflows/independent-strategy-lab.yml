@@ -1,0 +1,46 @@
+name: Independent Strategy Lab
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/independent-strategy-lab-v1]
+    paths:
+      - 'src/independent_strategy_lab.py'
+      - 'tests/test_independent_strategy_lab.py'
+      - '.github/workflows/independent-strategy-lab.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: independent-strategy-lab
+  cancel-in-progress: true
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore existing NSE history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: nse-state-v2-none
+          restore-keys: |
+            nse-state-v2-
+      - name: Run independent strategy tests
+        run: python -m pytest -q tests/test_independent_strategy_lab.py
+      - name: Run four independent strategies
+        run: python src/independent_strategy_lab.py --state state/history.csv.gz --out artifacts/independent_strategy_lab
+      - name: Upload independent strategy results
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-strategy-lab
+          path: artifacts/independent_strategy_lab/
+          retention-days: 30
