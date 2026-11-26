@@ -42,3 +42,26 @@ def test_cost_sensitivity_changes_result_without_changing_trade_count():
     high_cost = _simulate(history, signals, "M", 1.00, "none")
     assert low_cost["trades"] == high_cost["trades"] == 1
     assert high_cost["ending_equity"] < low_cost["ending_equity"]
+
+
+def test_trailing_stop_does_not_use_same_session_high_to_stop_same_session():
+    dates = pd.bdate_range("2025-01-01", periods=3)
+    history = pd.DataFrame({
+        "SYMBOL": ["AAA"] * 3, "DATE": dates,
+        "OPEN": [100.0, 100.0, 190.0],
+        "HIGH": [200.0, 200.0, 195.0],
+        "LOW": [95.0, 95.0, 180.0],
+        "CLOSE": [150.0, 190.0, 185.0],
+        "VOLUME": [100000] * 3,
+    })
+    signals = pd.DataFrame([{
+        "SYMBOL": "AAA", "STRATEGY": "M", "SIGNAL_DATE": dates[0],
+        "SIGNAL_CLOSE": 100, "VOL_X": 1.5, "MOM_RANK": .95,
+        "CLOSE_LOC": .8,
+    }])
+    result = _simulate(history, signals, "M", .35, "trailing_8")
+    # Day 1's 200 high must not create a 184 stop that is tested against
+    # day 1's 95 low. The carried stop is 92; day 2 raises it to 184.
+    assert result["trades"] == 1
+    assert result["stop_exits"] == 1
+    assert result["ending_equity"] > 500000
