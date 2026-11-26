@@ -39,7 +39,21 @@ def features_one(g: pd.DataFrame) -> pd.DataFrame:
     d["MFI_RISE3"] = d["MFI14"] > d["MFI14"].shift(3)
     d["EMA20"] = c.ewm(span=20,adjust=False,min_periods=20).mean()
     d["EMA50"] = c.ewm(span=50,adjust=False,min_periods=50).mean()
+    d["EMA200"] = c.ewm(span=200,adjust=False,min_periods=180).mean()
+    delta = c.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    d["RSI14"] = (100 - 100 / (1 + rs)).mask((loss == 0) & (gain > 0), 100.0)
+    prev_close = c.shift(1)
+    tr = pd.concat([(h-l), (h-prev_close).abs(), (l-prev_close).abs()], axis=1).max(axis=1)
+    d["ATR14"] = tr.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    d["ATR_PCT"] = d["ATR14"] / c * 100
+    d["ATR_PCT_MED60"] = d["ATR_PCT"].rolling(60, min_periods=40).median()
+    d["RET63"] = c.pct_change(63) * 100
     d["HIGH10_PREV"] = h.shift(1).rolling(10,min_periods=8).max()
+    d["HIGH20_PREV"] = h.shift(1).rolling(20,min_periods=16).max()
+    d["HIGH55_PREV"] = h.shift(1).rolling(55,min_periods=45).max()
     d["BREAK10"] = c > d["HIGH10_PREV"]
     d["RET1"] = c.pct_change()*100
     return d
@@ -93,6 +107,13 @@ def build_events(hist: pd.DataFrame) -> pd.DataFrame:
     obv=f.OBV_RISE20.fillna(False)
     mfi=f.MFI14.ge(50)&f.MFI_RISE3.fillna(False)
     confirm=(f.CLOSE>f.EMA20)&(f.CLOSE>f.HIGH10_PREV)
+    # New hypotheses: trend pullback, volatility contraction breakout, and
+    # cross-sectional relative-strength leadership. Ranks use same-day universe.
+    trend_stack=(f.EMA20>f.EMA50)&(f.EMA50>f.EMA200)
+    trend_pullback=(f.CLOSE>f.EMA200)&trend_stack&(f.LOW<=f.EMA20*1.015)&(f.CLOSE>=f.EMA20)&f.RSI14.between(45,65)&(f.VOL_X>=1.1)
+    contraction_breakout=(f.CLOSE>f.HIGH55_PREV)&trend_stack&(f.VOL_X>=1.5)&(f.ATR_PCT<=f.ATR_PCT_MED60*1.15)&(f.CLOSE_LOC>=0.65)
+    f["RS63_RANK"]=f.groupby("DATE")["RET63"].rank(pct=True)
+    rs_leader=(f.RS63_RANK>=0.80)&(f.CLOSE>f.EMA50)&(f.EMA50>f.EMA200)&(f.CLOSE>f.HIGH20_PREV)&(f.VOL_X>=1.2)&(f.CLOSE_LOC>=0.65)
     tiers={
       "A_DISCOVERY":near&spike,
       "B_ABSORPTION":near&heavy&absorption,
@@ -100,6 +121,9 @@ def build_events(hist: pd.DataFrame) -> pd.DataFrame:
       "D_CONFIRMED":near&spike&absorption&obv&mfi&confirm,
       "E_OBV_ONLY":near&spike&absorption&obv,
       "F_MFI_ONLY":near&spike&absorption&mfi,
+      "G_TREND_PULLBACK":trend_pullback,
+      "H_CONTRACTION_BREAKOUT":contraction_breakout,
+      "I_RS_LEADER_BREAKOUT":rs_leader,
     }
     out=[]
     last_signal={}
