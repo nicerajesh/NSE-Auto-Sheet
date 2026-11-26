@@ -1,7 +1,7 @@
 name: RY APEX V2 Research Scanner
 on:
   push:
-    branches: [ry-apex-v2-rebuild]
+    branches: [ry-apex-v2-rebuild, research/mj-portfolio-backtest-v1]
   workflow_dispatch:
   schedule:
     - cron: '30 15 * * 1-5'
