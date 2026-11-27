@@ -146,7 +146,7 @@ def backtest_early_runners(f: pd.DataFrame, cooldown: int = 20) -> tuple[pd.Data
             last = -cooldown
             hits = np.flatnonzero(d[flag].fillna(False).to_numpy())
             for i in hits:
-                if i - last < cooldown or i + 40 >= len(d):
+                if i - last < cooldown or i + 1 >= len(d):
                     continue
                 entry = float(d.at[i + 1, "OPEN"])
                 if not np.isfinite(entry) or entry <= 0:
