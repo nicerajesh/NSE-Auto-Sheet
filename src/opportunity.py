@@ -67,7 +67,7 @@ def add_opportunity_features(f: pd.DataFrame) -> pd.DataFrame:
         candle_score = loc.clip(0, 1) * 15
         momentum_score = (d["RET5"].clip(-5, 10) + 5) / 15 * 20
         liquidity_score = liquid.astype(int) * 10
-        d["OPPORTUNITY_SCORE"] = (trend + volume_score + candle_score + momentum_score + liquidity_score).clip(0, 100)
+        d["OPPORTUNITY_SCORE"] = (trend * 0.75 + volume_score + candle_score + momentum_score + liquidity_score).clip(0, 100)
         d["OPPORTUNITY_LIQUID"] = liquid
         parts.append(d)
     return pd.concat(parts, ignore_index=True)
@@ -127,7 +127,7 @@ def evaluate_opportunity_setups(f: pd.DataFrame, max_hold: int = 20) -> pd.DataF
         for col, label in flag_names:
             last = -999
             for i in np.flatnonzero(d[col].fillna(False).to_numpy()):
-                if i - last < 10 or i + 1 >= len(d):
+                if i - last < max_hold or i + 1 >= len(d):
                     continue
                 close, atr = float(d.at[i, "CLOSE"]), float(d.at[i, "ATR"])
                 if not np.isfinite(atr) or atr <= 0:
@@ -153,11 +153,18 @@ def evaluate_opportunity_setups(f: pd.DataFrame, max_hold: int = 20) -> pd.DataF
     for label, g in t.groupby("SETUP"):
         gains = g.loc[g.NET_PCT > 0, "NET_PCT"].sum()
         losses = -g.loc[g.NET_PCT < 0, "NET_PCT"].sum()
+        oos = g[pd.to_datetime(g.SIGNAL_DATE) >= pd.Timestamp("2023-01-01")]
+        oos_gains = oos.loc[oos.NET_PCT > 0, "NET_PCT"].sum()
+        oos_losses = -oos.loc[oos.NET_PCT < 0, "NET_PCT"].sum()
         summaries.append({
             "SETUP": label, "TRADES": len(g),
             "WIN_PCT": round(float((g.NET_PCT > 0).mean() * 100), 1),
             "AVG_NET_PCT": round(float(g.NET_PCT.mean()), 2),
             "MEDIAN_NET_PCT": round(float(g.NET_PCT.median()), 2),
             "PROFIT_FACTOR": round(float(gains / losses), 2) if losses else (float("inf") if gains else 0.0),
+            "OOS_TRADES_2023_PLUS": len(oos),
+            "OOS_WIN_PCT_2023_PLUS": round(float((oos.NET_PCT > 0).mean() * 100), 1) if len(oos) else np.nan,
+            "OOS_AVG_NET_PCT_2023_PLUS": round(float(oos.NET_PCT.mean()), 2) if len(oos) else np.nan,
+            "OOS_PROFIT_FACTOR_2023_PLUS": round(float(oos_gains / oos_losses), 2) if oos_losses else (float("inf") if oos_gains else 0.0),
         })
-    return pd.DataFrame(summaries).sort_values("PROFIT_FACTOR", ascending=False).reset_index(drop=True)
+    return pd.DataFrame(summaries).sort_values("OOS_PROFIT_FACTOR_2023_PLUS", ascending=False).reset_index(drop=True)
