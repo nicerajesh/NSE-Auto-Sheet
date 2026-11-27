@@ -147,6 +147,42 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
             add([r["SETUP"], r["TRADES"], r["WIN_PCT"], r["AVG_NET_PCT"], r["MEDIAN_NET_PCT"], r["PROFIT_FACTOR"], r["OOS_TRADES_2023_PLUS"], r["OOS_WIN_PCT_2023_PLUS"], r["OOS_AVG_NET_PCT_2023_PLUS"], r["OOS_PROFIT_FACTOR_2023_PLUS"]])
     else:
         add(["Abhi historical sample nahi"])
+    add([""])
+    add(["G) EARLY RUNNER HUNTER - low se turn, accumulation aur breakout se pehle ke candidates; research only"], "title")
+    add(["STOCK", "SETUP", "CLOSE", "SCORE /100", "52W LOW SE %", "52W HIGH SE %", "CMF20", "UP/DOWN VOL", "VOL X", "RS60", "RS60 CHANGE 20D", "RSI", "STATUS"], "header")
+    er = ctx.get("early_runner_radar")
+    if ctx.get("buy_ok") and er is not None and not er.empty:
+        for _, r in er.iterrows():
+            add([r["SYMBOL"], r["SETUP"], r["CLOSE"], r["SCORE"], r["LOW52W_DIST_PCT"], r["HIGH52W_DIST_PCT"],
+                 r["CMF20"], r["UP_DOWN_VOL"], r["VOL_RATIO"], r["RS60"], r["RS60_CHANGE_20D"], r["RSI"], r["STATUS"]])
+    else:
+        add(["", "Aaj koi early-runner candidate nahi" if ctx.get("buy_ok") else "BUY BAND: " + ctx.get("banner", "")])
+    add([""])
+    add(["H) EARLY RUNNER HISTORICAL FORWARD STUDY - next-session OPEN se 5/10/20/40 sessions ke close returns; range MFE/MAE stop execution nahi"], "title")
+    add(["SETUP", "HORIZON", "SAMPLE", "WIN %", "AVG %", "MEDIAN %", "HIT +10 %", "HIT +20 %", "AVG MFE %", "AVG MAE %", "OOS SAMPLE", "OOS WIN %", "OOS AVG %", "OOS MEDIAN %", "OOS HIT +10 %", "OOS HIT +20 %"], "header")
+    ers = ctx.get("early_runner_stats")
+    if ers is not None and not ers.empty:
+        for _, r in ers.iterrows():
+            add([r["SETUP"], r["HORIZON_SESSIONS"], r["TRADES"], r["WIN_PCT"], r["AVG_RETURN_PCT"], r["MEDIAN_RETURN_PCT"],
+                 r["HIT_10PCT"], r["HIT_20PCT"], r["AVG_MFE_PCT"], r["AVG_MAE_PCT"], r["OOS_TRADES"],
+                 r["OOS_WIN_PCT"], r["OOS_AVG_RETURN_PCT"], r["OOS_MEDIAN_RETURN_PCT"], r["OOS_HIT_10PCT"], r["OOS_HIT_20PCT"]])
+    else:
+        add(["Abhi complete historical sample nahi"])
+    add([""])
+    add(["I) USER FOCUS LIST - in 30 shares ke historical early-runner signals ka symbol-wise scorecard; blank = enough historical signals nahi"], "title")
+    focus = ctx.get("early_runner_focus")
+    focus_hdr = ["STOCK", "EVENT DAYS", "LAST SIGNAL", "10D N", "10D AVG %", "10D MEDIAN %", "10D WIN %", "10D HIT +10 %",
+                 "20D N", "20D AVG %", "20D MEDIAN %", "20D WIN %", "20D HIT +10 %",
+                 "40D N", "40D AVG %", "40D MEDIAN %", "40D WIN %", "40D HIT +10 %"]
+    add(focus_hdr, "header")
+    if focus is not None and not focus.empty:
+        for _, r in focus.iterrows():
+            add([r["SYMBOL"], r["EVENT_DAYS"], r["LAST_SIGNAL_DATE"],
+                 r["N_10D"], r["AVG_10D_PCT"], r["MEDIAN_10D_PCT"], r["WIN_10D_PCT"], r["HIT10_10D_PCT"],
+                 r["N_20D"], r["AVG_20D_PCT"], r["MEDIAN_20D_PCT"], r["WIN_20D_PCT"], r["HIT10_20D_PCT"],
+                 r["N_40D"], r["AVG_40D_PCT"], r["MEDIAN_40D_PCT"], r["WIN_40D_PCT"], r["HIT10_40D_PCT"]])
+    else:
+        add(["Focus symbols ke liye event history available nahi"])
 
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
