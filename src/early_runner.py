@@ -11,6 +11,13 @@ import pandas as pd
 
 
 SETUPS = ("BOTTOM TURN", "ACCUMULATION", "PRE-BREAKOUT", "FIRST MOMENTUM")
+FOCUS_SYMBOLS = (
+    "PRESTIGE", "ACE", "TORNTPHARM", "J&KBANK", "BRIGADE", "KFINTECH",
+    "BAJAJHLDNG", "LODHA", "WOCKPHARMA", "MCX", "JWL", "TCS", "DOMS",
+    "WIPRO", "PTCIL", "360ONE", "BRITANNIA", "RKFORGE", "SOBHA",
+    "BALRAMCHIN", "CRAFTSMAN", "ZENTEC", "CHOICEIN", "KAJARIACER",
+    "LTTS", "BAJAJ-AUTO", "KPRMILL", "HDFCBANK", "ENDURANCE", "HEGAM",
+)
 
 
 def add_early_runner_features(f: pd.DataFrame) -> pd.DataFrame:
@@ -199,3 +206,26 @@ def backtest_early_runners(f: pd.DataFrame, cooldown: int = 20) -> tuple[pd.Data
         })
     summary = pd.DataFrame(summaries)
     return events, summary
+
+
+
+def summarize_focus_symbols(events: pd.DataFrame, symbols=FOCUS_SYMBOLS) -> pd.DataFrame:
+    """One row per user-supplied focus symbol; duplicate same-day setup events count once."""
+    rows = []
+    for sym in symbols:
+        d = events[events["SYMBOL"] == sym].sort_values(["SIGNAL_DATE", "SCORE"], ascending=[True, False])
+        if not d.empty:
+            d = d.drop_duplicates("SIGNAL_DATE", keep="last")
+        row = {
+            "SYMBOL": sym, "EVENT_DAYS": len(d),
+            "LAST_SIGNAL_DATE": d["SIGNAL_DATE"].max() if not d.empty else pd.NaT,
+        }
+        for n in (10, 20, 40):
+            r = d[f"RET_{n}D"].dropna() if not d.empty else pd.Series(dtype=float)
+            row[f"N_{n}D"] = len(r)
+            row[f"AVG_{n}D_PCT"] = round(float(r.mean()), 2) if len(r) else np.nan
+            row[f"MEDIAN_{n}D_PCT"] = round(float(r.median()), 2) if len(r) else np.nan
+            row[f"WIN_{n}D_PCT"] = round(float((r > 0).mean() * 100), 1) if len(r) else np.nan
+            row[f"HIT10_{n}D_PCT"] = round(float((r >= 10).mean() * 100), 1) if len(r) else np.nan
+        rows.append(row)
+    return pd.DataFrame(rows)
