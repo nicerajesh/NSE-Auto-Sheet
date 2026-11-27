@@ -24,6 +24,7 @@ from engine import add_features, latest_candidates, position_size  # noqa: E402
 from v42 import add_v42_features, latest_v42_candidates            # noqa: E402
 from opportunity import add_opportunity_features, latest_opportunities, evaluate_opportunity_setups  # noqa: E402
 from early_runner import add_early_runner_features, latest_early_runners, backtest_early_runners, summarize_focus_symbols, FOCUS_SYMBOLS  # noqa: E402
+from swing_turn import add_turn_signal_features, latest_turn_signals  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.getenv("NSE_STATE_DIR", ROOT / "state"))
@@ -67,6 +68,7 @@ def main(argv=None) -> int:
     f = add_v42_features(f)
     f = add_opportunity_features(f)
     f = add_early_runner_features(f)
+    f = add_turn_signal_features(f)
     asof = f["DATE"].max()
     print(f"DATA: {hist.SYMBOL.nunique()} symbols | {hist.DATE.nunique()} sessions | latest {asof:%Y-%m-%d}")
 
@@ -146,6 +148,7 @@ def main(argv=None) -> int:
     early_runner_radar = latest_early_runners(f)
     early_runner_events, early_runner_stats = backtest_early_runners(f)
     early_runner_focus = summarize_focus_symbols(early_runner_events, FOCUS_SYMBOLS)
+    turn_signal_radar = latest_turn_signals(f)
     if not buy_v42.empty:
         # V42 tier: apna score-engine (0-100), NIFTY ki jagah apna equal-weight universe regime proxy.
         # Backtest PF sabse kam (~1.19, production code) - size sabse chhota.
@@ -180,7 +183,7 @@ def main(argv=None) -> int:
 
     last = f[f.DATE == asof]
     ctx = dict(asof=asof, stale=stale, banner=banner, buy_ok=buy_ok, mult=hl["mult"], mult_total=mult_total, mine=mine, mine_sum=msum, mine_problems=pos_problems, health_label=hl["label"], health=hl,
-               buy=buy, buy_watch=buy_watch, buy_v38=buy_v38, buy_v42=buy_v42, opportunity_radar=opportunity_radar, opportunity_stats=opportunity_stats, early_runner_radar=early_runner_radar, early_runner_stats=early_runner_stats, early_runner_focus=early_runner_focus, watch=watch, open=open_t, slots_free=slots_free, bt=summ, by_year=yearly, score=score,
+               buy=buy, buy_watch=buy_watch, buy_v38=buy_v38, buy_v42=buy_v42, opportunity_radar=opportunity_radar, opportunity_stats=opportunity_stats, early_runner_radar=early_runner_radar, early_runner_stats=early_runner_stats, early_runner_focus=early_runner_focus, turn_signal_radar=turn_signal_radar, watch=watch, open=open_t, slots_free=slots_free, bt=summ, by_year=yearly, score=score,
                n_symbols=hist.SYMBOL.nunique(), n_sessions=hist.DATE.nunique(),
                breadth50=float((last.CLOSE > last.EMA50).mean() * 100), breadth200=float((last.CLOSE > last.EMA200).mean() * 100),
                notes=notes(yearly, summ, bt.split_summary(trades)))
@@ -196,6 +199,7 @@ def main(argv=None) -> int:
     early_runner_stats.to_csv(OUT / "early_runner_backtest.csv", index=False)
     early_runner_events.to_csv(OUT / "early_runner_events.csv", index=False)
     early_runner_focus.to_csv(OUT / "early_runner_focus_30.csv", index=False)
+    turn_signal_radar.to_csv(OUT / "swing_turn_signals.csv", index=False)
     deliv.to_csv(OUT / "delivery_candidates.csv", index=False)
     watch.head(CFG.watch_rows).to_csv(OUT / "watchlist.csv", index=False)
     open_t.to_csv(OUT / "open_signals.csv", index=False)
