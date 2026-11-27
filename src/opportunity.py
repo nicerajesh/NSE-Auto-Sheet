@@ -147,7 +147,7 @@ def evaluate_opportunity_setups(f: pd.DataFrame, max_hold: int = 20) -> pd.DataF
                 results.append((label, sym, d.at[i, "DATE"], d.at[exit_i, "DATE"], ret, reason))
                 last = i
     if not results:
-        return pd.DataFrame(columns=["SETUP", "TRADES", "WIN_PCT", "AVG_NET_PCT", "MEDIAN_NET_PCT", "PROFIT_FACTOR"])
+        return pd.DataFrame(columns=["SETUP", "TRADES", "WIN_PCT", "AVG_NET_PCT", "MEDIAN_NET_PCT", "PROFIT_FACTOR", "OOS_TRADES_2023_PLUS", "OOS_WIN_PCT_2023_PLUS", "OOS_AVG_NET_PCT_2023_PLUS", "OOS_PROFIT_FACTOR_2023_PLUS"])
     t = pd.DataFrame(results, columns=["SETUP", "SYMBOL", "SIGNAL_DATE", "EXIT_DATE", "NET_PCT", "REASON"])
     summaries = []
     for label, g in t.groupby("SETUP"):
