@@ -3,3 +3,4 @@ Safe to retain; this file is the only push path that starts the daily workflow.
 Multi-strategy Hunter deployed 2026-11-27.
 
 Validation v2 deployed 2026-11-27.
+Early Runner Hunter + 30-stock focus study deployed 2026-11-27.
