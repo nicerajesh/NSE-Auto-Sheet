@@ -126,6 +126,28 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
             add([r["SYMBOL"], r["CLOSE"], r["TRIGGER"], r["DIST_TO_TRIGGER_PCT"], r["RANGE_TIGHTNESS"], r["MOM_RANK"], r["EMA20"], r["RSI"]])
     else:
         add(["Watchlist khaali"])
+    add([""])
+    add(["E) MULTI-STRATEGY HUNTER - RADAR ONLY; ye validated BUY nahi, next-session confirmation zaroori"], "title")
+    add(["STOCK", "SETUP(S)", "CLOSE", "ENTRY GUIDE", "STOP LOSS", "T1 (2R)", "T2 (3R)",
+         "VOLUME X", "52W LOW SE %", "52W HIGH SE %", "SCORE /100", "RSI", "STATUS"], "header")
+    radar = ctx.get("opportunity_radar")
+    if ctx.get("buy_ok") and radar is not None and not radar.empty:
+        for _, r in radar.iterrows():
+            add([r["SYMBOL"], r["SETUP"], r["CLOSE"], r["ENTRY_GUIDE"], r["STOP_LOSS"], r["T1_2R"],
+                 r["T2_3R"], r["VOLUME_RATIO"], r["LOW52W_DIST_PCT"], r["HIGH52W_DIST_PCT"],
+                 r["SCORE"], r["RSI"], r["STATUS"]])
+    else:
+        add(["", "Aaj koi qualified radar setup nahi" if ctx.get("buy_ok") else "BUY BAND: " + ctx.get("banner", "")])
+    add([""])
+    add(["F) MULTI-STRATEGY HISTORICAL SCREEN - simplified next-open / 2-ATR stop / 20-session exit; costs 0.35%; research only"], "title")
+    add(["STRATEGY", "TRADES", "WIN %", "AVG NET %", "MEDIAN NET %", "PROFIT FACTOR"], "header")
+    stats = ctx.get("opportunity_stats")
+    if stats is not None and not stats.empty:
+        for _, r in stats.iterrows():
+            add([r["SETUP"], r["TRADES"], r["WIN_PCT"], r["AVG_NET_PCT"], r["MEDIAN_NET_PCT"], r["PROFIT_FACTOR"]])
+    else:
+        add(["Abhi historical sample nahi"])
+
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
 

@@ -22,6 +22,7 @@ import publish as pb           # noqa: E402
 from config import CFG         # noqa: E402
 from engine import add_features, latest_candidates, position_size  # noqa: E402
 from v42 import add_v42_features, latest_v42_candidates            # noqa: E402
+from opportunity import add_opportunity_features, latest_opportunities, evaluate_opportunity_setups  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.getenv("NSE_STATE_DIR", ROOT / "state"))
@@ -63,6 +64,7 @@ def main(argv=None) -> int:
     hist = dt.load_history(STATE / "history.csv.gz", symbols, rebuild=a.rebuild_history, offline=a.offline)
     f = add_features(hist)
     f = add_v42_features(f)
+    f = add_opportunity_features(f)
     asof = f["DATE"].max()
     print(f"DATA: {hist.SYMBOL.nunique()} symbols | {hist.DATE.nunique()} sessions | latest {asof:%Y-%m-%d}")
 
@@ -137,6 +139,8 @@ def main(argv=None) -> int:
 
     deliv = dv.delivery_candidates(f) if not stale else pd.DataFrame()
     buy_v42 = latest_v42_candidates(f)
+    opportunity_radar = latest_opportunities(f)
+    opportunity_stats = evaluate_opportunity_setups(f)
     if not buy_v42.empty:
         # V42 tier: apna score-engine (0-100), NIFTY ki jagah apna equal-weight universe regime proxy.
         # Backtest PF sabse kam (~1.19, production code) - size sabse chhota.
@@ -171,7 +175,7 @@ def main(argv=None) -> int:
 
     last = f[f.DATE == asof]
     ctx = dict(asof=asof, stale=stale, banner=banner, buy_ok=buy_ok, mult=hl["mult"], mult_total=mult_total, mine=mine, mine_sum=msum, mine_problems=pos_problems, health_label=hl["label"], health=hl,
-               buy=buy, buy_watch=buy_watch, buy_v38=buy_v38, buy_v42=buy_v42, watch=watch, open=open_t, slots_free=slots_free, bt=summ, by_year=yearly, score=score,
+               buy=buy, buy_watch=buy_watch, buy_v38=buy_v38, buy_v42=buy_v42, opportunity_radar=opportunity_radar, opportunity_stats=opportunity_stats, watch=watch, open=open_t, slots_free=slots_free, bt=summ, by_year=yearly, score=score,
                n_symbols=hist.SYMBOL.nunique(), n_sessions=hist.DATE.nunique(),
                breadth50=float((last.CLOSE > last.EMA50).mean() * 100), breadth200=float((last.CLOSE > last.EMA200).mean() * 100),
                notes=notes(yearly, summ, bt.split_summary(trades)))
@@ -181,6 +185,8 @@ def main(argv=None) -> int:
     (buy_watch if buy_ok else buy_watch.head(0)).to_csv(OUT / "action_plan_buy_watch.csv", index=False)
     (buy_v38 if buy_ok else buy_v38.head(0)).to_csv(OUT / "action_plan_buy_v38.csv", index=False)
     (buy_v42 if buy_ok else buy_v42.head(0)).to_csv(OUT / "action_plan_buy_v42.csv", index=False)
+    (opportunity_radar if buy_ok else opportunity_radar.head(0)).to_csv(OUT / "opportunity_radar.csv", index=False)
+    opportunity_stats.to_csv(OUT / "opportunity_backtest.csv", index=False)
     deliv.to_csv(OUT / "delivery_candidates.csv", index=False)
     watch.head(CFG.watch_rows).to_csv(OUT / "watchlist.csv", index=False)
     open_t.to_csv(OUT / "open_signals.csv", index=False)
