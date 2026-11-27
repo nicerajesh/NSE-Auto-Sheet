@@ -215,7 +215,7 @@ def summarize_focus_symbols(events: pd.DataFrame, symbols=FOCUS_SYMBOLS) -> pd.D
     for sym in symbols:
         d = events[events["SYMBOL"] == sym].sort_values(["SIGNAL_DATE", "SCORE"], ascending=[True, False])
         if not d.empty:
-            d = d.drop_duplicates("SIGNAL_DATE", keep="last")
+            d = d.drop_duplicates("SIGNAL_DATE", keep="first")
         row = {
             "SYMBOL": sym, "EVENT_DAYS": len(d),
             "LAST_SIGNAL_DATE": d["SIGNAL_DATE"].max() if not d.empty else pd.NaT,
