@@ -72,6 +72,12 @@ def run_swing_portfolio_backtest(frame, initial_capital=1_000_000.0, max_positio
                 p["qty"] -= qty
                 p["t1_done"] = True
                 p["stop"] = p["entry"]
+                # If the same daily candle also reaches 3R, close the runner
+                # at 3R. Stop ambiguity was already resolved above.
+                if hi >= p["t2"]:
+                    finish(sym, p, date, p["t2"], "TARGET_2R_AND_3R")
+                    del positions[sym]
+                    continue
             elif p["t1_done"] and hi >= p["t2"]:
                 finish(sym, p, date, p["t2"], "TARGET_3R"); del positions[sym]; continue
             p["age"] += 1
@@ -89,7 +95,7 @@ def run_swing_portfolio_backtest(frame, initial_capital=1_000_000.0, max_positio
             risk = c["entry"] - stop
             if risk <= 0 or cash <= 0:
                 continue
-            allocation = min(cash, initial_capital / max_positions)
+            allocation = min(cash, equity_now / max_positions)
             qty = allocation / c["entry"]
             entry_fee = allocation * fee
             cash -= allocation + entry_fee
