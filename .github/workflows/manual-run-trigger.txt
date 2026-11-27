@@ -1,0 +1,10 @@
+Manual daily run trigger.
+Safe to retain; this file is the only push path that starts the daily workflow.
+Multi-strategy Hunter deployed 2026-11-27.
+
+Validation v2 deployed 2026-11-27.
+Early Runner Hunter + 30-stock focus study deployed 2026-11-27.
+Trigger full Early Runner Hunter scan after default-branch workflow enablement.
+Rerun Early Runner with 52-week-low distance cap for accumulation.
+RY Swing Turn BUY/SELL module + Pine indicator deployed 2026-11-27.
+Swing Turn historical validation + ACTION PLAN Sections J/K deployed 2026-11-27.

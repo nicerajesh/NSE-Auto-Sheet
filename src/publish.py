@@ -72,7 +72,9 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
 
     add(["B) NAYE BUY - agle session ke OPEN par kharido (open signal close se 2% se upar ho to SKIP)"], "title")
     hdr = ["#", "STOCK", "SETUP", "BUY PRICE (approx)", "MAX BUY", "STOP LOSS", "T1 (2R)", "T2 (4R)", "T3 (6R)",
-           "RISK %", "QTY", "CAPITAL Rs", "RISK Rs", "MOMENTUM RANK", "EXIT PLAN"]
+           "RISK %", "QTY", "CAPITAL Rs", "RISK Rs", "MOMENTUM RANK",
+           "T1 MOVE %", "T2 MOVE %", "T3 MOVE %", "HIST SAMPLE (2023+)", "HIST WIN % (2023+)",
+           "HIST AVG NET % (2023+)", "MEDIAN HOLD (SESSIONS)", "2025+ AVG NET %", "EXIT PLAN"]
     add(hdr, "header")
     buy = ctx["buy"]
     if ctx["buy_ok"] and buy is not None and not buy.empty:
@@ -80,7 +82,11 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
             plan = ("T1 touch -> SL entry par | T2 touch -> SL T1 par | T3 touch -> SL T2 par. "
                     "Koi fixed target nahi; SL hit hone tak hold (max 90 din).")
             add([i, r["SYMBOL"], r["SETUP"], r["CLOSE"], r["CLOSE"] * (1 + CFG.max_gap_pct / 100), r["STOP"], r["T1"],
-                 r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"], plan])
+                 r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"],
+                 r.get("T1_MOVE_PCT", ""), r.get("T2_MOVE_PCT", ""), r.get("T3_MOVE_PCT", ""),
+                 r.get("HIST_SAMPLE_2023_PLUS", ""), r.get("HIST_WIN_PCT_2023_PLUS", ""),
+                 r.get("HIST_AVG_RETURN_PCT_2023_PLUS", ""), r.get("HIST_MEDIAN_HOLD_SESSIONS", ""),
+                 r.get("HIST_2025_PLUS_AVG_RETURN_PCT", ""), plan])
     else:
         add(["", "KOI NAYA BUY NAHI" if ctx["buy_ok"] else "BUY BAND: " + ctx["banner"]])
     add([""])
@@ -93,7 +99,11 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
         for i, (_, r) in enumerate(bw.iterrows(), 1):
             plan = "T1/T2/T3 ka staircase SL - jaisa strict BUY me hai. Size aadha rakha gaya hai (kam PF ki wajah se)."
             add([i, r["SYMBOL"], r["SETUP"], r["CLOSE"], r["CLOSE"] * (1 + CFG.max_gap_pct / 100), r["STOP"], r["T1"],
-                 r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"], plan])
+                 r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"],
+                 r.get("T1_MOVE_PCT", ""), r.get("T2_MOVE_PCT", ""), r.get("T3_MOVE_PCT", ""),
+                 r.get("HIST_SAMPLE_2023_PLUS", ""), r.get("HIST_WIN_PCT_2023_PLUS", ""),
+                 r.get("HIST_AVG_RETURN_PCT_2023_PLUS", ""), r.get("HIST_MEDIAN_HOLD_SESSIONS", ""),
+                 r.get("HIST_2025_PLUS_AVG_RETURN_PCT", ""), plan])
     else:
         add(["", "Aaj koi WATCH BUY bhi nahi (bahut kamzor din)" if ctx["buy_ok"] else "BUY BAND: " + ctx["banner"]])
     add([""])
@@ -116,6 +126,85 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
             add([r["SYMBOL"], r["CLOSE"], r["TRIGGER"], r["DIST_TO_TRIGGER_PCT"], r["RANGE_TIGHTNESS"], r["MOM_RANK"], r["EMA20"], r["RSI"]])
     else:
         add(["Watchlist khaali"])
+    add([""])
+    add(["E) MULTI-STRATEGY HUNTER - RADAR ONLY; ye validated BUY nahi, next-session confirmation zaroori"], "title")
+    add(["STOCK", "SETUP(S)", "CLOSE", "ENTRY GUIDE", "STOP LOSS", "T1 (2R)", "T2 (3R)",
+         "VOLUME X", "52W LOW SE %", "52W HIGH SE %", "SCORE /100", "RSI", "STATUS"], "header")
+    radar = ctx.get("opportunity_radar")
+    if ctx.get("buy_ok") and radar is not None and not radar.empty:
+        for _, r in radar.iterrows():
+            add([r["SYMBOL"], r["SETUP"], r["CLOSE"], r["ENTRY_GUIDE"], r["STOP_LOSS"], r["T1_2R"],
+                 r["T2_3R"], r["VOLUME_RATIO"], r["LOW52W_DIST_PCT"], r["HIGH52W_DIST_PCT"],
+                 r["SCORE"], r["RSI"], r["STATUS"]])
+    else:
+        add(["", "Aaj koi qualified radar setup nahi" if ctx.get("buy_ok") else "BUY BAND: " + ctx.get("banner", "")])
+    add([""])
+    add(["F) MULTI-STRATEGY HISTORICAL SCREEN - simplified next-open / 2-ATR stop / 20-session exit; costs 0.35%; research only"], "title")
+    add(["STRATEGY", "TRADES", "WIN %", "AVG NET %", "MEDIAN NET %", "PF FULL", "OOS TRADES (2023+)", "OOS WIN %", "OOS AVG NET %", "OOS PF (2023+)"], "header")
+    stats = ctx.get("opportunity_stats")
+    if stats is not None and not stats.empty:
+        for _, r in stats.iterrows():
+            add([r["SETUP"], r["TRADES"], r["WIN_PCT"], r["AVG_NET_PCT"], r["MEDIAN_NET_PCT"], r["PROFIT_FACTOR"], r["OOS_TRADES_2023_PLUS"], r["OOS_WIN_PCT_2023_PLUS"], r["OOS_AVG_NET_PCT_2023_PLUS"], r["OOS_PROFIT_FACTOR_2023_PLUS"]])
+    else:
+        add(["Abhi historical sample nahi"])
+    add([""])
+    add(["G) EARLY RUNNER HUNTER - low se turn, accumulation aur breakout se pehle ke candidates; research only"], "title")
+    add(["STOCK", "SETUP", "CLOSE", "SCORE /100", "52W LOW SE %", "52W HIGH SE %", "CMF20", "UP/DOWN VOL", "VOL X", "RS60", "RS60 CHANGE 20D", "RSI", "STATUS"], "header")
+    er = ctx.get("early_runner_radar")
+    if ctx.get("buy_ok") and er is not None and not er.empty:
+        for _, r in er.iterrows():
+            add([r["SYMBOL"], r["SETUP"], r["CLOSE"], r["SCORE"], r["LOW52W_DIST_PCT"], r["HIGH52W_DIST_PCT"],
+                 r["CMF20"], r["UP_DOWN_VOL"], r["VOL_RATIO"], r["RS60"], r["RS60_CHANGE_20D"], r["RSI"], r["STATUS"]])
+    else:
+        add(["", "Aaj koi early-runner candidate nahi" if ctx.get("buy_ok") else "BUY BAND: " + ctx.get("banner", "")])
+    add([""])
+    add(["H) EARLY RUNNER HISTORICAL FORWARD STUDY - next-session OPEN se 5/10/20/40 sessions ke gross close returns (charges/slippage se pehle); range MFE/MAE stop execution nahi"], "title")
+    add(["SETUP", "HORIZON", "SAMPLE", "WIN %", "AVG %", "MEDIAN %", "HIT +10 %", "HIT +20 %", "AVG MFE %", "AVG MAE %", "OOS SAMPLE", "OOS WIN %", "OOS AVG %", "OOS MEDIAN %", "OOS HIT +10 %", "OOS HIT +20 %"], "header")
+    ers = ctx.get("early_runner_stats")
+    if ers is not None and not ers.empty:
+        for _, r in ers.iterrows():
+            add([r["SETUP"], r["HORIZON_SESSIONS"], r["TRADES"], r["WIN_PCT"], r["AVG_RETURN_PCT"], r["MEDIAN_RETURN_PCT"],
+                 r["HIT_10PCT"], r["HIT_20PCT"], r["AVG_MFE_PCT"], r["AVG_MAE_PCT"], r["OOS_TRADES"],
+                 r["OOS_WIN_PCT"], r["OOS_AVG_RETURN_PCT"], r["OOS_MEDIAN_RETURN_PCT"], r["OOS_HIT_10PCT"], r["OOS_HIT_20PCT"]])
+    else:
+        add(["Abhi complete historical sample nahi"])
+    add([""])
+    add(["I) USER FOCUS LIST - in 30 shares ke historical early-runner signals ka symbol-wise scorecard; blank = enough historical signals nahi"], "title")
+    focus = ctx.get("early_runner_focus")
+    focus_hdr = ["STOCK", "EVENT DAYS", "LAST SIGNAL", "10D N", "10D AVG %", "10D MEDIAN %", "10D WIN %", "10D HIT +10 %",
+                 "20D N", "20D AVG %", "20D MEDIAN %", "20D WIN %", "20D HIT +10 %",
+                 "40D N", "40D AVG %", "40D MEDIAN %", "40D WIN %", "40D HIT +10 %"]
+    add(focus_hdr, "header")
+    if focus is not None and not focus.empty:
+        for _, r in focus.iterrows():
+            add([r["SYMBOL"], r["EVENT_DAYS"], r["LAST_SIGNAL_DATE"],
+                 r["N_10D"], r["AVG_10D_PCT"], r["MEDIAN_10D_PCT"], r["WIN_10D_PCT"], r["HIT10_10D_PCT"],
+                 r["N_20D"], r["AVG_20D_PCT"], r["MEDIAN_20D_PCT"], r["WIN_20D_PCT"], r["HIT10_20D_PCT"],
+                 r["N_40D"], r["AVG_40D_PCT"], r["MEDIAN_40D_PCT"], r["WIN_40D_PCT"], r["HIT10_40D_PCT"]])
+    else:
+        add(["Focus symbols ke liye event history available nahi"])
+    add([""])
+    add(["J) RY SWING TURN - CONFIRMED SIGNALS; next-session OPEN entry plan only; research-only"], "title")
+    add(["STOCK", "SIGNAL", "SIGNAL DATE", "PIVOT DATE", "PIVOT PRICE", "CLOSE", "STOP LOSS", "TARGET 1 (2R)", "TARGET 2 (3R)", "RSI", "CONFIRMATION"], "header")
+    turn = ctx.get("turn_signal_radar")
+    if turn is not None and not turn.empty:
+        for _, r in turn.iterrows():
+            add([r["SYMBOL"], r["SIGNAL"], r["SIGNAL_DATE"], r["PIVOT_DATE"], r["PIVOT_PRICE"],
+                 r["CLOSE"], r["STOP_LOSS"], r["TARGET_1"], r["TARGET_2"], r["RSI"], r["CONFIRMATION"]])
+    else:
+        add(["", "Aaj koi confirmed swing turn signal nahi"])
+    add([""])
+    add(["K) SWING TURN HISTORICAL EVENT STUDY - BUY only; next-session OPEN entry to horizon CLOSE; gross before costs; overlapping events; MFE/MAE are range excursions, not stop/target fills"], "title")
+    add(["HORIZON", "SAMPLE", "WIN %", "AVG %", "MEDIAN %", "HIT +10 %", "HIT +20 %", "AVG MFE %", "AVG MAE %", "OOS SAMPLE", "OOS WIN %", "OOS AVG %", "OOS MEDIAN %", "OOS HIT +10 %", "OOS HIT +20 %"], "header")
+    ts = ctx.get("turn_signal_stats")
+    if ts is not None and not ts.empty:
+        for _, r in ts.iterrows():
+            add([r["HORIZON_SESSIONS"], r["TRADES"], r["WIN_PCT"], r["AVG_RETURN_PCT"], r["MEDIAN_RETURN_PCT"],
+                 r["HIT_10PCT"], r["HIT_20PCT"], r["AVG_MFE_PCT"], r["AVG_MAE_PCT"], r["OOS_TRADES"],
+                 r["OOS_WIN_PCT"], r["OOS_AVG_RETURN_PCT"], r["OOS_MEDIAN_RETURN_PCT"], r["OOS_HIT_10PCT"], r["OOS_HIT_20PCT"]])
+    else:
+        add(["Abhi swing-turn BUY ka complete historical sample nahi"])
+
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
 
@@ -172,6 +261,17 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
 
     if not any_row:
         add(["", "Aaj koi BUY ya SELL nahi", "", "", "", "", "", ""])
+
+    # Separate research signal: confirmed swing pivots; never mixes with production BUY rows.
+    add(["J) RY SWING TURN SIGNAL - pivot confirmation ke baad ka research signal; next-session entry only"], "title")
+    add(["STOCK", "SIGNAL", "SIGNAL DATE", "PIVOT DATE", "PIVOT PRICE", "CLOSE", "STOP LOSS", "TARGET 1 (2R)", "TARGET 2 (3R)", "RSI", "CONFIRMATION"], "header")
+    turn = ctx.get("turn_signal_radar")
+    if turn is not None and not turn.empty:
+        for _, r in turn.iterrows():
+            add([r["SYMBOL"], r["SIGNAL"], r["SIGNAL_DATE"], r["PIVOT_DATE"], r["PIVOT_PRICE"],
+                 r["CLOSE"], r["STOP_LOSS"], r["TARGET_1"], r["TARGET_2"], r["RSI"], r["CONFIRMATION"]])
+    else:
+        add(["", "Aaj koi confirmed swing turn signal nahi"])
 
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
