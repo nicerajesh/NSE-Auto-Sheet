@@ -99,12 +99,12 @@ def run_swing_portfolio_backtest(frame, initial_capital=1_000_000.0, max_positio
                 p["qty"] * float(today.loc[s, "CLOSE"])
                 for s, p in positions.items() if s in today.index
             )
-            allocation = min(cash, equity_now / max_positions)
+            allocation = min(cash / (1.0 + fee), equity_now / max_positions)
             qty = allocation / c["entry"]
             entry_fee = allocation * fee
             cash -= allocation + entry_fee
             positions[c["symbol"]] = {"signal_date": c["signal_date"], "entry_date": date,
-                "entry": c["entry"], "qty": qty, "allocated": allocation, "stop": stop,
+                "entry": c["entry"], "last_close": c["entry"], "qty": qty, "allocated": allocation, "stop": stop,
                 "t1": c["entry"] + 2 * risk, "t2": c["entry"] + 3 * risk,
                 "t1_done": False, "realized": -entry_fee, "cost": entry_fee, "age": 1}
 
@@ -116,8 +116,7 @@ def run_swing_portfolio_backtest(frame, initial_capital=1_000_000.0, max_positio
     if dates:
         last_date, last = dates[-1], daily[dates[-1]]
         for sym, p in list(positions.items()):
-            if sym in last.index:
-                finish(sym, p, last_date, float(last.loc[sym].CLOSE), "END_OF_DATA")
+            finish(sym, p, last_date, p["last_close"], "END_OF_DATA")
         if curve:
             curve[-1]["EQUITY"], curve[-1]["CASH"], curve[-1]["OPEN_POSITIONS"] = cash, cash, 0
     t, eq = pd.DataFrame(trades), pd.DataFrame(curve)
