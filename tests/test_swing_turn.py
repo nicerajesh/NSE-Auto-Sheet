@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from swing_turn import add_turn_signal_features, latest_turn_signals
+from swing_turn import add_turn_signal_features, latest_turn_signals, backtest_turn_signals
 
 
 def make_frame(n=100):
@@ -37,3 +37,19 @@ def test_latest_turn_output_schema_when_no_signal():
     out = latest_turn_signals(f)
     assert isinstance(out, pd.DataFrame)
     assert "SIGNAL" in out.columns
+
+
+
+def test_turn_backtest_enters_next_session_open_and_counts_horizon_sessions():
+    f = make_frame(40)
+    f["TURN_BUY"] = False
+    f.loc[20, "TURN_BUY"] = True
+    events, stats = backtest_turn_signals(f, horizons=(5,), oos_start="2024-01-01")
+    assert len(events) == 1
+    row = events.iloc[0]
+    assert row["ENTRY_DATE"] == f.loc[21, "DATE"]
+    assert row["ENTRY_OPEN"] == f.loc[21, "OPEN"]
+    assert row["EXIT_DATE"] == f.loc[25, "DATE"]
+    assert row["HORIZON_SESSIONS"] == 5
+    assert len(stats) == 1
+    assert stats.iloc[0]["TRADES"] == 1
