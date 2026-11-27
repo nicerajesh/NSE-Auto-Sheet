@@ -61,6 +61,7 @@ def add_early_runner_features(f: pd.DataFrame) -> pd.DataFrame:
             (d["ER_CMF20"] > -0.08) & (d["ER_UP_DOWN_VOL"] > 0.95) & valid
         )
         accumulation = (
+            d["ER_LOW_DIST"].between(5, 55) &
             (c > d["EMA20"]) & d["ER_EMA20_UP"] &
             (d["ER_CMF20"] >= 0.05) & (d["ER_UP_DOWN_VOL"] >= 1.10) &
             (d["ER_OBV_DELTA20"] > 0) & (d["ER_RANK_IMPROVE"] >= 3) & valid

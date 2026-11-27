@@ -158,7 +158,7 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
     else:
         add(["", "Aaj koi early-runner candidate nahi" if ctx.get("buy_ok") else "BUY BAND: " + ctx.get("banner", "")])
     add([""])
-    add(["H) EARLY RUNNER HISTORICAL FORWARD STUDY - next-session OPEN se 5/10/20/40 sessions ke close returns; range MFE/MAE stop execution nahi"], "title")
+    add(["H) EARLY RUNNER HISTORICAL FORWARD STUDY - next-session OPEN se 5/10/20/40 sessions ke gross close returns (charges/slippage se pehle); range MFE/MAE stop execution nahi"], "title")
     add(["SETUP", "HORIZON", "SAMPLE", "WIN %", "AVG %", "MEDIAN %", "HIT +10 %", "HIT +20 %", "AVG MFE %", "AVG MAE %", "OOS SAMPLE", "OOS WIN %", "OOS AVG %", "OOS MEDIAN %", "OOS HIT +10 %", "OOS HIT +20 %"], "header")
     ers = ctx.get("early_runner_stats")
     if ers is not None and not ers.empty:
