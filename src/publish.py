@@ -140,11 +140,11 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
         add(["", "Aaj koi qualified radar setup nahi" if ctx.get("buy_ok") else "BUY BAND: " + ctx.get("banner", "")])
     add([""])
     add(["F) MULTI-STRATEGY HISTORICAL SCREEN - simplified next-open / 2-ATR stop / 20-session exit; costs 0.35%; research only"], "title")
-    add(["STRATEGY", "TRADES", "WIN %", "AVG NET %", "MEDIAN NET %", "PROFIT FACTOR"], "header")
+    add(["STRATEGY", "TRADES", "WIN %", "AVG NET %", "MEDIAN NET %", "PF FULL", "OOS TRADES (2023+)", "OOS WIN %", "OOS AVG NET %", "OOS PF (2023+)"], "header")
     stats = ctx.get("opportunity_stats")
     if stats is not None and not stats.empty:
         for _, r in stats.iterrows():
-            add([r["SETUP"], r["TRADES"], r["WIN_PCT"], r["AVG_NET_PCT"], r["MEDIAN_NET_PCT"], r["PROFIT_FACTOR"]])
+            add([r["SETUP"], r["TRADES"], r["WIN_PCT"], r["AVG_NET_PCT"], r["MEDIAN_NET_PCT"], r["PROFIT_FACTOR"], r["OOS_TRADES_2023_PLUS"], r["OOS_WIN_PCT_2023_PLUS"], r["OOS_AVG_NET_PCT_2023_PLUS"], r["OOS_PROFIT_FACTOR_2023_PLUS"]])
     else:
         add(["Abhi historical sample nahi"])
 
