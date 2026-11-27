@@ -61,7 +61,7 @@ def test_forward_returns_start_next_open_and_require_complete_window():
     assert len(events) == 1
     assert events.iloc[0]["ENTRY_DATE"] == dates[11]
     assert events.iloc[0]["ENTRY_OPEN"] == 100.0
-    assert events.iloc[0]["RET_5D"] == 10.0
+    assert np.isclose(events.iloc[0]["RET_5D"], 10.0)
     assert not stats.empty
     assert (stats.HORIZON_SESSIONS == 5).any()
 
