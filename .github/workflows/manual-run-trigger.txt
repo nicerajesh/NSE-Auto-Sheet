@@ -1,1 +1,3 @@
-Manual daily run trigger. Safe to retain; this file is the only push path that starts the daily workflow.
+Manual daily run trigger.
+Safe to retain; this file is the only push path that starts the daily workflow.
+Multi-strategy Hunter deployed 2026-11-27.
