@@ -241,6 +241,17 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
     if not any_row:
         add(["", "Aaj koi BUY ya SELL nahi", "", "", "", "", "", ""])
 
+    # Separate research signal: confirmed swing pivots; never mixes with production BUY rows.
+    add(["J) RY SWING TURN SIGNAL - pivot confirmation ke baad ka research signal; next-session entry only"], "title")
+    add(["STOCK", "SIGNAL", "SIGNAL DATE", "PIVOT DATE", "PIVOT PRICE", "CLOSE", "STOP LOSS", "TARGET 1 (2R)", "TARGET 2 (3R)", "RSI", "CONFIRMATION"], "header")
+    turn = ctx.get("turn_signal_radar")
+    if turn is not None and not turn.empty:
+        for _, r in turn.iterrows():
+            add([r["SYMBOL"], r["SIGNAL"], r["SIGNAL_DATE"], r["PIVOT_DATE"], r["PIVOT_PRICE"],
+                 r["CLOSE"], r["STOP_LOSS"], r["TARGET_1"], r["TARGET_2"], r["RSI"], r["CONFIRMATION"]])
+    else:
+        add(["", "Aaj koi confirmed swing turn signal nahi"])
+
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
     width = max(len(r) for r in rows)

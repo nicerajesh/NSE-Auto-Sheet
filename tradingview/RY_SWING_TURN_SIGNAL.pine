@@ -1,0 +1,39 @@
+//@version=6
+indicator("RY SWING TURN SIGNAL", overlay=true, max_labels_count=500)
+
+// The pivot is displayed on its actual swing candle only after rightBars
+// candles have closed. Alerts/signals are available on the confirmation bar.
+leftBars  = input.int(4, "Pivot left bars", minval=2, maxval=20)
+rightBars = input.int(3, "Pivot confirmation bars", minval=1, maxval=10)
+showEMAs  = input.bool(true, "Show EMA 10 / EMA 20")
+
+ema10 = ta.ema(close, 10)
+ema20 = ta.ema(close, 20)
+rsi14 = ta.rsi(close, 14)
+
+pivotLow  = ta.pivotlow(low, leftBars, rightBars)
+pivotHigh = ta.pivothigh(high, leftBars, rightBars)
+
+buySignal = not na(pivotLow) and close > ema20 and close > close[1] and rsi14 >= 45 and rsi14 > rsi14[3] and close > open
+sellSignal = not na(pivotHigh) and close < ema10 and rsi14 < 55 and rsi14 < rsi14[3] and close < open
+
+atr14 = ta.atr(14)
+buyStop = math.min(pivotLow, close - 1.8 * atr14)
+buyRisk = close - buyStop
+target1 = close + 2.0 * buyRisk
+target2 = close + 3.0 * buyRisk
+
+plot(showEMAs ? ema10 : na, "EMA 10", color=color.orange)
+plot(showEMAs ? ema20 : na, "EMA 20", color=color.blue)
+
+// Circles are visually anchored to the swing candle. They appear only after
+// rightBars confirmation candles; this is not a backdated trading alert.
+plotshape(buySignal, title="BUY - confirmed swing low", style=shape.circle, location=location.belowbar, offset=-rightBars, color=color.lime, size=size.small, text="BUY", textcolor=color.black)
+plotshape(sellSignal, title="SELL - confirmed swing high", style=shape.circle, location=location.abovebar, offset=-rightBars, color=color.red, size=size.small, text="SELL", textcolor=color.white)
+
+plot(buySignal ? buyStop : na, "BUY Stop", color=color.red, style=plot.style_linebr)
+plot(buySignal ? target1 : na, "BUY Target 1 (2R)", color=color.green, style=plot.style_linebr)
+plot(buySignal ? target2 : na, "BUY Target 2 (3R)", color=color.green, style=plot.style_linebr)
+
+alertcondition(buySignal, title="RY BUY", message="RY SWING TURN BUY confirmed on {{ticker}} at {{close}}. Entry is next-session plan; check stop/position size.")
+alertcondition(sellSignal, title="RY SELL", message="RY SWING TURN SELL confirmed on {{ticker}} at {{close}}. Review/exit existing long position.")
