@@ -5,3 +5,4 @@ Multi-strategy Hunter deployed 2026-11-27.
 Validation v2 deployed 2026-11-27.
 Early Runner Hunter + 30-stock focus study deployed 2026-11-27.
 Trigger full Early Runner Hunter scan after default-branch workflow enablement.
+Rerun Early Runner with 52-week-low distance cap for accumulation.
