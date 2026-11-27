@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from early_runner import add_early_runner_features, latest_early_runners, backtest_early_runners
+from early_runner import add_early_runner_features, latest_early_runners, backtest_early_runners, summarize_focus_symbols
 
 
 def feature_frame(n=340):
@@ -84,3 +84,21 @@ def test_latest_radar_has_only_flagged_rows():
     assert len(radar) == 1
     assert radar.iloc[0]["SETUP"] == "ACCUMULATION"
     assert radar.iloc[0]["SCORE"] == 77.0
+
+
+
+def test_focus_scorecard_keeps_all_requested_symbols_and_deduplicates_dates():
+    events = pd.DataFrame({
+        "SYMBOL": ["PRESTIGE", "PRESTIGE", "PRESTIGE"],
+        "SETUP": ["BOTTOM TURN", "ACCUMULATION", "FIRST MOMENTUM"],
+        "SIGNAL_DATE": pd.to_datetime(["2024-01-01", "2024-01-01", "2024-02-01"]),
+        "SCORE": [70.0, 90.0, 80.0],
+        "RET_10D": [5.0, 6.0, 12.0], "RET_20D": [8.0, 9.0, 15.0],
+        "RET_40D": [10.0, 11.0, 20.0],
+    })
+    out = summarize_focus_symbols(events, ["PRESTIGE", "ACE"])
+    assert list(out.SYMBOL) == ["PRESTIGE", "ACE"]
+    assert out.iloc[0]["EVENT_DAYS"] == 2
+    assert out.iloc[0]["AVG_10D_PCT"] == 9.0
+    assert out.iloc[1]["EVENT_DAYS"] == 0
+    assert pd.isna(out.iloc[1]["AVG_10D_PCT"])
