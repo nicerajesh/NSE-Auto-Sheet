@@ -45,9 +45,8 @@ def add_turn_signal_features(frame: pd.DataFrame, left: int = 4, right: int = 3)
         d["TURN_SIGNAL"] = np.select(
             [d["TURN_BUY"], d["TURN_SELL"]], ["BUY", "SELL"], default=""
         )
-        d["TURN_PIVOT_DATE"] = pd.NaT
-        d.loc[d["TURN_BUY"], "TURN_PIVOT_DATE"] = d.loc[d["TURN_BUY"], "DATE"] - pd.offsets.BDay(right)
-        d.loc[d["TURN_SELL"], "TURN_PIVOT_DATE"] = d.loc[d["TURN_SELL"], "DATE"] - pd.offsets.BDay(right)
+        pivot_date = d["DATE"].shift(right)
+        d["TURN_PIVOT_DATE"] = pivot_date.where(d["TURN_BUY"] | d["TURN_SELL"])
         parts.append(d)
     return pd.concat(parts, ignore_index=True)
 
