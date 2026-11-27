@@ -95,6 +95,10 @@ def run_swing_portfolio_backtest(frame, initial_capital=1_000_000.0, max_positio
             risk = c["entry"] - stop
             if risk <= 0 or cash <= 0:
                 continue
+            equity_now = cash + sum(
+                p["qty"] * float(today.loc[s, "CLOSE"])
+                for s, p in positions.items() if s in today.index
+            )
             allocation = min(cash, equity_now / max_positions)
             qty = allocation / c["entry"]
             entry_fee = allocation * fee
