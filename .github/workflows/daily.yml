@@ -1,6 +1,11 @@
 name: RY APEX Daily
 
 on:
+  push:
+    branches:
+      - ry-apex-v2-rebuild
+    paths:
+      - '.github/workflows/manual-run-trigger.txt'
   schedule:
     - cron: '45 14 * * 1-5'      # 20:15 IST, Mon-Fri (NSE bhavcopy aa chuka hota hai)
   workflow_dispatch:
