@@ -57,6 +57,7 @@ def run_swing_portfolio_backtest(frame, initial_capital=1_000_000.0, max_positio
                 continue
             p, r = positions[sym], today.loc[sym]
             op, hi, lo, cl = map(float, (r.OPEN, r.HIGH, r.LOW, r.CLOSE))
+            p["last_close"] = cl
             stop = p["stop"]
             if op <= stop:
                 finish(sym, p, date, op, "STOP_GAP"); del positions[sym]; continue
@@ -95,10 +96,7 @@ def run_swing_portfolio_backtest(frame, initial_capital=1_000_000.0, max_positio
             risk = c["entry"] - stop
             if risk <= 0 or cash <= 0:
                 continue
-            equity_now = cash + sum(
-                p["qty"] * float(today.loc[s, "CLOSE"])
-                for s, p in positions.items() if s in today.index
-            )
+            equity_now = cash + sum(p["qty"] * p["last_close"] for p in positions.values())
             allocation = min(cash / (1.0 + fee), equity_now / max_positions)
             qty = allocation / c["entry"]
             entry_fee = allocation * fee
@@ -108,8 +106,7 @@ def run_swing_portfolio_backtest(frame, initial_capital=1_000_000.0, max_positio
                 "t1": c["entry"] + 2 * risk, "t2": c["entry"] + 3 * risk,
                 "t1_done": False, "realized": -entry_fee, "cost": entry_fee, "age": 1}
 
-        market_value = sum(p["qty"] * float(today.loc[s, "CLOSE"])
-                           for s, p in positions.items() if s in today.index)
+        market_value = sum(p["qty"] * p["last_close"] for p in positions.values())
         curve.append({"DATE": date, "EQUITY": cash + market_value, "CASH": cash,
                       "OPEN_POSITIONS": len(positions)})
 
