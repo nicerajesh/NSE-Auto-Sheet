@@ -183,6 +183,27 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
                  r["N_40D"], r["AVG_40D_PCT"], r["MEDIAN_40D_PCT"], r["WIN_40D_PCT"], r["HIT10_40D_PCT"]])
     else:
         add(["Focus symbols ke liye event history available nahi"])
+    add([""])
+    add(["J) RY SWING TURN - CONFIRMED SIGNALS; next-session OPEN entry plan only; research-only"], "title")
+    add(["STOCK", "SIGNAL", "SIGNAL DATE", "PIVOT DATE", "PIVOT PRICE", "CLOSE", "STOP LOSS", "TARGET 1 (2R)", "TARGET 2 (3R)", "RSI", "CONFIRMATION"], "header")
+    turn = ctx.get("turn_signal_radar")
+    if turn is not None and not turn.empty:
+        for _, r in turn.iterrows():
+            add([r["SYMBOL"], r["SIGNAL"], r["SIGNAL_DATE"], r["PIVOT_DATE"], r["PIVOT_PRICE"],
+                 r["CLOSE"], r["STOP_LOSS"], r["TARGET_1"], r["TARGET_2"], r["RSI"], r["CONFIRMATION"]])
+    else:
+        add(["", "Aaj koi confirmed swing turn signal nahi"])
+    add([""])
+    add(["K) SWING TURN HISTORICAL EVENT STUDY - BUY only; next-session OPEN entry to horizon CLOSE; gross before costs; overlapping events; MFE/MAE are range excursions, not stop/target fills"], "title")
+    add(["HORIZON", "SAMPLE", "WIN %", "AVG %", "MEDIAN %", "HIT +10 %", "HIT +20 %", "AVG MFE %", "AVG MAE %", "OOS SAMPLE", "OOS WIN %", "OOS AVG %", "OOS MEDIAN %", "OOS HIT +10 %", "OOS HIT +20 %"], "header")
+    ts = ctx.get("turn_signal_stats")
+    if ts is not None and not ts.empty:
+        for _, r in ts.iterrows():
+            add([r["HORIZON_SESSIONS"], r["TRADES"], r["WIN_PCT"], r["AVG_RETURN_PCT"], r["MEDIAN_RETURN_PCT"],
+                 r["HIT_10PCT"], r["HIT_20PCT"], r["AVG_MFE_PCT"], r["AVG_MAE_PCT"], r["OOS_TRADES"],
+                 r["OOS_WIN_PCT"], r["OOS_AVG_RETURN_PCT"], r["OOS_MEDIAN_RETURN_PCT"], r["OOS_HIT_10PCT"], r["OOS_HIT_20PCT"]])
+    else:
+        add(["Abhi swing-turn BUY ka complete historical sample nahi"])
 
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks

@@ -82,3 +82,74 @@ def latest_turn_signals(frame: pd.DataFrame) -> pd.DataFrame:
             "CONFIRMATION": "CONFIRMED AT CLOSE; next-session entry only",
         })
     return pd.DataFrame(rows).sort_values(["SIGNAL", "SYMBOL"]).reset_index(drop=True)
+
+
+
+def backtest_turn_signals(frame: pd.DataFrame, horizons=(5, 10, 20, 40), oos_start="2023-01-01"):
+    """Event study for BUY signals: next-session OPEN entry, horizon CLOSE exit.
+
+    Overlapping events are retained; this is not a portfolio simulation. MFE/MAE
+    are observed daily-range excursions and do not imply target/stop execution.
+    """
+    events = []
+    for _, group in frame.groupby("SYMBOL", sort=False):
+        d = group.sort_values("DATE").reset_index(drop=True)
+        signal_idx = np.flatnonzero(d["TURN_BUY"].fillna(False).to_numpy())
+        for i in signal_idx:
+            entry_idx = i + 1
+            if entry_idx >= len(d):
+                continue
+            entry = float(d.loc[entry_idx, "OPEN"])
+            if not np.isfinite(entry) or entry <= 0:
+                continue
+            for h in horizons:
+                end_idx = entry_idx + int(h) - 1
+                if end_idx >= len(d):
+                    continue
+                window = d.iloc[entry_idx:end_idx + 1]
+                exit_close = float(d.loc[end_idx, "CLOSE"])
+                events.append({
+                    "SYMBOL": d.loc[i, "SYMBOL"],
+                    "SIGNAL_DATE": d.loc[i, "DATE"],
+                    "ENTRY_DATE": d.loc[entry_idx, "DATE"],
+                    "ENTRY_OPEN": entry,
+                    "HORIZON_SESSIONS": int(h),
+                    "EXIT_DATE": d.loc[end_idx, "DATE"],
+                    "EXIT_CLOSE": exit_close,
+                    "RETURN_PCT": (exit_close / entry - 1) * 100,
+                    "MFE_PCT": (float(window["HIGH"].max()) / entry - 1) * 100,
+                    "MAE_PCT": (float(window["LOW"].min()) / entry - 1) * 100,
+                    "OOS": d.loc[entry_idx, "DATE"] >= pd.Timestamp(oos_start),
+                })
+    events_df = pd.DataFrame(events)
+    columns = ["HORIZON_SESSIONS", "TRADES", "WIN_PCT", "AVG_RETURN_PCT", "MEDIAN_RETURN_PCT",
+               "HIT_10PCT", "HIT_20PCT", "AVG_MFE_PCT", "AVG_MAE_PCT",
+               "OOS_TRADES", "OOS_WIN_PCT", "OOS_AVG_RETURN_PCT", "OOS_MEDIAN_RETURN_PCT",
+               "OOS_HIT_10PCT", "OOS_HIT_20PCT"]
+    if events_df.empty:
+        return events_df, pd.DataFrame(columns=columns)
+
+    def summarize(g):
+        r = g["RETURN_PCT"]
+        return {
+            "TRADES": len(g), "WIN_PCT": round((r > 0).mean() * 100, 2),
+            "AVG_RETURN_PCT": round(r.mean(), 2), "MEDIAN_RETURN_PCT": round(r.median(), 2),
+            "HIT_10PCT": round((r >= 10).mean() * 100, 2),
+            "HIT_20PCT": round((r >= 20).mean() * 100, 2),
+            "AVG_MFE_PCT": round(g["MFE_PCT"].mean(), 2), "AVG_MAE_PCT": round(g["MAE_PCT"].mean(), 2),
+        }
+
+    rows = []
+    for h, g in events_df.groupby("HORIZON_SESSIONS"):
+        all_stats = summarize(g)
+        oos = g[g["OOS"]]
+        os_stats = summarize(oos) if not oos.empty else {}
+        rows.append({
+            "HORIZON_SESSIONS": int(h), **all_stats,
+            "OOS_TRADES": len(oos), "OOS_WIN_PCT": os_stats.get("WIN_PCT", np.nan),
+            "OOS_AVG_RETURN_PCT": os_stats.get("AVG_RETURN_PCT", np.nan),
+            "OOS_MEDIAN_RETURN_PCT": os_stats.get("MEDIAN_RETURN_PCT", np.nan),
+            "OOS_HIT_10PCT": os_stats.get("HIT_10PCT", np.nan),
+            "OOS_HIT_20PCT": os_stats.get("HIT_20PCT", np.nan),
+        })
+    return events_df, pd.DataFrame(rows, columns=columns).sort_values("HORIZON_SESSIONS").reset_index(drop=True)
