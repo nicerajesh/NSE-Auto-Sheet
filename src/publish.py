@@ -205,6 +205,21 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
     else:
         add(["Abhi swing-turn BUY ka complete historical sample nahi"])
 
+    add([""])
+    add(["L) SWING TURN PORTFOLIO BACKTEST - max 5 concurrent positions; next OPEN entry; 2R partial / 3R final; 40-session max; 0.35% round-trip cost; research only"], "title")
+    add(["PERIOD", "TRADES", "WIN %", "AVG RETURN %", "PROFIT FACTOR", "NET P&L Rs", "AVG HOLD", "FINAL EQUITY", "TOTAL RETURN %", "CAGR %", "MAX DRAWDOWN %"], "header")
+    ps_stats = ctx.get("swing_portfolio_stats")
+    if ps_stats is not None and not ps_stats.empty:
+        for _, r in ps_stats.iterrows():
+            add([r.get("PERIOD", ""), r.get("TRADES", ""), r.get("WIN_PCT", ""),
+                 r.get("AVG_RETURN_PCT", ""), r.get("PROFIT_FACTOR", ""), r.get("NET_PNL", ""),
+                 r.get("AVG_HOLD_SESSIONS", ""), r.get("FINAL_EQUITY", "") if r.get("PERIOD") == "FULL" else "",
+                 r.get("TOTAL_RETURN_PCT", "") if r.get("PERIOD") == "FULL" else "",
+                 r.get("CAGR_PCT", "") if r.get("PERIOD") == "FULL" else "",
+                 r.get("MAX_DRAWDOWN_PCT", "") if r.get("PERIOD") == "FULL" else ""])
+    else:
+        add(["Portfolio backtest data unavailable"])
+    add(["NOTE: Equal-weight allocation up to 20% equity per slot; candidate tie-break is higher RSI then symbol. Stop takes priority when stop and target both touch same daily candle. END_OF_DATA positions are marked to final close. Historical current-universe survivorship bias remains."])
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
 
