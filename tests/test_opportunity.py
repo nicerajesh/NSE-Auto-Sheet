@@ -40,7 +40,7 @@ def test_opportunity_engine_is_no_lookahead_and_outputs_valid_levels():
 def test_historical_setup_evaluator_returns_metrics_shape():
     f = add_opportunity_features(add_features(sample_history()))
     stats = evaluate_opportunity_setups(f)
-    assert set(stats.columns) == {"SETUP", "TRADES", "WIN_PCT", "AVG_NET_PCT", "MEDIAN_NET_PCT", "PROFIT_FACTOR"}
+    assert set(stats.columns) == {"SETUP", "TRADES", "WIN_PCT", "AVG_NET_PCT", "MEDIAN_NET_PCT", "PROFIT_FACTOR", "OOS_TRADES_2023_PLUS", "OOS_WIN_PCT_2023_PLUS", "OOS_AVG_NET_PCT_2023_PLUS", "OOS_PROFIT_FACTOR_2023_PLUS"}
     if not stats.empty:
         assert (stats.TRADES > 0).all()
         assert stats.WIN_PCT.between(0, 100).all()
