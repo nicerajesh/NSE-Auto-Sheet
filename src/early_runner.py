@@ -212,6 +212,8 @@ def backtest_early_runners(f: pd.DataFrame, cooldown: int = 20) -> tuple[pd.Data
 def summarize_focus_symbols(events: pd.DataFrame, symbols=FOCUS_SYMBOLS) -> pd.DataFrame:
     """One row per user-supplied focus symbol; duplicate same-day setup events count once."""
     rows = []
+    if events.empty:
+        events = pd.DataFrame(columns=["SYMBOL", "SIGNAL_DATE", "SCORE"])
     for sym in symbols:
         d = events[events["SYMBOL"] == sym].sort_values(["SIGNAL_DATE", "SCORE"], ascending=[True, False])
         if not d.empty:
