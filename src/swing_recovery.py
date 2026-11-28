@@ -253,3 +253,26 @@ def summarize_swing_trades(trades: pd.DataFrame) -> pd.DataFrame:
             "PROFIT_FACTOR": round(pf, 3) if np.isfinite(pf) else "INF"
         })
     return pd.DataFrame(rows, columns=columns)
+
+
+def apply_recent_edge_gate(report: pd.DataFrame, trades: pd.DataFrame, asof,
+                           lookback_days: int = 730, min_trades: int = 30,
+                           min_profit_factor: float = 1.05) -> tuple[pd.DataFrame, dict]:
+    """Demote actionable signals to WAIT unless recent historical evidence clears the edge gate."""
+    cutoff = pd.Timestamp(asof) - pd.Timedelta(days=lookback_days)
+    recent = trades[pd.to_datetime(trades["EXIT_DATE"]) >= cutoff] if trades is not None and not trades.empty else pd.DataFrame()
+    returns = pd.to_numeric(recent["RETURN_PCT"], errors="coerce").dropna() if not recent.empty else pd.Series(dtype=float)
+    gross_profit = float(returns[returns > 0].sum())
+    gross_loss = float(-returns[returns < 0].sum())
+    pf = gross_profit / gross_loss if gross_loss > 0 else (float("inf") if gross_profit > 0 else 0.0)
+    passed = len(returns) >= min_trades and pf >= min_profit_factor
+    out = report.copy() if report is not None else pd.DataFrame(columns=SWING_COLUMNS)
+    if not out.empty and not passed and "SIGNAL" in out:
+        actionable = out["SIGNAL"].isin(["MUST BUY", "BUY"])
+        out.loc[actionable, "SIGNAL"] = "WAIT"
+    return out, {
+        "passed": bool(passed), "trades": int(len(returns)),
+        "profit_factor": round(pf, 3) if np.isfinite(pf) else "INF",
+        "cutoff": cutoff.date().isoformat(),
+        "minimum_trades": int(min_trades), "minimum_profit_factor": float(min_profit_factor)
+    }
