@@ -47,8 +47,14 @@ def _summarize(trades: pd.DataFrame, strategy: str, asof: pd.Timestamp) -> list[
 
 
 def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
-              initial_atr: float = 2.2, cost_pct: float = 0.35, max_hold: int = 126) -> pd.DataFrame:
-    """One position per symbol, next-open entry, causal stop updates, full exit."""
+              initial_atr: float = 2.2, cost_pct: float = 0.35,
+              max_hold: int = 126, partial_targets: tuple[float, ...] | None = None,
+              partial_fraction: float = 1 / 3) -> pd.DataFrame:
+    """One position per symbol; optional equal tranches at fixed profit targets.
+
+    Stop is evaluated before targets when both are touched in one OHLC bar
+    (conservative ambiguity handling). Stop levels use only prior-known ATR.
+    """
     d = f.copy()
     d["_ENTRY"] = entry_mask.fillna(False).astype(bool)
     out = []
@@ -67,31 +73,47 @@ def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
                 i += 1
                 continue
             initial_stop = entry - initial_atr * atr0
-            # Reject setups with excessively wide initial risk.
             if (entry - initial_stop) / entry > 0.10:
                 i += 1
                 continue
             stop = initial_stop
             high_water = entry
             prev_atr = atr0
+            remaining = 1.0
+            realized = 0.0
+            targets_hit = []
             exit_i, exit_price, reason = None, None, None
             end = min(len(g), entry_i + max_hold)
+            targets = tuple(sorted(float(x) for x in (partial_targets or ())))
             for j in range(entry_i, end):
                 bar = g.loc[j]
                 op, hi, lo, cl = map(float, (bar.OPEN, bar.HIGH, bar.LOW, bar.CLOSE))
-                # Stop known before today's bar; gap-through fills at open.
+                # Conservative: if stop and target both occur in one bar, assume stop first.
                 if op <= stop:
                     exit_i, exit_price, reason = j, op, "GAP_STOP"
                     break
                 if lo <= stop:
                     exit_i, exit_price, reason = j, stop, "ATR_TRAIL"
                     break
-                # Today's close is known now; update stop for the NEXT session only.
+                if targets and remaining > 0:
+                    for target_pct in targets:
+                        target_price = entry * (1 + target_pct / 100)
+                        if target_pct in targets_hit or hi < target_price:
+                            continue
+                        tranche = min(partial_fraction, remaining)
+                        fill = max(op, target_price) if op >= target_price else target_price
+                        realized += tranche * (fill / entry - 1) * 100
+                        remaining -= tranche
+                        targets_hit.append(target_pct)
+                        if remaining <= 1e-9:
+                            exit_i, exit_price, reason = j, entry * (1 + target_pct / 100), "ALL_TARGETS"
+                            break
+                    if exit_i is not None:
+                        break
                 high_water = max(high_water, cl)
                 current_atr = float(bar.ATR14) if np.isfinite(bar.ATR14) else prev_atr
                 stop = max(stop, high_water - trail_atr * prev_atr)
                 prev_atr = current_atr
-                # Close-confirmed trend failure exits at this close (not at an earlier intraday price).
                 if j > entry_i and np.isfinite(bar.EMA50) and cl < float(bar.EMA50):
                     exit_i, exit_price, reason = j, cl, "EMA50_CLOSE"
                     break
@@ -101,16 +123,18 @@ def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
             if exit_i is None:
                 i += 1
                 continue
-            ret = (exit_price / entry - 1) * 100 - cost_pct
+            if remaining > 1e-9:
+                realized += remaining * (exit_price / entry - 1) * 100
+            ret = realized - cost_pct
             out.append({
                 "STOCK": symbol, "SIGNAL_DATE": sig.DATE,
                 "ENTRY_DATE": g.loc[entry_i, "DATE"], "ENTRY": entry,
                 "EXIT_DATE": g.loc[exit_i, "DATE"], "EXIT": exit_price,
                 "EXIT_REASON": reason, "RETURN_PCT": ret,
+                "PARTIAL_TARGETS_HIT": ",".join(str(x) for x in targets_hit),
             })
             i = exit_i + 1
     return pd.DataFrame(out)
-
 
 def run_ry_quant_edge(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Test original RY setup across selective entries and risk/exit combinations."""
@@ -179,6 +203,16 @@ def run_ry_quant_edge(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[p
                 trades["STRATEGY"] = label
                 all_trades.append(trades)
             summaries.extend(_summarize(trades, label, asof))
+
+            partial_label = f"{label}_PARTIAL20_30_40"
+            partial_trades = _simulate(
+                f, mask, trail, initial_atr=initial_atr, cost_pct=cost_pct,
+                partial_targets=(20.0, 30.0, 40.0), partial_fraction=1 / 3,
+            )
+            if not partial_trades.empty:
+                partial_trades["STRATEGY"] = partial_label
+                all_trades.append(partial_trades)
+            summaries.extend(_summarize(partial_trades, partial_label, asof))
     summary = pd.DataFrame(summaries)
     trades_out = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
     return summary, trades_out
