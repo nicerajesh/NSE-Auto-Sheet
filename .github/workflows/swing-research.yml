@@ -1,4 +1,4 @@
-name: RY Swing Recovery Research (No Publish) # v2 regime-filter validation
+name: RY Swing Recovery Research (No Publish) # v3 volatility-overlay validation
 
 on:
   pull_request:
