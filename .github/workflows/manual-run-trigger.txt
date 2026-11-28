@@ -1,1 +1,1 @@
-Trigger consolidated RY APEX Main Pipeline validation.
+Trigger consolidated RY APEX Main Pipeline validation and Google Sheets publish.
