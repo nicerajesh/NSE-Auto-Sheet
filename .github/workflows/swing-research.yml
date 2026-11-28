@@ -1,4 +1,4 @@
-name: RY Swing Recovery Research (No Publish)
+name: RY Swing Recovery Research (No Publish) # v2 regime-filter validation
 
 on:
   pull_request:
