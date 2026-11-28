@@ -23,6 +23,7 @@ from config import CFG         # noqa: E402
 from engine import add_features, latest_candidates, position_size  # noqa: E402
 from v42 import add_v42_features, latest_v42_candidates            # noqa: E402
 import swing_recovery as sr                                         # noqa: E402
+import strategy_lab as sl                                             # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.getenv("NSE_STATE_DIR", ROOT / "state"))
@@ -173,6 +174,14 @@ def main(argv=None) -> int:
             })
         if exits:
             swing_report = pd.concat([pd.DataFrame(exits), swing_report], ignore_index=True)
+    # Comparative research: six independent price/volume entry hypotheses,
+    # all passed through the same next-open execution and conservative exit engine.
+    strategy_summary, strategy_trades = sl.run_strategy_lab(swing_features)
+    strategy_summary.to_csv(OUT / "strategy_lab_summary.csv", index=False)
+    strategy_trades.to_csv(OUT / "strategy_lab_trades.csv", index=False)
+    if not strategy_summary.empty:
+        print("STRATEGY LAB |", strategy_summary[strategy_summary.PERIOD.isin(["ALL", "RECENT_730D"])].to_dict("records"))
+
     swing_trades = sr.backtest_swing(swing_features)
     swing_trades.to_csv(OUT / "swing_backtest_trades.csv", index=False)
     swing_summary = sr.summarize_swing_trades(swing_trades)
