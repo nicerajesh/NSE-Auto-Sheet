@@ -100,7 +100,8 @@ def build_signals(history: pd.DataFrame) -> pd.DataFrame:
                     exit_price = float(future.iloc[n-1]["CLOSE"])
                     rec[f"RET{n}_NET_PCT"] = (exit_price / entry - 1) * 100 - COST_PCT if entry > 0 else np.nan
                 records.append(rec)
-    return pd.DataFrame(records)
+    columns = ["SYMBOL", "TIER", "SIGNAL_DATE", "SIGNAL_CLOSE", "VOL_X"] + [f"RET{n}_NET_PCT" for n in HORIZONS]
+    return pd.DataFrame(records, columns=columns)
 
 
 def summarize(events: pd.DataFrame) -> pd.DataFrame:
