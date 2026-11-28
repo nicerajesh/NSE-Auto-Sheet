@@ -96,6 +96,16 @@ def _levels(row: pd.Series) -> dict:
     }
 
 
+def _setup_score(r: pd.Series) -> int:
+    score = 0
+    score += 25 if r.CLOSE > r.EMA20 else 0
+    score += 20 if bool(r.EMA20_RISING) else 0
+    score += 20 if r.RS_RANK >= 70 else (10 if r.RS_RANK >= 50 else 0)
+    score += 20 if r.VOL_RATIO >= 1.5 else (10 if r.VOL_RATIO >= 1.15 else 0)
+    score += 15 if r.CLOSE_LOC >= 0.75 else (8 if r.CLOSE_LOC >= 0.60 else 0)
+    return score
+
+
 def latest_swing_report(features: pd.DataFrame) -> pd.DataFrame:
     if features.empty:
         return pd.DataFrame(columns=SWING_COLUMNS)
@@ -115,12 +125,7 @@ def latest_swing_report(features: pd.DataFrame) -> pd.DataFrame:
         lv = _levels(r)
         if not 0.5 <= lv["RISK_PCT"] <= 12:
             continue
-        score = 0
-        score += 25 if r.CLOSE > r.EMA20 else 0
-        score += 20 if r.EMA20_RISING else 0
-        score += 20 if r.RS_RANK >= 70 else (10 if r.RS_RANK >= 50 else 0)
-        score += 20 if r.VOL_RATIO >= 1.5 else (10 if r.VOL_RATIO >= 1.15 else 0)
-        score += 15 if r.CLOSE_LOC >= 0.75 else (8 if r.CLOSE_LOC >= 0.60 else 0)
+        score = _setup_score(r)
         if setup == "WAIT":
             signal = "WAIT"
         elif score >= 90 and setup == "BREAKOUT" and r.CLOSE > r.EMA200 and r.EMA50 > r.EMA200:
@@ -156,6 +161,10 @@ def backtest_swing(features: pd.DataFrame, cost_pct: float = 0.35, max_hold: int
         while i < len(g) - 1:
             r = g.iloc[i]
             if not (bool(r.BREAKOUT_SETUP) or bool(r.RECOVERY_SETUP)):
+                i += 1
+                continue
+            # Backtest only executable BUY-grade setups; WAIT rows are never entered.
+            if _setup_score(r) < 65:
                 i += 1
                 continue
             lv = _levels(r)
