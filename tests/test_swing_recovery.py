@@ -82,7 +82,8 @@ def test_same_bar_new_trailing_stop_is_handled_conservatively():
         "ATR14": [2.0] * 6, "BREAKOUT_SETUP": [False, False, False, False, True, False],
         "RECOVERY_SETUP": [False] * 6, "TURNOVER_CR": [20.0] * 6,
         "EMA20": [95.0] * 6, "EMA20_RISING": [True] * 6,
-        "RS_RANK": [95.0] * 6, "VOL_RATIO": [2.0] * 6, "CLOSE_LOC": [0.9] * 6
+        "RS_RANK": [95.0] * 6, "VOL_RATIO": [2.0] * 6, "CLOSE_LOC": [0.9] * 6,
+        "EMA200": [90.0] * 6, "EMA50": [98.0] * 6
     })
     trades = backtest_swing(frame, cost_pct=0.0, max_hold=10)
     assert len(trades) == 1
