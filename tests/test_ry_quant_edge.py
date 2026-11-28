@@ -15,6 +15,7 @@ def test_ry_quant_edge_returns_three_entry_models_and_walk_forward_segments():
         "VOLUME": np.full(len(dates), 2_000_000.0),
     })
     features = sr.add_swing_features(history)
+    assert "EMA100" in features.columns
     summary, trades = rqe.run_ry_quant_edge(features)
     assert len(set(summary["STRATEGY"])) == 320
     assert any(x.startswith("RY_52W_REGIME_") for x in summary["STRATEGY"])
