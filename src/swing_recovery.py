@@ -76,9 +76,22 @@ def add_swing_features(history: pd.DataFrame) -> pd.DataFrame:
         parts.append(d)
     out = pd.concat(parts, ignore_index=True)
     out["RS_RANK"] = out.groupby("DATE")["RET60"].rank(pct=True) * 100
+    # Market regime: avoid fresh risk when too few universe stocks are in trend.
+    out["BREADTH_50"] = out.groupby("DATE").apply(
+        lambda g: pd.Series((g["CLOSE"] > g["EMA50"]).mean() * 100, index=g.index),
+        include_groups=False
+    ).reset_index(level=0, drop=True).sort_index()
+    out["BREADTH_200"] = out.groupby("DATE").apply(
+        lambda g: pd.Series((g["CLOSE"] > g["EMA200"]).mean() * 100, index=g.index),
+        include_groups=False
+    ).reset_index(level=0, drop=True).sort_index()
     # A recovery must also show relative strength and a rising medium-term trend.
     # Otherwise it remains a WAIT observation instead of an executable BUY candidate.
-    out["RECOVERY_SETUP"] = out["RECOVERY_SETUP"] & (out["RS_RANK"] >= 60) & out["EMA50_RISING"]
+    out["BREAKOUT_SETUP"] = out["BREAKOUT_SETUP"] & (out["BREADTH_200"] >= 45) & (out["BREADTH_50"] >= 50)
+    out["RECOVERY_SETUP"] = (
+        out["RECOVERY_SETUP"] & (out["RS_RANK"] >= 60) & out["EMA50_RISING"]
+        & (out["BREADTH_200"] >= 45) & (out["BREADTH_50"] >= 50)
+    )
     out["WAIT_SETUP"] = (
         out["LOW_DISTANCE_PCT"].between(0, 25)
         & (out["CLOSE"] > out["LOW_52W"] * 1.02)
@@ -267,17 +280,18 @@ def summarize_swing_trades(trades: pd.DataFrame) -> pd.DataFrame:
 
 
 def apply_recent_edge_gate(report: pd.DataFrame, trades: pd.DataFrame, asof,
-                           lookback_days: int = 730, min_trades: int = 30,
+                           lookback_days: int = 730, min_trades: int = 50,
                            min_profit_factor: float = 1.05) -> tuple[pd.DataFrame, dict]:
     """Apply separate recent edge gates to breakout and recovery BUY candidates."""
     cutoff = pd.Timestamp(asof) - pd.Timedelta(days=lookback_days)
     d = trades.copy() if trades is not None else pd.DataFrame()
     if not d.empty:
-        d["EXIT_DATE"] = pd.to_datetime(d["EXIT_DATE"])
+        d["SIGNAL_DATE"] = pd.to_datetime(d["SIGNAL_DATE"])
     out = report.copy() if report is not None else pd.DataFrame(columns=SWING_COLUMNS)
     setup_stats = {}
     for setup in ("BREAKOUT", "RECOVERY"):
-        recent = d[(d["SETUP"] == setup) & (d["EXIT_DATE"] >= cutoff)] if not d.empty else pd.DataFrame()
+        # Use entry signal date, not exit date, to avoid stale-trade leakage.
+        recent = d[(d["SETUP"] == setup) & (d["SIGNAL_DATE"] >= cutoff)] if not d.empty else pd.DataFrame()
         returns = pd.to_numeric(recent["RETURN_PCT"], errors="coerce").dropna() if not recent.empty else pd.Series(dtype=float)
         gross_profit = float(returns[returns > 0].sum())
         gross_loss = float(-returns[returns < 0].sum())
