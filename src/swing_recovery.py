@@ -76,6 +76,17 @@ def add_swing_features(history: pd.DataFrame) -> pd.DataFrame:
         parts.append(d)
     out = pd.concat(parts, ignore_index=True)
     out["RS_RANK"] = out.groupby("DATE")["RET60"].rank(pct=True) * 100
+    # A recovery must also show relative strength and a rising medium-term trend.
+    # Otherwise it remains a WAIT observation instead of an executable BUY candidate.
+    out["RECOVERY_SETUP"] = out["RECOVERY_SETUP"] & (out["RS_RANK"] >= 60) & out["EMA50_RISING"]
+    out["WAIT_SETUP"] = (
+        out["LOW_DISTANCE_PCT"].between(0, 25)
+        & (out["CLOSE"] > out["LOW_52W"] * 1.02)
+        & out["RET5"].gt(0)
+        & (out["RSI14"] >= 40)
+        & ~out["RECOVERY_SETUP"]
+        & ~out["BREAKOUT_SETUP"]
+    )
     return out
 
 
