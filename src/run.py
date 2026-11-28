@@ -25,6 +25,7 @@ from v42 import add_v42_features, latest_v42_candidates            # noqa: E402
 import swing_recovery as sr                                         # noqa: E402
 import strategy_lab as sl                                             # noqa: E402
 import ry_quant_edge as rqe                                             # noqa: E402
+from strategy_portfolio import build_strategy_buys                         # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.getenv("NSE_STATE_DIR", ROOT / "state"))
@@ -178,6 +179,13 @@ def main(argv=None) -> int:
     # Comparative research: six independent price/volume entry hypotheses,
     # all passed through the same next-open execution and conservative exit engine.
     strategy_summary, strategy_trades = sl.run_strategy_lab(swing_features)
+    strategy_buys, strategy_audit = build_strategy_buys(swing_features)
+    if not buy_ok:
+        strategy_buys = strategy_buys.iloc[0:0].copy()
+    strategy_buys.to_csv(OUT / "strategy_buys.csv", index=False)
+    strategy_audit.to_csv(OUT / "strategy_qualification_audit.csv", index=False)
+    print("QUALIFIED STRATEGY BUY LIST |", len(strategy_buys), "rows")
+    print("STRATEGY QUALIFICATION |", strategy_audit.to_dict("records"))
     ry_edge_summary, ry_edge_trades = rqe.run_ry_quant_edge(swing_features)
     ry_edge_summary.to_csv(OUT / "ry_quant_edge_summary.csv", index=False)
     ry_edge_trades.to_csv(OUT / "ry_quant_edge_trades.csv", index=False)
@@ -227,6 +235,8 @@ def main(argv=None) -> int:
 
     if not a.no_publish:
         ok = pb.publish_swing(swing_report, book=book)
+        strategy_ok = pb.publish_strategy_buys(strategy_buys, book=book)
+        ok = ok and strategy_ok
         if not ok and os.getenv("GITHUB_ACTIONS"):
             print("ERROR: GitHub Actions me GCP_CREDENTIALS zaroori hai")
             return 1

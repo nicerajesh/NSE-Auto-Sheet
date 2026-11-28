@@ -134,6 +134,36 @@ def build_swing_rows(report: pd.DataFrame) -> tuple[list[list], dict]:
     return _pad(rows, len(SWING_COLUMNS)), marks
 
 
+def build_strategy_buy_rows(report: pd.DataFrame) -> tuple[list[list], dict]:
+    headers = ["STRATEGY", "STOCK", "SIGNAL DATE", "BUY PRICE", "STOP LOSS",
+               "T1", "T2", "T3", "RISK %", "OOS TRADES", "OOS PF",
+               "RECENT TRADES", "RECENT PF", "SCORE"]
+    rows = [["QUALIFIED STRATEGY BUY LIST | Maximum 15 | One top BUY per strategy"],
+            headers]
+    if report is None or report.empty:
+        rows.append(["", "Aaj koi strategy BUY qualify nahi hui"])
+    else:
+        for _, r in report.iterrows():
+            rows.append([r.get("STRATEGY", ""), r.get("STOCK", ""), r.get("SIGNAL_DATE", ""),
+                         r.get("BUY_PRICE", ""), r.get("STOP_LOSS", ""), r.get("T1", ""),
+                         r.get("T2", ""), r.get("T3", ""), r.get("RISK_PCT", ""),
+                         r.get("OOS_TRADES", ""), r.get("OOS_PF", ""),
+                         r.get("RECENT_TRADES", ""), r.get("RECENT_PF", ""), r.get("SCORE", "")])
+    return _pad(rows, len(headers)), {"title": [0], "header": [1]}
+
+
+def publish_strategy_buys(report: pd.DataFrame, book=None) -> bool:
+    """Publish the separately qualified strategy shortlist; never mixes legacy BUY tiers."""
+    if book is None:
+        book = open_book()
+    if book is None:
+        print("PUBLISH SKIPPED: GCP_CREDENTIALS set nahi (STRATEGY BUY CSV only)")
+        return False
+    _write_tab(book, "STRATEGY BUY", *build_strategy_buy_rows(report))
+    print(f"PUBLISHED: STRATEGY BUY ({len(report) if report is not None else 0} candidates)")
+    return True
+
+
 def publish_swing(report: pd.DataFrame, book=None) -> bool:
     """Publish only the consolidated SWING tab. No legacy reports or tab deletion."""
     if book is None:
