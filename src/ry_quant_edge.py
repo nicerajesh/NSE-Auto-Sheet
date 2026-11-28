@@ -127,8 +127,10 @@ def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
                 current_atr = float(bar.ATR14) if np.isfinite(bar.ATR14) else prev_atr
                 stop = max(stop, high_water - trail_atr * prev_atr)
                 prev_atr = current_atr
-                if j > entry_i and np.isfinite(bar.EMA50) and cl < float(bar.EMA50):
-                    exit_i, exit_price, reason = j, cl, "EMA50_CLOSE"
+                ema_col = f"EMA{trend_exit_period}"
+                ema_value = bar.get(ema_col, np.nan)
+                if j > entry_i and np.isfinite(ema_value) and cl < float(ema_value):
+                    exit_i, exit_price, reason = j, cl, f"EMA{trend_exit_period}_CLOSE"
                     break
                 if j == end - 1:
                     exit_i, exit_price, reason = j, cl, "TIME_EXIT"
