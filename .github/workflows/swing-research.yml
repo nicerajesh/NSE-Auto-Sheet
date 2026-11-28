@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'src/swing_recovery.py'
+      - 'src/strategy_lab.py'
       - 'src/run.py'
       - 'src/publish.py'
       - 'tests/test_swing_*.py'
@@ -35,5 +36,7 @@ jobs:
             output/swing_report.csv
             output/swing_backtest_trades.csv
             output/swing_backtest_summary.csv
+            output/strategy_lab_summary.csv
+            output/strategy_lab_trades.csv
           if-no-files-found: error
           retention-days: 30
