@@ -38,7 +38,7 @@ def test_swing_report_has_exact_required_columns_and_target_math():
         "LOW_10D": 97.0, "BREAKOUT_SETUP": True, "RECOVERY_SETUP": False,
         "WAIT_SETUP": False, "EMA20": 99.0, "EMA20_RISING": True,
         "RS_RANK": 95.0, "VOL_RATIO": 2.0, "CLOSE_LOC": 0.9,
-        "EMA200": 90.0, "EMA50": 98.0
+        "EMA200": 90.0, "EMA50": 98.0, "TURNOVER_CR": 20.0
     }
     rows = latest_swing_report(pd.DataFrame([row]))
     assert list(rows.columns[:len(SWING_COLUMNS)]) == SWING_COLUMNS
