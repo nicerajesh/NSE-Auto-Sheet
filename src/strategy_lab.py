@@ -97,6 +97,16 @@ def run_strategy_lab(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[pd
                 & f["RSI14"].between(45, 68) & (f["VOL_RATIO"] >= 1.15)
                 & (f["CLOSE_LOC"] >= 0.60))
 
+    # Strict variants test selectivity and stronger market leadership filters.
+    f["HIGH_252D_PREV"] = by_symbol["HIGH"].shift(1).transform(lambda x: x.rolling(252, min_periods=200).max())
+    broad_market = (f["BREADTH_200"] >= 60) & (f["BREADTH_50"] >= 65)
+    strict_trend = uptrend & (f["EMA20"] > f["EMA50"]) & (f["RS_RANK"] >= 85) & broad_market
+    turtle20_strict = (common_liquid & strict_trend & (c > f["HIGH_20D_PREV"] * 1.002) & (f["VOL_RATIO"] >= 2.0) & (f["CLOSE_LOC"] >= 0.75))
+    turtle55_strict = (common_liquid & strict_trend & (c > f["HIGH_55D_PREV"] * 1.002) & (f["VOL_RATIO"] >= 2.0) & (f["CLOSE_LOC"] >= 0.75))
+    canslim_strict = (common_liquid & strict_trend & (f["RS_RANK"] >= 90) & (c > f["HIGH_55D_PREV"] * 1.002) & (f["VOL_RATIO"] >= 2.0) & (f["CLOSE_LOC"] >= 0.80))
+    vcp_strict = (common_liquid & strict_trend & (f["ATR_PCT"] <= f["ATR_PCT_40"] * 0.75) & (f["RANGE20_PCT"] <= f["RANGE60_PCT"] * 0.50) & (c > f["HIGH_20D_PREV"] * 1.002) & (f["VOL_RATIO"] >= 1.8) & (f["CLOSE_LOC"] >= 0.75))
+    high52_breakout = (common_liquid & strict_trend & (c > f["HIGH_252D_PREV"] * 1.002) & (f["VOL_RATIO"] >= 1.8) & (f["CLOSE_LOC"] >= 0.75))
+    recovery_strict = (common_liquid & f["LOW_DISTANCE_PCT"].between(3, 25) & (c > f["EMA20"]) & f["EMA20_RISING"] & f["EMA50_RISING"] & (f["RS_RANK"] >= 80) & (f["BREADTH_200"] >= 55) & (f["BREADTH_50"] >= 60) & (f["RET5"] > 0) & f["RSI14"].between(50, 65) & (f["VOL_RATIO"] >= 1.5) & (f["CLOSE_LOC"] >= 0.70))
     models = {
         "TURTLE_55_BREAKOUT": turtle55,
         "CANSLIM_PRICE_VOLUME_PROXY": canslim_proxy,
@@ -104,6 +114,12 @@ def run_strategy_lab(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[pd
         "RELATIVE_STRENGTH_MOMENTUM": rs_momentum,
         "TREND_PULLBACK": trend_pullback,
         "52W_LOW_RECOVERY": recovery,
+        "TURTLE_20_STRICT": turtle20_strict,
+        "TURTLE_55_STRICT": turtle55_strict,
+        "CANSLIM_STRICT_PROXY": canslim_strict,
+        "MINERVINI_VCP_STRICT": vcp_strict,
+        "52W_HIGH_BREAKOUT": high52_breakout,
+        "52W_LOW_RECOVERY_STRICT": recovery_strict,
     }
     asof = pd.to_datetime(f["DATE"]).max()
     cutoff = asof - pd.Timedelta(days=730)
