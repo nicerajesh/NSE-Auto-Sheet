@@ -141,73 +141,64 @@ def latest_swing_report(features: pd.DataFrame) -> pd.DataFrame:
 
 
 def backtest_swing(features: pd.DataFrame, cost_pct: float = 0.35, max_hold: int = 126) -> pd.DataFrame:
-    """One-position-per-symbol next-open simulation. Stop-first daily OHLC; exit at +40% or time.
-    No future data enters features or signal decisions. Costs are round-trip percentage points.
-    """
+    """Next-open, one position per symbol; conservative stop-first daily OHLC simulation."""
     f = features.sort_values(["SYMBOL", "DATE"]).copy()
     f["LOW_10D"] = f.groupby("SYMBOL")["LOW"].transform(lambda x: x.rolling(10, min_periods=5).min())
     trades = []
-    for symbol, g in f.groupby("SYMBOL", sort=False):
-        g = g.reset_index(drop=True)
-        active = None
-        for i in range(len(g) - 1):
+    for symbol, raw in f.groupby("SYMBOL", sort=False):
+        g = raw.reset_index(drop=True)
+        i = 0
+        while i < len(g) - 1:
             r = g.iloc[i]
-            if active is not None:
-                continue
-            setup = bool(r.BREAKOUT_SETUP) or bool(r.RECOVERY_SETUP)
-            if not setup:
+            if not (bool(r.BREAKOUT_SETUP) or bool(r.RECOVERY_SETUP)):
+                i += 1
                 continue
             lv = _levels(r)
             if not 0.5 <= lv["RISK_PCT"] <= 12:
+                i += 1
                 continue
             entry_i = i + 1
             entry = float(g.iloc[entry_i].OPEN)
             if not np.isfinite(entry) or entry <= lv["SL"] or entry > float(r.CLOSE) * 1.03:
+                i += 1
                 continue
-            t1, t2, t3 = entry * 1.20, entry * 1.30, entry * 1.40
-            stop = lv["SL"]
-            qty_parts = [1/3, 1/3, 1/3]
-            realized = 0.0
+            targets = (entry * 1.20, entry * 1.30, entry * 1.40)
+            fractions = (1/3, 1/3, 1/3)
             sold = [False, False, False]
-            exit_date, reason = None, None
+            realized, stop = 0.0, float(lv["SL"])
+            exit_idx, reason = None, None
             end = min(len(g), entry_i + max_hold)
             for j in range(entry_i, end):
                 bar = g.iloc[j]
                 op, hi, lo, cl = map(float, (bar.OPEN, bar.HIGH, bar.LOW, bar.CLOSE))
-                if op <= stop:
-                    px = op
-                    realized += sum(qty_parts[k] * (px / entry - 1) for k in range(3) if not sold[k])
-                    exit_date, reason = bar.DATE, "SL GAP"
+                if op <= stop or lo <= stop:
+                    px = op if op <= stop else stop
+                    realized += sum(fractions[k] * (px / entry - 1) for k in range(3) if not sold[k])
+                    exit_idx, reason = j, "SL GAP" if op <= stop else "SL"
                     break
-                if lo <= stop:
-                    px = stop
-                    realized += sum(qty_parts[k] * (px / entry - 1) for k in range(3) if not sold[k])
-                    exit_date, reason = bar.DATE, "SL"
-                    break
-                for k, target in enumerate((t1, t2, t3)):
+                for k, target in enumerate(targets):
                     if not sold[k] and hi >= target:
-                        realized += qty_parts[k] * (target / entry - 1)
+                        realized += fractions[k] * (target / entry - 1)
                         sold[k] = True
-                        if k == 0: stop = max(stop, entry)
-                        if k == 1: stop = max(stop, t1)
+                        if k == 0:
+                            stop = max(stop, entry)
+                        elif k == 1:
+                            stop = max(stop, targets[0])
                 if all(sold):
-                    exit_date, reason = bar.DATE, "T3"
+                    exit_idx, reason = j, "T3"
                     break
                 if j == end - 1:
-                    realized += sum(qty_parts[k] * (cl / entry - 1) for k in range(3) if not sold[k])
-                    exit_date, reason = bar.DATE, "TIME/END"
-            if exit_date is not None:
-                trades.append({"STOCK": symbol, "SIGNAL_DATE": r.DATE, "ENTRY_DATE": g.iloc[entry_i].DATE,
-                               "ENTRY": entry, "EXIT_DATE": exit_date, "EXIT_REASON": reason,
-                               "RETURN_PCT": realized * 100 - cost_pct, "SETUP": "BREAKOUT" if bool(r.BREAKOUT_SETUP) else "RECOVERY"})
-                # prevent repeated same-symbol trades until after exit
-                active = True
-                # locate exit row, then resume after it
-                exit_idx = int(g.index[g.DATE == exit_date][0])
-                for k in range(i + 1, min(exit_idx + 1, len(g))):
-                    pass
-                # Simple cooldown: next candidate is evaluated only after 10 sessions.
-                # We use a rolling cursor in the outer loop via a symbol-local block.
-                # This function is intentionally conservative and does not pyramid.
-                break
+                    realized += sum(fractions[k] * (cl / entry - 1) for k in range(3) if not sold[k])
+                    exit_idx, reason = j, "TIME/END"
+            if exit_idx is None:
+                i += 1
+                continue
+            trades.append({
+                "STOCK": symbol, "SIGNAL_DATE": r.DATE, "ENTRY_DATE": g.iloc[entry_i].DATE,
+                "ENTRY": entry, "EXIT_DATE": g.iloc[exit_idx].DATE, "EXIT_REASON": reason,
+                "RETURN_PCT": realized * 100 - cost_pct,
+                "SETUP": "BREAKOUT" if bool(r.BREAKOUT_SETUP) else "RECOVERY"
+            })
+            # No overlapping trades: next eligible signal only after the exit session.
+            i = exit_idx + 1
     return pd.DataFrame(trades)
