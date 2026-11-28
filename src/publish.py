@@ -131,7 +131,7 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
     if ctx.get("buy_ok") and buy is not None and not buy.empty:
         for _, r in buy.head(CFG.max_new_per_day).iterrows():
             add([r["SYMBOL"], "BUY", r["CLOSE"], r["STOP"], r["T1"], r["T2"], r["T3"],
-                 "Kal OPEN par kharido (gap>2% ho to skip)"])
+                 "Next-session OPEN <= MAX BUY aur > SL; actual fill par qty/targets recalculate"])
             any_row = True
 
     mine = ctx.get("mine")
@@ -144,8 +144,6 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
     if not any_row:
         add(["", "Aaj koi STRICT BUY ya SELL nahi", "", "", "", "", "", ""])
 
-    width = max(len(r) for r in rows)
-    return _pad(rows, width), marks
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
 
