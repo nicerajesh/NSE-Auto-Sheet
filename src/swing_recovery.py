@@ -258,21 +258,31 @@ def summarize_swing_trades(trades: pd.DataFrame) -> pd.DataFrame:
 def apply_recent_edge_gate(report: pd.DataFrame, trades: pd.DataFrame, asof,
                            lookback_days: int = 730, min_trades: int = 30,
                            min_profit_factor: float = 1.05) -> tuple[pd.DataFrame, dict]:
-    """Demote actionable signals to WAIT unless recent historical evidence clears the edge gate."""
+    """Apply separate recent edge gates to breakout and recovery BUY candidates."""
     cutoff = pd.Timestamp(asof) - pd.Timedelta(days=lookback_days)
-    recent = trades[pd.to_datetime(trades["EXIT_DATE"]) >= cutoff] if trades is not None and not trades.empty else pd.DataFrame()
-    returns = pd.to_numeric(recent["RETURN_PCT"], errors="coerce").dropna() if not recent.empty else pd.Series(dtype=float)
-    gross_profit = float(returns[returns > 0].sum())
-    gross_loss = float(-returns[returns < 0].sum())
-    pf = gross_profit / gross_loss if gross_loss > 0 else (float("inf") if gross_profit > 0 else 0.0)
-    passed = len(returns) >= min_trades and pf >= min_profit_factor
+    d = trades.copy() if trades is not None else pd.DataFrame()
+    if not d.empty:
+        d["EXIT_DATE"] = pd.to_datetime(d["EXIT_DATE"])
     out = report.copy() if report is not None else pd.DataFrame(columns=SWING_COLUMNS)
-    if not out.empty and not passed and "SIGNAL" in out:
-        actionable = out["SIGNAL"].isin(["MUST BUY", "BUY"])
-        out.loc[actionable, "SIGNAL"] = "WAIT"
+    setup_stats = {}
+    for setup in ("BREAKOUT", "RECOVERY"):
+        recent = d[(d["SETUP"] == setup) & (d["EXIT_DATE"] >= cutoff)] if not d.empty else pd.DataFrame()
+        returns = pd.to_numeric(recent["RETURN_PCT"], errors="coerce").dropna() if not recent.empty else pd.Series(dtype=float)
+        gross_profit = float(returns[returns > 0].sum())
+        gross_loss = float(-returns[returns < 0].sum())
+        pf = gross_profit / gross_loss if gross_loss > 0 else (float("inf") if gross_profit > 0 else 0.0)
+        passed = len(returns) >= min_trades and pf >= min_profit_factor
+        setup_stats[setup] = {
+            "passed": bool(passed), "trades": int(len(returns)),
+            "profit_factor": round(pf, 3) if np.isfinite(pf) else "INF"
+        }
+        if not out.empty and "SETUP" in out and "SIGNAL" in out and not passed:
+            mask = (out["SETUP"] == setup) & out["SIGNAL"].isin(["MUST BUY", "BUY"])
+            out.loc[mask, "SIGNAL"] = "WAIT"
     return out, {
-        "passed": bool(passed), "trades": int(len(returns)),
-        "profit_factor": round(pf, 3) if np.isfinite(pf) else "INF",
+        "passed": any(x["passed"] for x in setup_stats.values()),
         "cutoff": cutoff.date().isoformat(),
-        "minimum_trades": int(min_trades), "minimum_profit_factor": float(min_profit_factor)
+        "minimum_trades": int(min_trades),
+        "minimum_profit_factor": float(min_profit_factor),
+        "by_setup": setup_stats
     }
