@@ -34,5 +34,6 @@ jobs:
           path: |
             output/swing_report.csv
             output/swing_backtest_trades.csv
+            output/swing_backtest_summary.csv
           if-no-files-found: error
           retention-days: 30
