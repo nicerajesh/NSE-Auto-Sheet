@@ -177,6 +177,8 @@ def main(argv=None) -> int:
     swing_report.to_csv(OUT / "swing_report.csv", index=False)
     swing_trades = sr.backtest_swing(swing_features)
     swing_trades.to_csv(OUT / "swing_backtest_trades.csv", index=False)
+    swing_summary = sr.summarize_swing_trades(swing_trades)
+    swing_summary.to_csv(OUT / "swing_backtest_summary.csv", index=False)
     if not swing_trades.empty:
         print("SWING BACKTEST |", {
             "trades": len(swing_trades),
