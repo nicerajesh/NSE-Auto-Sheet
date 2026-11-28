@@ -108,3 +108,28 @@ def test_edge_gate_blocks_when_out_of_sample_is_negative():
     assert not ok and "OUT-OF-SAMPLE" in why
     ok2, _ = bt.edge_gate(t[t.EXIT_DATE < "2023-01-01"])
     assert ok2                                                      # sirf in-sample dekho to gate pass (yahi circular problem tha)
+
+
+
+def test_user_facing_plan_separates_strict_buy_from_paper_and_watch():
+    ctx = _ctx()
+    action, _ = pb.build_action_rows(ctx)
+    status, _ = pb.build_status_rows(ctx)
+    ry, _ = pb.build_ry_rows(ctx)
+    action_text = " ".join(str(x) for row in action for x in row)
+    status_text = " ".join(str(x) for row in status for x in row)
+    ry_text = " ".join(str(x) for row in ry for x in row)
+    assert "PAPER SIGNALS" not in action_text
+    assert "WATCH ONLY" in action_text
+    assert "LIVE SCOREBOARD" not in status_text
+    assert "AAA" in ry_text
+    assert "WWW" not in ry_text and "VVV" not in ry_text and "UUU" not in ry_text
+    assert "STRICT BUY" in ry_text
+
+
+def test_action_plan_explains_next_open_execution_and_recalculation():
+    rows, _ = pb.build_action_rows(_ctx())
+    flat = " ".join(str(x) for row in rows for x in row)
+    assert "Next-session OPEN" in flat
+    assert "Actual fill F par R=F-SL" in flat
+    assert "qty actual fill se recalculate" in flat
