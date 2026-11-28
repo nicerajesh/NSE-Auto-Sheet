@@ -189,6 +189,12 @@ def backtest_swing(features: pd.DataFrame, cost_pct: float = 0.35, max_hold: int
                             stop = max(stop, entry)
                         elif k == 1:
                             stop = max(stop, targets[0])
+                # If a target ratchets the stop and the same daily bar also trades
+                # through that new stop, take the conservative high-then-low path.
+                if any(sold) and not all(sold) and lo <= stop:
+                    realized += sum(fractions[k] * (stop / entry - 1) for k in range(3) if not sold[k])
+                    exit_idx, reason = j, "TRAILING SL SAME BAR"
+                    break
                 if all(sold):
                     exit_idx, reason = j, "T3"
                     break
