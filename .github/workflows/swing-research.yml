@@ -7,6 +7,7 @@ on:
       - 'src/swing_recovery.py'
       - 'src/strategy_lab.py'
       - 'src/ry_quant_edge.py'
+      - 'src/run_ry_quant_edge.py'
       - 'src/run.py'
       - 'src/publish.py'
       - 'tests/test_swing_*.py'
@@ -28,7 +29,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Run full history scanner without Google Sheets publishing
-        run: python src/run.py --no-publish
+        run: python src/run_ry_quant_edge.py
       - name: Upload SWING report and historical trades
         uses: actions/upload-artifact@v4
         with:
