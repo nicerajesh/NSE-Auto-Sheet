@@ -120,6 +120,31 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
     return _pad(rows, width), marks
 
 
+
+# --------------------------------------------------------------------------- SWING (single clean report)
+def build_swing_rows(report: pd.DataFrame) -> tuple[list[list], dict]:
+    from swing_recovery import SWING_COLUMNS
+    rows = [list(SWING_COLUMNS)]
+    marks = {"title": [], "header": [0]}
+    if report is None or report.empty:
+        rows.append(["", "WAIT", "", "", "", "", "", "", "", "", ""])
+    else:
+        for _, r in report.iterrows():
+            rows.append([r.get(k, "") for k in SWING_COLUMNS])
+    return _pad(rows, len(SWING_COLUMNS)), marks
+
+
+def publish_swing(report: pd.DataFrame, book=None) -> bool:
+    """Publish only the consolidated SWING tab. No legacy reports or tab deletion."""
+    if book is None:
+        book = open_book()
+    if book is None:
+        print("PUBLISH SKIPPED: GCP_CREDENTIALS set nahi (SWING CSV only)")
+        return False
+    _write_tab(book, "SWING", *build_swing_rows(report))
+    print("PUBLISHED: SWING (single consolidated report)")
+    return True
+
 # --------------------------------------------------------------------------- RY (quick view)
 def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
     """Ek-nazar tab: sirf aaj ka BUY ya SELL, entry/exit price, SL, T1/T2/T3. Baaki detail ACTION PLAN me hai."""

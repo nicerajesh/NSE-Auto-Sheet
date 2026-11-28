@@ -1,0 +1,47 @@
+name: RY Swing Recovery Research (No Publish) # v3 volatility-overlay validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/swing_recovery.py'
+      - 'src/strategy_lab.py'
+      - 'src/ry_quant_edge.py'
+      - 'src/run_ry_quant_edge.py'
+      - 'src/run.py'
+      - 'src/publish.py'
+      - 'tests/test_swing_*.py'
+      - 'tests/test_ry_quant_edge.py'
+      - '.github/workflows/swing-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run full history scanner without Google Sheets publishing
+        run: python src/run_ry_quant_edge.py
+      - name: Upload SWING report and historical trades
+        uses: actions/upload-artifact@v4
+        with:
+          name: ry-swing-recovery-research
+          path: |
+            output/swing_report.csv
+            output/swing_backtest_trades.csv
+            output/swing_backtest_summary.csv
+            output/strategy_lab_summary.csv
+            output/strategy_lab_trades.csv
+            output/ry_quant_edge_summary.csv
+            output/ry_quant_edge_trades.csv
+          if-no-files-found: error
+          retention-days: 30

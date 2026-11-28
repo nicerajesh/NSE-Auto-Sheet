@@ -5,6 +5,9 @@ on:
     branches: [main, ry-apex-v2-rebuild]
     paths:
       - '.github/workflows/manual-run-trigger.txt'
+      - 'src/swing_recovery.py'
+      - 'src/run.py'
+      - 'src/publish.py'
   pull_request:
     branches: [main]
   schedule:
