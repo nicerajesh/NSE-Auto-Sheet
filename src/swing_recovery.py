@@ -137,7 +137,7 @@ def latest_swing_report(features: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(rows)
     priority = {"MUST BUY": 0, "BUY": 1, "WAIT": 2}
     out["_P"] = out.SIGNAL.map(priority)
-    return out.sort_values(["_P", "SCORE", "STOCK"], ascending=[True, False, True]).drop(columns="_P").reset_index(drop=True)
+    out = out.sort_values(["_P", "SCORE", "STOCK"], ascending=[True, False, True]).drop(columns="_P").reset_index(drop=True)\n    extras = [x for x in out.columns if x not in SWING_COLUMNS]\n    return out.reindex(columns=SWING_COLUMNS + extras)
 
 
 def backtest_swing(features: pd.DataFrame, cost_pct: float = 0.35, max_hold: int = 126) -> pd.DataFrame:
