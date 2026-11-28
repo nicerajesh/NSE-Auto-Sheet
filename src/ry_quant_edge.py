@@ -231,6 +231,24 @@ def run_ry_quant_edge(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[p
                 trades["STRATEGY"] = label
                 all_trades.append(trades)
             summaries.extend(_summarize(trades, label, asof))
+
+    # Volatility-compression overlay on the broad 52W-high signal.
+    # Fixed grid is evaluated on the same chronological train/validation/OOS splits.
+    for rs_floor in (90, 95):
+        for atr_cap, range_cap in ((0.85, 0.60), (0.85, 0.80), (0.95, 0.60), (0.95, 0.80)):
+            mask = base_52w & (f["RS_RANK"] >= rs_floor)
+            mask &= (f["BREADTH_200"] >= 55) & (f["BREADTH_50"] >= 60)
+            mask &= (f["ATR_PCT"] <= f["ATR_PCT_MA40"] * atr_cap)
+            mask &= (f["RANGE20"] <= f["RANGE60"] * range_cap)
+            label = f"RY_52W_VOL_RS{rs_floor}_ATR{atr_cap:.2f}_RNG{range_cap:.2f}_SL2.0_TR2.5_PARTIAL20_30_40"
+            trades = _simulate(
+                f, mask, 2.5, initial_atr=2.0, cost_pct=cost_pct,
+                partial_targets=(20.0, 30.0, 40.0), partial_fraction=1 / 3,
+            )
+            if not trades.empty:
+                trades["STRATEGY"] = label
+                all_trades.append(trades)
+            summaries.extend(_summarize(trades, label, asof))
     summary = pd.DataFrame(summaries)
     trades_out = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
     return summary, trades_out
