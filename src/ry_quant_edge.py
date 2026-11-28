@@ -47,7 +47,7 @@ def _summarize(trades: pd.DataFrame, strategy: str, asof: pd.Timestamp) -> list[
 
 
 def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
-              cost_pct: float = 0.35, max_hold: int = 126) -> pd.DataFrame:
+              initial_atr: float = 2.2, cost_pct: float = 0.35, max_hold: int = 126) -> pd.DataFrame:
     """One position per symbol, next-open entry, causal stop updates, full exit."""
     d = f.copy()
     d["_ENTRY"] = entry_mask.fillna(False).astype(bool)
@@ -66,7 +66,7 @@ def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
             if not np.isfinite(entry) or not np.isfinite(atr0) or entry <= 0 or atr0 <= 0:
                 i += 1
                 continue
-            initial_stop = entry - 2.2 * atr0
+            initial_stop = entry - initial_atr * atr0
             # Reject setups with excessively wide initial risk.
             if (entry - initial_stop) / entry > 0.10:
                 i += 1
@@ -113,7 +113,7 @@ def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
 
 
 def run_ry_quant_edge(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Test original RY setup across three entries and two trailing-stop widths."""
+    """Test original RY setup across selective entries and risk/exit combinations."""
     if features.empty:
         return pd.DataFrame(), pd.DataFrame()
     f = features.sort_values(["SYMBOL", "DATE"]).copy()
@@ -149,17 +149,32 @@ def run_ry_quant_edge(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[p
     recent_ema_touch = by["LOW"].transform(lambda x: x.rolling(5, min_periods=5).min()) <= f["EMA20"] * 1.015
     ry_pullback = liquid & trend & leadership & market_ok & recent_ema_touch
     ry_pullback &= (c > f["HIGH10_PREV"] * 1.002) & (f["RET5"] > 0) & f["RSI14"].between(50, 68)
+    # High-selectivity variants: fewer but cleaner candidates in strong regimes.
+    market_strong = (f["BREADTH_200"] >= 60) & (f["BREADTH_50"] >= 65)
+    leadership_strong = (f["RS_RANK"] >= 90) & (f["RET60"] > 0)
+    high252_prev = f.groupby("SYMBOL")["HIGH"].transform(lambda x: x.shift(1).rolling(252, min_periods=200).max())
+    ry_breakout_strict = liquid & trend & leadership_strong & market_strong & (f["ATR_PCT"] <= f["ATR_PCT_MA40"] * 0.85)
+    ry_breakout_strict &= (f["RANGE20"] <= f["RANGE60"] * 0.55) & (c > f["HIGH55_PREV"] * 1.003)
+    ry_breakout_strict &= (f["VOL_RATIO"] >= 2.0) & (f["CLOSE_LOC"] >= 0.80)
+    ry_52w_high = liquid & trend & leadership_strong & market_strong & (c > high252_prev * 1.002)
+    ry_52w_high &= (f["VOL_RATIO"] >= 1.8) & (f["CLOSE_LOC"] >= 0.78)
+    ry_momentum20 = liquid & trend & leadership_strong & market_strong & (c > f["HIGH20_PREV"] * 1.003)
+    ry_momentum20 &= (f["VOL_RATIO"] >= 2.0) & (f["CLOSE_LOC"] >= 0.80)
     entries = {
         "RY_VCP55": ry_vcp55,
         "RY_EARLY20": ry_early20,
         "RY_PULLBACK10": ry_pullback,
+        "RY_BREAKOUT_STRICT": ry_breakout_strict,
+        "RY_52W_HIGH": ry_52w_high,
+        "RY_MOMENTUM20": ry_momentum20,
     }
     asof = pd.to_datetime(f["DATE"]).max()
     summaries, all_trades = [], []
+    # Compare risk models with identical signals. OOS and recent periods remain separate.
     for name, mask in entries.items():
-        for trail in (2.5, 3.0):
-            label = f"{name}_ATR{trail:.1f}"
-            trades = _simulate(f, mask, trail, cost_pct=cost_pct)
+        for initial_atr, trail in ((1.5, 2.5), (2.0, 2.5), (2.0, 3.0), (2.2, 3.0)):
+            label = f"{name}_SL{initial_atr:.1f}_TR{trail:.1f}"
+            trades = _simulate(f, mask, trail, initial_atr=initial_atr, cost_pct=cost_pct)
             if not trades.empty:
                 trades["STRATEGY"] = label
                 all_trades.append(trades)
