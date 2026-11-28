@@ -202,3 +202,30 @@ def backtest_swing(features: pd.DataFrame, cost_pct: float = 0.35, max_hold: int
             # No overlapping trades: next eligible signal only after the exit session.
             i = exit_idx + 1
     return pd.DataFrame(trades)
+
+
+def summarize_swing_trades(trades: pd.DataFrame) -> pd.DataFrame:
+    """Transparent descriptive stats by setup and exit year; not a portfolio equity curve."""
+    columns = ["SEGMENT", "TRADES", "WIN_PCT", "AVG_RETURN_PCT", "MEDIAN_RETURN_PCT", "PROFIT_FACTOR"]
+    if trades is None or trades.empty:
+        return pd.DataFrame(columns=columns)
+    d = trades.copy()
+    d["EXIT_DATE"] = pd.to_datetime(d["EXIT_DATE"])
+    d["EXIT_YEAR"] = d["EXIT_DATE"].dt.year
+    groups = [("ALL", d)]
+    groups.extend((f"SETUP_{k}", g) for k, g in d.groupby("SETUP"))
+    groups.extend((f"YEAR_{int(k)}", g) for k, g in d.groupby("EXIT_YEAR"))
+    rows = []
+    for label, g in groups:
+        r = pd.to_numeric(g["RETURN_PCT"], errors="coerce").dropna()
+        wins = float(r[r > 0].sum())
+        losses = float(-r[r < 0].sum())
+        pf = wins / losses if losses > 0 else (float("inf") if wins > 0 else 0.0)
+        rows.append({
+            "SEGMENT": label, "TRADES": int(len(r)),
+            "WIN_PCT": round(float((r > 0).mean() * 100), 2) if len(r) else 0.0,
+            "AVG_RETURN_PCT": round(float(r.mean()), 2) if len(r) else 0.0,
+            "MEDIAN_RETURN_PCT": round(float(r.median()), 2) if len(r) else 0.0,
+            "PROFIT_FACTOR": round(pf, 3) if np.isfinite(pf) else "INF"
+        })
+    return pd.DataFrame(rows, columns=columns)
