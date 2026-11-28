@@ -19,7 +19,9 @@ def test_strategy_lab_emits_all_six_models_and_two_core_periods():
     assert set(summary["STRATEGY"]) == {
         "TURTLE_55_BREAKOUT", "CANSLIM_PRICE_VOLUME_PROXY",
         "MINERVINI_VCP_INSPIRED", "RELATIVE_STRENGTH_MOMENTUM",
-        "TREND_PULLBACK", "52W_LOW_RECOVERY",
+        "TREND_PULLBACK", "52W_LOW_RECOVERY", "TURTLE_20_STRICT", "TURTLE_55_STRICT",
+        "CANSLIM_STRICT_PROXY", "MINERVINI_VCP_STRICT", "52W_HIGH_BREAKOUT",
+        "52W_LOW_RECOVERY_STRICT",
     }
     assert set(summary["PERIOD"]) >= {"ALL", "RECENT_730D"}
     assert {"STRATEGY", "PERIOD", "TRADES", "PROFIT_FACTOR"} <= set(summary.columns)
