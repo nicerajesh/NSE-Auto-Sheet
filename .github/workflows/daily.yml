@@ -1,13 +1,15 @@
-name: RY APEX Daily
+name: RY APEX Main Pipeline
 
 on:
   push:
-    branches:
-      - ry-apex-v2-rebuild
+    branches: [main, ry-apex-v2-rebuild]
     paths:
       - '.github/workflows/manual-run-trigger.txt'
+  pull_request:
+    branches: [main]
   schedule:
-    - cron: '45 14 * * 1-5'      # 20:15 IST, Mon-Fri (NSE bhavcopy aa chuka hota hai)
+    - cron: '45 14 * * 1-5' # Daily scanner - 20:15 IST
+    - cron: '15 15 * * 1-5' # Delivery20 research - 20:45 IST
   workflow_dispatch:
     inputs:
       rebuild_history:
@@ -20,41 +22,52 @@ on:
         default: false
 
 concurrency:
-  group: nse-daily
+  group: ry-apex-main-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write     # sirf data/signal_ledger.csv commit karne ke liye
+  contents: write
 
 jobs:
-  daily:
+  tests:
+    name: Compile and full test suite
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-
       - run: pip install -r requirements.txt
-
-      - name: Tests
+      - name: Compile all application modules
+        run: python -m compileall -q src
+      - name: Run complete test suite
         run: python -m pytest -q tests
 
+  daily:
+    name: Daily scanner and Google Sheets publish
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '45 14 * * 1-5') || (github.event_name == 'push' && github.ref == 'refs/heads/ry-apex-v2-rebuild')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
       - name: Restore history + ledger cache
         uses: actions/cache/restore@v4
         with:
           path: state
           key: nse-state-v2-none
           restore-keys: nse-state-v2-
-
-      - name: Restore ledger from repo (cache evict ho gaya ho to)
+      - name: Restore ledger from repo if cache is unavailable
         run: |
           mkdir -p state
           if [ ! -f state/signal_ledger.csv ] && [ -f data/signal_ledger.csv ]; then cp data/signal_ledger.csv state/signal_ledger.csv; fi
-
       - name: Run engine and publish
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
@@ -65,15 +78,13 @@ jobs:
           DELIVERY_CAPITAL: ${{ vars.DELIVERY_CAPITAL }}
           PUBLISH_RESEARCH_TABS: ${{ vars.PUBLISH_RESEARCH_TABS }}
         run: python src/run.py ${{ inputs.rebuild_history && '--rebuild-history' || '' }}
-
       - name: Save history + ledger cache
         if: success()
         uses: actions/cache/save@v4
         with:
           path: state
           key: nse-state-v2-${{ github.run_id }}
-
-      - name: Commit ledger (cache evict ho to bhi live scoreboard bacha rahe; repo bhi 'active' rehta hai)
+      - name: Commit ledger
         if: success()
         run: |
           mkdir -p data
@@ -82,7 +93,6 @@ jobs:
           git config user.email "ry-apex-bot@users.noreply.github.com"
           git add data/signal_ledger.csv
           git diff --cached --quiet || (git commit -m "ledger $(date -u +%F)" && git push)
-
       - name: Upload CSV outputs
         if: always()
         uses: actions/upload-artifact@v4
@@ -91,3 +101,32 @@ jobs:
           path: output/*.csv
           if-no-files-found: warn
           retention-days: 14
+
+  delivery20_research:
+    name: Delivery20 research
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '15 15 * * 1-5')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore NSE history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: nse-state-v2-none
+          restore-keys: |
+            nse-state-v2-
+      - name: Run Delivery20 research
+        run: python src/delivery20_run.py
+      - name: Upload Delivery20 research
+        uses: actions/upload-artifact@v4
+        with:
+          name: ry-delivery-20-research
+          path: output/delivery20_*.csv
+          if-no-files-found: error
+          retention-days: 30
