@@ -68,3 +68,21 @@ def test_backtest_returns_well_formed_empty_result_without_signals():
     f["RECOVERY_SETUP"] = False
     trades = backtest_swing(f)
     assert trades.empty
+
+
+
+def test_same_bar_new_trailing_stop_is_handled_conservatively():
+    dates = pd.bdate_range("2026-01-01", periods=6)
+    frame = pd.DataFrame({
+        "SYMBOL": ["AAA"] * 6, "DATE": dates,
+        "OPEN": [96, 96, 96, 96, 99, 100],
+        "HIGH": [98, 98, 98, 98, 101, 121],
+        "LOW": [95, 95, 95, 95, 96, 99],
+        "CLOSE": [97, 97, 97, 97, 100, 110],
+        "ATR14": [2.0] * 6, "BREAKOUT_SETUP": [False, False, False, False, True, False],
+        "RECOVERY_SETUP": [False] * 6, "TURNOVER_CR": [20.0] * 6
+    })
+    trades = backtest_swing(frame, cost_pct=0.0, max_hold=10)
+    assert len(trades) == 1
+    assert trades.iloc[0]["EXIT_REASON"] == "TRAILING SL SAME BAR"
+    assert trades.iloc[0]["RETURN_PCT"] == pytest.approx(20 / 3)
