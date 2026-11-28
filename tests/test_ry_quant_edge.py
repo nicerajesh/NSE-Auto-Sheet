@@ -16,11 +16,10 @@ def test_ry_quant_edge_returns_three_entry_models_and_walk_forward_segments():
     })
     features = sr.add_swing_features(history)
     summary, trades = rqe.run_ry_quant_edge(features)
-    assert set(summary["STRATEGY"]) == {
-        "RY_VCP55_ATR2.5", "RY_VCP55_ATR3.0",
-        "RY_EARLY20_ATR2.5", "RY_EARLY20_ATR3.0",
-        "RY_PULLBACK10_ATR2.5", "RY_PULLBACK10_ATR3.0",
-    }
+    assert len(set(summary["STRATEGY"])) == 24
+    assert any(x.startswith("RY_BREAKOUT_STRICT_") for x in summary["STRATEGY"])
+    assert any(x.startswith("RY_52W_HIGH_") for x in summary["STRATEGY"])
+    assert any(x.startswith("RY_MOMENTUM20_") for x in summary["STRATEGY"])
     assert {"ALL", "TRAIN_THROUGH_2022", "VALIDATION_2023_2024",
             "OOS_2025_PLUS", "RECENT_730D"} <= set(summary["PERIOD"])
     assert {"STRATEGY", "TRADES", "PROFIT_FACTOR"} <= set(summary.columns)
