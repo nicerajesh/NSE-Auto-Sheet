@@ -174,11 +174,13 @@ def main(argv=None) -> int:
         if exits:
             swing_report = pd.concat([pd.DataFrame(exits), swing_report], ignore_index=True)
     swing_report = swing_report.reindex(columns=sr.SWING_COLUMNS)
-    swing_report.to_csv(OUT / "swing_report.csv", index=False)
     swing_trades = sr.backtest_swing(swing_features)
     swing_trades.to_csv(OUT / "swing_backtest_trades.csv", index=False)
     swing_summary = sr.summarize_swing_trades(swing_trades)
     swing_summary.to_csv(OUT / "swing_backtest_summary.csv", index=False)
+    swing_report, swing_gate = sr.apply_recent_edge_gate(swing_report, swing_trades, asof)
+    print("SWING RECENT EDGE GATE |", swing_gate)
+    swing_report.to_csv(OUT / "swing_report.csv", index=False)
     if not swing_trades.empty:
         print("SWING BACKTEST |", {
             "trades": len(swing_trades),
