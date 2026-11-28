@@ -102,7 +102,7 @@ def test_recent_edge_gate_demotes_only_the_setup_with_weak_recent_edge():
     ])
     trades = pd.DataFrame({
         "SETUP": ["BREAKOUT"] * 3 + ["RECOVERY"] * 3,
-        "EXIT_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"] * 2),
+        "SIGNAL_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"] * 2),
         "RETURN_PCT": [12.0, 8.0, -5.0, 5.0, -10.0, -5.0]
     })
     out, gate = sr.apply_recent_edge_gate(report, trades, pd.Timestamp("2026-11-28"), min_trades=3)
@@ -114,7 +114,7 @@ def test_recent_edge_gate_keeps_recovery_buys_when_recovery_edge_passes():
     report = pd.DataFrame([{"STOCK": "AAA", "SIGNAL": "BUY", "SETUP": "RECOVERY"}])
     trades = pd.DataFrame({
         "SETUP": ["RECOVERY"] * 3,
-        "EXIT_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"]),
+        "SIGNAL_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"]),
         "RETURN_PCT": [12.0, 8.0, -5.0]
     })
     out, gate = sr.apply_recent_edge_gate(report, trades, pd.Timestamp("2026-11-28"), min_trades=3)
