@@ -77,14 +77,11 @@ def add_swing_features(history: pd.DataFrame) -> pd.DataFrame:
     out = pd.concat(parts, ignore_index=True)
     out["RS_RANK"] = out.groupby("DATE")["RET60"].rank(pct=True) * 100
     # Market regime: avoid fresh risk when too few universe stocks are in trend.
-    out["BREADTH_50"] = out.groupby("DATE").apply(
-        lambda g: pd.Series((g["CLOSE"] > g["EMA50"]).mean() * 100, index=g.index),
-        include_groups=False
-    ).reset_index(level=0, drop=True).sort_index()
-    out["BREADTH_200"] = out.groupby("DATE").apply(
-        lambda g: pd.Series((g["CLOSE"] > g["EMA200"]).mean() * 100, index=g.index),
-        include_groups=False
-    ).reset_index(level=0, drop=True).sort_index()
+    out["_ABOVE_50"] = (out["CLOSE"] > out["EMA50"]).astype(float)
+    out["_ABOVE_200"] = (out["CLOSE"] > out["EMA200"]).astype(float)
+    out["BREADTH_50"] = out.groupby("DATE")["_ABOVE_50"].transform("mean") * 100
+    out["BREADTH_200"] = out.groupby("DATE")["_ABOVE_200"].transform("mean") * 100
+    out = out.drop(columns=["_ABOVE_50", "_ABOVE_200"])
     # A recovery must also show relative strength and a rising medium-term trend.
     # Otherwise it remains a WAIT observation instead of an executable BUY candidate.
     out["BREAKOUT_SETUP"] = out["BREAKOUT_SETUP"] & (out["BREADTH_200"] >= 45) & (out["BREADTH_50"] >= 50)
