@@ -37,6 +37,7 @@ def add_swing_features(history: pd.DataFrame) -> pd.DataFrame:
         rs = _wilder(delta.clip(lower=0)) / _wilder(-delta.clip(upper=0)).replace(0, np.nan)
         d["RSI14"] = (100 - 100 / (1 + rs)).where(_wilder(-delta.clip(upper=0)) != 0, np.where(_wilder(delta.clip(lower=0)) > 0, 100.0, 50.0))
         d["VOL_RATIO"] = v / v.rolling(20, min_periods=15).mean()
+        d["TURNOVER_CR"] = (c * v).rolling(20, min_periods=20).mean() / 1e7
         d["LOW_52W"] = low.rolling(252, min_periods=252).min()
         d["HIGH_55D_PREV"] = h.shift(1).rolling(55, min_periods=55).max()
         d["HIGH_20D_PREV"] = h.shift(1).rolling(20, min_periods=20).max()
@@ -105,6 +106,8 @@ def latest_swing_report(features: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for _, r in d.iterrows():
         if not np.isfinite(r.get("ATR14", np.nan)) or r.ATR14 <= 0 or not np.isfinite(r.get("LOW_52W", np.nan)):
+            continue
+        if float(r.CLOSE) < 50 or float(r.get("TURNOVER_CR", 0)) < 10:
             continue
         setup = "BREAKOUT" if bool(r.BREAKOUT_SETUP) else ("RECOVERY" if bool(r.RECOVERY_SETUP) else ("WAIT" if bool(r.WAIT_SETUP) else ""))
         if not setup:
