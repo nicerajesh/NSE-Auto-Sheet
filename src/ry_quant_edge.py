@@ -213,6 +213,24 @@ def run_ry_quant_edge(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[p
                 partial_trades["STRATEGY"] = partial_label
                 all_trades.append(partial_trades)
             summaries.extend(_summarize(partial_trades, partial_label, asof))
+
+    # Explicit walk-forward market-regime sensitivity test for the leading 52-week-high setup.
+    # Thresholds are observable on signal date; no future returns enter the gate.
+    base_52w = liquid & trend & (c > high252_prev * 1.002)
+    base_52w &= (f["VOL_RATIO"] >= 1.8) & (f["CLOSE_LOC"] >= 0.78)
+    for rs_floor in (85, 90, 95):
+        for breadth200_floor, breadth50_floor in ((55, 60), (60, 65), (65, 70), (70, 75)):
+            mask = base_52w & (f["RS_RANK"] >= rs_floor)
+            mask &= (f["BREADTH_200"] >= breadth200_floor) & (f["BREADTH_50"] >= breadth50_floor)
+            label = f"RY_52W_REGIME_RS{rs_floor}_B{breadth200_floor}_{breadth50_floor}_SL2.0_TR2.5_PARTIAL20_30_40"
+            trades = _simulate(
+                f, mask, 2.5, initial_atr=2.0, cost_pct=cost_pct,
+                partial_targets=(20.0, 30.0, 40.0), partial_fraction=1 / 3,
+            )
+            if not trades.empty:
+                trades["STRATEGY"] = label
+                all_trades.append(trades)
+            summaries.extend(_summarize(trades, label, asof))
     summary = pd.DataFrame(summaries)
     trades_out = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
     return summary, trades_out
