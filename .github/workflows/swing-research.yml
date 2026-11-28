@@ -11,6 +11,7 @@ on:
       - 'src/run.py'
       - 'src/publish.py'
       - 'tests/test_swing_*.py'
+      - 'tests/test_ry_quant_edge.py'
       - '.github/workflows/swing-research.yml'
   workflow_dispatch:
 
