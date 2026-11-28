@@ -62,7 +62,7 @@ def _summarize(trades: pd.DataFrame, strategy: str, asof: pd.Timestamp) -> list[
 def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
               initial_atr: float = 2.2, cost_pct: float = 0.35,
               max_hold: int = 126, partial_targets: tuple[float, ...] | None = None,
-              partial_fraction: float = 1 / 3) -> pd.DataFrame:
+              partial_fraction: float = 1 / 3, trend_exit_period: int = 50) -> pd.DataFrame:
     """One position per symbol; optional equal tranches at fixed profit targets.
 
     Stop is evaluated before targets when both are touched in one OHLC bar
@@ -271,6 +271,34 @@ def run_ry_quant_edge(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[p
                 trades["STRATEGY"] = label
                 all_trades.append(trades)
             summaries.extend(_summarize(trades, label, asof))
+    # Exit-policy robustness grid on the 52-week-high family only.
+    # This isolates whether the PF improvement survives different trend exits
+    # and staged-profit schedules rather than endlessly tuning entry thresholds.
+    for rs_floor in (85, 90, 95):
+        for breadth200_floor, breadth50_floor in ((55, 60), (60, 65), (65, 70)):
+            mask = base_52w & (f["RS_RANK"] >= rs_floor)
+            mask &= (f["BREADTH_200"] >= breadth200_floor) & (f["BREADTH_50"] >= breadth50_floor)
+            for exit_period in (20, 50, 100):
+                for target_name, target_levels in (
+                    ("NO_PARTIAL", None),
+                    ("PARTIAL15_25_35", (15.0, 25.0, 35.0)),
+                    ("PARTIAL20_30_40", (20.0, 30.0, 40.0)),
+                    ("PARTIAL25_35_45", (25.0, 35.0, 45.0)),
+                ):
+                    label = (
+                        f"RY_52W_EXITEMA{exit_period}_RS{rs_floor}_"
+                        f"B{breadth200_floor}_{breadth50_floor}_{target_name}_SL2.0_TR2.5"
+                    )
+                    trades = _simulate(
+                        f, mask, 2.5, initial_atr=2.0, cost_pct=cost_pct,
+                        partial_targets=target_levels, partial_fraction=1 / 3,
+                        trend_exit_period=exit_period,
+                    )
+                    if not trades.empty:
+                        trades["STRATEGY"] = label
+                        all_trades.append(trades)
+                    summaries.extend(_summarize(trades, label, asof))
+
     summary = pd.DataFrame(summaries)
     trades_out = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
     return summary, trades_out
