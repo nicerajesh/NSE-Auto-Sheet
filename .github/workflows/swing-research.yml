@@ -6,6 +6,7 @@ on:
     paths:
       - 'src/swing_recovery.py'
       - 'src/strategy_lab.py'
+      - 'src/ry_quant_edge.py'
       - 'src/run.py'
       - 'src/publish.py'
       - 'tests/test_swing_*.py'
@@ -38,5 +39,7 @@ jobs:
             output/swing_backtest_summary.csv
             output/strategy_lab_summary.csv
             output/strategy_lab_trades.csv
+            output/ry_quant_edge_summary.csv
+            output/ry_quant_edge_trades.csv
           if-no-files-found: error
           retention-days: 30
