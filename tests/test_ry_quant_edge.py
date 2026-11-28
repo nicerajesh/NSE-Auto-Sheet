@@ -16,9 +16,9 @@ def test_ry_quant_edge_returns_three_entry_models_and_walk_forward_segments():
     })
     features = sr.add_swing_features(history)
     summary, trades = rqe.run_ry_quant_edge(features)
-    assert len(set(summary["STRATEGY"])) == 212
+    assert len(set(summary["STRATEGY"])) == 320
     assert any(x.startswith("RY_52W_REGIME_") for x in summary["STRATEGY"])
-    assert any(x.startswith("RY_52W_VOL_") for x in summary["STRATEGY"])
+    assert any(x.startswith("RY_52W_VOL_") for x in summary["STRATEGY"])\n    assert any(x.startswith("RY_52W_EXITEMA20_") for x in summary["STRATEGY"])\n    assert any(x.startswith("RY_52W_EXITEMA100_") for x in summary["STRATEGY"])
     assert any(x.endswith("_PARTIAL20_30_40") for x in summary["STRATEGY"])
     assert any(x.startswith("RY_BREAKOUT_STRICT_") for x in summary["STRATEGY"])
     assert any(x.startswith("RY_52W_HIGH_") for x in summary["STRATEGY"])
