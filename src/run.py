@@ -22,6 +22,7 @@ import publish as pb           # noqa: E402
 from config import CFG         # noqa: E402
 from engine import add_features, latest_candidates, position_size  # noqa: E402
 from v42 import add_v42_features, latest_v42_candidates            # noqa: E402
+import swing_recovery as sr                                         # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.getenv("NSE_STATE_DIR", ROOT / "state"))
@@ -63,6 +64,7 @@ def main(argv=None) -> int:
     hist = dt.load_history(STATE / "history.csv.gz", symbols, rebuild=a.rebuild_history, offline=a.offline)
     f = add_features(hist)
     f = add_v42_features(f)
+    swing_features = sr.add_swing_features(hist)
     asof = f["DATE"].max()
     print(f"DATA: {hist.SYMBOL.nunique()} symbols | {hist.DATE.nunique()} sessions | latest {asof:%Y-%m-%d}")
 
@@ -148,6 +150,46 @@ def main(argv=None) -> int:
                breadth50=float((last.CLOSE > last.EMA50).mean() * 100), breadth200=float((last.CLOSE > last.EMA200).mean() * 100),
                notes=notes(yearly, summ, bt.split_summary(trades)))
 
+    # Unified breakout + 52-week-low recovery report. Real user positions that have hit
+    # their stop are surfaced as SL BREAK in the same SWING table.
+    swing_report = sr.latest_swing_report(swing_features)
+    if not mine.empty:
+        latest_swing = swing_features[swing_features.DATE == asof].set_index("SYMBOL")
+        exits = []
+        for _, held in mine[mine["PRIORITY"] == 0].iterrows():
+            sym = held["SYMBOL"]
+            if sym not in latest_swing.index:
+                continue
+            bar = latest_swing.loc[sym]
+            buy_px = float(held["BUY PRICE"])
+            exits.append({
+                "STOCK": sym, "SIGNAL": "SL BREAK", "BUY PRICE": buy_px,
+                "SL": held.get("SL NOW", ""),
+                "T1": round(buy_px * 1.20, 2), "T2": round(buy_px * 1.30, 2),
+                "T3": round(buy_px * 1.40, 2),
+                "52W LOW DISTANCE": round(float(bar["LOW_DISTANCE_PCT"]), 2),
+                "+20%": round(buy_px * 1.20, 2), "+30%": round(buy_px * 1.30, 2),
+                "+40%": round(buy_px * 1.40, 2)
+            })
+        if exits:
+            swing_report = pd.concat([pd.DataFrame(exits), swing_report], ignore_index=True)
+    swing_report = swing_report.reindex(columns=sr.SWING_COLUMNS)
+    swing_report.to_csv(OUT / "swing_report.csv", index=False)
+    swing_trades = sr.backtest_swing(swing_features)
+    swing_trades.to_csv(OUT / "swing_backtest_trades.csv", index=False)
+    if not swing_trades.empty:
+        print("SWING BACKTEST |", {
+            "trades": len(swing_trades),
+            "win_pct": round((swing_trades.RETURN_PCT > 0).mean() * 100, 2),
+            "avg_return_pct": round(swing_trades.RETURN_PCT.mean(), 2),
+            "profit_factor": round(
+                swing_trades.loc[swing_trades.RETURN_PCT > 0, "RETURN_PCT"].sum()
+                / abs(swing_trades.loc[swing_trades.RETURN_PCT < 0, "RETURN_PCT"].sum()), 3
+            ) if (swing_trades.RETURN_PCT < 0).any() else float("inf")
+        })
+    else:
+        print("SWING BACKTEST | no trades in available history")
+
     # CSV artifacts (hamesha)
     (buy if buy_ok else buy.head(0)).to_csv(OUT / "action_plan_buy.csv", index=False)
     (buy_watch if buy_ok else buy_watch.head(0)).to_csv(OUT / "action_plan_buy_watch.csv", index=False)
@@ -165,14 +207,7 @@ def main(argv=None) -> int:
     print(f"WALK-FORWARD | in-sample {bt.split_summary(trades)[0]} | out-of-sample {bt.split_summary(trades)[1]}")
 
     if not a.no_publish:
-        research = CFG.publish_research_tabs      # RY / RY V38 / RY V42 sirf research ke liye (PUBLISH_RESEARCH_TABS=1)
-        ok = pb.publish(pb.build_action_rows(ctx), pb.build_status_rows(ctx),
-                        pb.build_ry_rows(ctx) if research else None,
-                        pb.build_v38_rows(ctx) if research else None,
-                        pb.build_v42_rows(ctx) if research else None, book=book)
-        s3.publish_tab(CFG.delivery_tab, s3.build_delivery_rows(ctx, deliv), book=book)
-        if nt.send(nt.build_message(ctx)):
-            print("TELEGRAM: alert bheja")
+        ok = pb.publish_swing(swing_report, book=book)
         if not ok and os.getenv("GITHUB_ACTIONS"):
             print("ERROR: GitHub Actions me GCP_CREDENTIALS zaroori hai")
             return 1
