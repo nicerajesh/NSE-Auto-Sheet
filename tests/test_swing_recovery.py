@@ -93,28 +93,30 @@ def test_same_bar_new_trailing_stop_is_handled_conservatively():
 
 
 
-def test_recent_edge_gate_demotes_buys_when_recent_profit_factor_is_weak():
+def test_recent_edge_gate_demotes_only_the_setup_with_weak_recent_edge():
     report = pd.DataFrame([
-        {"STOCK": "AAA", "SIGNAL": "MUST BUY"},
-        {"STOCK": "BBB", "SIGNAL": "BUY"},
-        {"STOCK": "CCC", "SIGNAL": "WAIT"},
-        {"STOCK": "DDD", "SIGNAL": "SL BREAK"}
+        {"STOCK": "AAA", "SIGNAL": "MUST BUY", "SETUP": "BREAKOUT"},
+        {"STOCK": "BBB", "SIGNAL": "BUY", "SETUP": "RECOVERY"},
+        {"STOCK": "CCC", "SIGNAL": "WAIT", "SETUP": "RECOVERY"},
+        {"STOCK": "DDD", "SIGNAL": "SL BREAK", "SETUP": ""}
     ])
     trades = pd.DataFrame({
-        "EXIT_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"]),
-        "RETURN_PCT": [5.0, -10.0, -5.0]
+        "SETUP": ["BREAKOUT"] * 3 + ["RECOVERY"] * 3,
+        "EXIT_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"] * 2),
+        "RETURN_PCT": [12.0, 8.0, -5.0, 5.0, -10.0, -5.0]
     })
     out, gate = sr.apply_recent_edge_gate(report, trades, pd.Timestamp("2026-11-28"), min_trades=3)
-    assert gate["passed"] is False
-    assert out.SIGNAL.tolist() == ["WAIT", "WAIT", "WAIT", "SL BREAK"]
+    assert gate["passed"] is True
+    assert out.SIGNAL.tolist() == ["MUST BUY", "WAIT", "WAIT", "SL BREAK"]
 
 
-def test_recent_edge_gate_keeps_buys_when_recent_profit_factor_passes():
-    report = pd.DataFrame([{"STOCK": "AAA", "SIGNAL": "MUST BUY"}])
+def test_recent_edge_gate_keeps_recovery_buys_when_recovery_edge_passes():
+    report = pd.DataFrame([{"STOCK": "AAA", "SIGNAL": "BUY", "SETUP": "RECOVERY"}])
     trades = pd.DataFrame({
+        "SETUP": ["RECOVERY"] * 3,
         "EXIT_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"]),
         "RETURN_PCT": [12.0, 8.0, -5.0]
     })
     out, gate = sr.apply_recent_edge_gate(report, trades, pd.Timestamp("2026-11-28"), min_trades=3)
-    assert gate["passed"] is True
-    assert out.iloc[0].SIGNAL == "MUST BUY"
+    assert gate["by_setup"]["RECOVERY"]["passed"] is True
+    assert out.iloc[0].SIGNAL == "BUY"
