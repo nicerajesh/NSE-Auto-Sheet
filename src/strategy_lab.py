@@ -98,7 +98,7 @@ def run_strategy_lab(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[pd
                 & (f["CLOSE_LOC"] >= 0.60))
 
     # Strict variants test selectivity and stronger market leadership filters.
-    f["HIGH_252D_PREV"] = by_symbol["HIGH"].shift(1).transform(lambda x: x.rolling(252, min_periods=200).max())
+    f["HIGH_252D_PREV"] = by_symbol["HIGH"].transform(lambda x: x.shift(1).rolling(252, min_periods=200).max())
     broad_market = (f["BREADTH_200"] >= 60) & (f["BREADTH_50"] >= 65)
     strict_trend = uptrend & (f["EMA20"] > f["EMA50"]) & (f["RS_RANK"] >= 85) & broad_market
     turtle20_strict = (common_liquid & strict_trend & (c > f["HIGH_20D_PREV"] * 1.002) & (f["VOL_RATIO"] >= 2.0) & (f["CLOSE_LOC"] >= 0.75))
