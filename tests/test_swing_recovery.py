@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import swing_recovery as sr
 from swing_recovery import add_swing_features, latest_swing_report, backtest_swing, SWING_COLUMNS
 
 
@@ -89,3 +90,31 @@ def test_same_bar_new_trailing_stop_is_handled_conservatively():
     assert len(trades) == 1
     assert trades.iloc[0]["EXIT_REASON"] == "TRAILING SL SAME BAR"
     assert trades.iloc[0]["RETURN_PCT"] == pytest.approx(20 / 3)
+
+
+
+def test_recent_edge_gate_demotes_buys_when_recent_profit_factor_is_weak():
+    report = pd.DataFrame([
+        {"STOCK": "AAA", "SIGNAL": "MUST BUY"},
+        {"STOCK": "BBB", "SIGNAL": "BUY"},
+        {"STOCK": "CCC", "SIGNAL": "WAIT"},
+        {"STOCK": "DDD", "SIGNAL": "SL BREAK"}
+    ])
+    trades = pd.DataFrame({
+        "EXIT_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"]),
+        "RETURN_PCT": [5.0, -10.0, -5.0]
+    })
+    out, gate = sr.apply_recent_edge_gate(report, trades, pd.Timestamp("2026-11-28"), min_trades=3)
+    assert gate["passed"] is False
+    assert out.SIGNAL.tolist() == ["WAIT", "WAIT", "WAIT", "SL BREAK"]
+
+
+def test_recent_edge_gate_keeps_buys_when_recent_profit_factor_passes():
+    report = pd.DataFrame([{"STOCK": "AAA", "SIGNAL": "MUST BUY"}])
+    trades = pd.DataFrame({
+        "EXIT_DATE": pd.to_datetime(["2025-01-01", "2025-02-01", "2025-03-01"]),
+        "RETURN_PCT": [12.0, 8.0, -5.0]
+    })
+    out, gate = sr.apply_recent_edge_gate(report, trades, pd.Timestamp("2026-11-28"), min_trades=3)
+    assert gate["passed"] is True
+    assert out.iloc[0].SIGNAL == "MUST BUY"
