@@ -164,9 +164,11 @@ def backtest_swing(features: pd.DataFrame, cost_pct: float = 0.35, max_hold: int
                 i += 1
                 continue
             # Backtest only executable BUY-grade setups; WAIT rows are never entered.
-            if _setup_score(r) < 65:
+            score = _setup_score(r)
+            if score < 65:
                 i += 1
                 continue
+            signal_grade = "MUST BUY" if (bool(r.BREAKOUT_SETUP) and score >= 90 and r.CLOSE > r.EMA200 and r.EMA50 > r.EMA200) else "BUY"
             lv = _levels(r)
             if not 0.5 <= lv["RISK_PCT"] <= 12:
                 i += 1
@@ -217,7 +219,8 @@ def backtest_swing(features: pd.DataFrame, cost_pct: float = 0.35, max_hold: int
                 "STOCK": symbol, "SIGNAL_DATE": r.DATE, "ENTRY_DATE": g.iloc[entry_i].DATE,
                 "ENTRY": entry, "EXIT_DATE": g.iloc[exit_idx].DATE, "EXIT_REASON": reason,
                 "RETURN_PCT": realized * 100 - cost_pct,
-                "SETUP": "BREAKOUT" if bool(r.BREAKOUT_SETUP) else "RECOVERY"
+                "SETUP": "BREAKOUT" if bool(r.BREAKOUT_SETUP) else "RECOVERY",
+                "SIGNAL": signal_grade, "SCORE": score
             })
             # No overlapping trades: next eligible signal only after the exit session.
             i = exit_idx + 1
@@ -234,6 +237,7 @@ def summarize_swing_trades(trades: pd.DataFrame) -> pd.DataFrame:
     d["EXIT_YEAR"] = d["EXIT_DATE"].dt.year
     groups = [("ALL", d)]
     groups.extend((f"SETUP_{k}", g) for k, g in d.groupby("SETUP"))
+    groups.extend((f"SIGNAL_{k.replace(' ', '_')}", g) for k, g in d.groupby("SIGNAL"))
     groups.extend((f"YEAR_{int(k)}", g) for k, g in d.groupby("EXIT_YEAR"))
     rows = []
     for label, g in groups:
