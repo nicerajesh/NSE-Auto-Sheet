@@ -32,6 +32,7 @@ def add_swing_features(history: pd.DataFrame) -> pd.DataFrame:
         d["ATR14"] = _wilder(tr)
         d["EMA20"] = c.ewm(span=20, adjust=False, min_periods=20).mean()
         d["EMA50"] = c.ewm(span=50, adjust=False, min_periods=50).mean()
+        d["EMA100"] = c.ewm(span=100, adjust=False, min_periods=100).mean()
         d["EMA200"] = c.ewm(span=200, adjust=False, min_periods=200).mean()
         delta = c.diff()
         rs = _wilder(delta.clip(lower=0)) / _wilder(-delta.clip(upper=0)).replace(0, np.nan)
