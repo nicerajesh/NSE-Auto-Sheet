@@ -72,20 +72,22 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
 
     add(["B) NAYE BUY - agle session ke OPEN par kharido (open signal close se 2% se upar ho to SKIP)"], "title")
     hdr = ["#", "STOCK", "SETUP", "BUY PRICE (approx)", "MAX BUY", "STOP LOSS", "T1 (2R)", "T2 (4R)", "T3 (6R)",
-           "RISK %", "QTY", "CAPITAL Rs", "RISK Rs", "MOMENTUM RANK", "EXIT PLAN"]
+           "RISK %", "QTY (approx @ close)", "CAPITAL Rs (approx)", "RISK Rs (approx)", "MOMENTUM RANK", "EXECUTION RULE"]
     add(hdr, "header")
     buy = ctx["buy"]
     if ctx["buy_ok"] and buy is not None and not buy.empty:
         for i, (_, r) in enumerate(buy.head(CFG.max_new_per_day).iterrows(), 1):
-            plan = ("T1 touch -> SL entry par | T2 touch -> SL T1 par | T3 touch -> SL T2 par. "
-                    "Koi fixed target nahi; SL hit hone tak hold (max 90 din).")
+            plan = ("Next-session OPEN > SL aur <= MAX BUY ho tabhi entry; warna SKIP. "
+                    "Displayed levels/qty signal-close par approx hain. Actual fill F par R=F-SL; "
+                    "T1=F+2R, T2=F+4R, T3=F+6R; qty actual fill se recalculate. "
+                    "T1/T2/T3 par SL staircase; max 90 sessions.")
             add([i, r["SYMBOL"], r["SETUP"], r["CLOSE"], r["CLOSE"] * (1 + CFG.max_gap_pct / 100), r["STOP"], r["T1"],
                  r["T2"], r["T3"], r["RISK_PCT"], r["QTY"], r["CAPITAL_USED"], r["RISK_AMT"], r["MOM_RANK"], plan])
     else:
         add(["", "KOI NAYA BUY NAHI" if ctx["buy_ok"] else "BUY BAND: " + ctx["banner"]])
     add([""])
 
-    add(["B2) WATCH BUY - dhila filter, roz aane ki koshish karta hai (backtest PF ~1.7, strict wale ~2.2 se KAM). "
+    add(["B2) WATCH ONLY - YE BUY NAHI HAI; sirf trigger ka intezaar / lower-quality setup (backtest PF ~1.7, strict wale ~2.2 se KAM). "
          "Size jaan-bujhkar aadha hai. Ye 'kuch dikhane ke liye' list hai, guaranteed edge nahi."], "title")
     add(hdr, "header")
     bw = ctx.get("buy_watch")
@@ -98,17 +100,7 @@ def build_action_rows(ctx: dict) -> tuple[list[list], dict]:
         add(["", "Aaj koi WATCH BUY bhi nahi (bahut kamzor din)" if ctx["buy_ok"] else "BUY BAND: " + ctx["banner"]])
     add([""])
 
-    add(["C) PAPER SIGNALS - system ke published signals ka scoreboard (real trade nahi; sirf evidence ke liye)"], "title")
-    add(["STOCK", "STATE", "SIGNAL DATE", "ENTRY", "CURRENT SL", "LAST CLOSE", "R SO FAR", "ACTION"], "header")
-    op = ctx["open"]
-    if op is not None and not op.empty:
-        for _, r in op.iterrows():
-            add([r["STOCK"], r["STATE"], r["SIGNAL DATE"], r["ENTRY"], r["CURRENT SL"], r["LAST CLOSE"], r["R SO FAR"], r["ACTION"]])
-    else:
-        add(["Abhi koi open signal nahi"])
-    add([""])
-
-    add(["D) WATCHLIST - jitna kam DIST TO TRIGGER, utna paas (koi guarantee nahi - roz ka sirf naya data hai, kal ka nahi)"], "title")
+    add(["C) WATCHLIST - jitna kam DIST TO TRIGGER, utna paas (koi guarantee nahi - roz ka sirf naya data hai, kal ka nahi)"], "title")
     add(["STOCK", "CLOSE", "TRIGGER (breakout)", "DIST TO TRIGGER %", "RANGE TIGHT (0-100)", "MOMENTUM RANK", "EMA20 (pullback zone)", "RSI"], "header")
     w = ctx["watch"]
     if w is not None and not w.empty:
@@ -131,7 +123,7 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
         if kind:
             marks[kind].append(len(rows) - 1)
 
-    add([f"RY | Data: {ctx['asof']:%d-%b-%Y} | {ctx['banner']}"], "title")
+    add([f"RY STRICT BUY | Data: {ctx['asof']:%d-%b-%Y} | {ctx['banner']}"], "title")
     add(["STOCK", "SIGNAL", "PRICE", "STOP LOSS", "T1 (2R)", "T2 (4R)", "T3 (6R)", "NOTE"], "header")
 
     any_row = False
@@ -139,28 +131,7 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
     if ctx.get("buy_ok") and buy is not None and not buy.empty:
         for _, r in buy.head(CFG.max_new_per_day).iterrows():
             add([r["SYMBOL"], "BUY", r["CLOSE"], r["STOP"], r["T1"], r["T2"], r["T3"],
-                 "Kal OPEN par kharido (gap>2% ho to skip)"])
-            any_row = True
-
-    bw = ctx.get("buy_watch")
-    if ctx.get("buy_ok") and bw is not None and not bw.empty:
-        for _, r in bw.iterrows():
-            add([r["SYMBOL"], "BUY (WATCH)", r["CLOSE"], r["STOP"], r["T1"], r["T2"], r["T3"],
-                 "Dhila signal, PF kam (~1.7) - size aadha"])
-            any_row = True
-
-    bv = ctx.get("buy_v38")
-    if ctx.get("buy_ok") and bv is not None and not bv.empty:
-        for _, r in bv.iterrows():
-            add([r["SYMBOL"], "BUY (V38)", r["CLOSE"], r["STOP"], r["T1"], r["T2"], "",
-                 f"Pine V38 signal ({r['V38_SETUP']}) - PF sabse kam (~1.30), size sabse chhota. Detail: RY V38 tab"])
-            any_row = True
-
-    b42 = ctx.get("buy_v42")
-    if ctx.get("buy_ok") and b42 is not None and not b42.empty:
-        for _, r in b42.iterrows():
-            add([r["SYMBOL"], f"BUY (V42 {r['V42_ENTRY_TYPE']})", r["CLOSE"], r["STOP"], r["T1"], r["T2"], "",
-                 f"Pine V42 signal, score {r['V42_SCORE']}/100 - PF sabse kam (~1.19), size sabse chhota. Detail: RY V42 tab"])
+                 "Next-session OPEN <= MAX BUY aur > SL; actual fill par qty/targets recalculate"])
             any_row = True
 
     mine = ctx.get("mine")
@@ -171,10 +142,8 @@ def build_ry_rows(ctx: dict) -> tuple[list[list], dict]:
             any_row = True
 
     if not any_row:
-        add(["", "Aaj koi BUY ya SELL nahi", "", "", "", "", "", ""])
+        add(["", "Aaj koi STRICT BUY ya SELL nahi", "", "", "", "", "", ""])
 
-    width = max(len(r) for r in rows)
-    return _pad(rows, width), marks
     width = max(len(r) for r in rows)
     return _pad(rows, width), marks
 
@@ -276,10 +245,6 @@ def build_status_rows(ctx: dict) -> tuple[list[list], dict]:
     add(["Year", "Trades", "Win %", "Avg R", "Profit factor"], "header")
     for _, r in ctx["by_year"].iterrows():
         add([int(r["YEAR"]), r["trades"], r["win_pct"], r["avg_r"], r["pf"]])
-    add([""])
-    add(["LIVE SCOREBOARD (jo signals is system ne publish kiye)"], "title")
-    add(["Closed", "Active/Pending", "Win %", "Avg R", "Profit factor"], "header")
-    add([sb["closed"], sb["active"], sb["win_pct"], sb["avg_r"], sb["pf"]])
     add([""])
     add(["SACH (padh lo)"], "title")
     for line in ctx["notes"]:

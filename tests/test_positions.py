@@ -238,7 +238,7 @@ def test_ry_tab_empty_says_no_buy_sell():
     ctx["mine"] = pd.DataFrame(columns=ps.EVAL_COLS)
     rows, _ = pb.build_ry_rows(ctx)
     flat_ = [str(x) for r in rows for x in r]
-    assert any("koi BUY ya SELL nahi" in x for x in flat_)
+    assert any("koi STRICT BUY ya SELL nahi" in x for x in flat_)
 
 
 def test_publish_writes_ry_tab_and_keeps_it_on_clean(monkeypatch):
@@ -293,30 +293,12 @@ def test_publish_writes_v38_tab_and_keeps_it_on_clean(monkeypatch):
     assert book.worksheet.call_count >= 4   # action, status, ry, v38
 
 
-def test_ry_tab_includes_v38_tier_too():
+def test_ry_tab_shows_strict_buy_only_not_experimental_tiers():
     from test_pipeline import _ctx
     rows, _ = pb.build_ry_rows(_ctx())
     flat_ = [str(x) for r in rows for x in r]
-    assert "VVV" in flat_ and "BUY (V38)" in flat_
-    assert any("1.30" in x for x in flat_)   # PF caveat visible in RY tab too
-
-
-def test_ry_tab_v38_row_has_no_t3():
-    from test_pipeline import _ctx
-    rows, marks = pb.build_ry_rows(_ctx())
-    hdr_i = marks["header"][0]
-    header = rows[hdr_i]
-    v38_row = next(r for r in rows if "VVV" in r)
-    t3_col = header.index("T3 (6R)")
-    assert v38_row[t3_col] == ""
-
-
-def test_ry_tab_includes_v42_tier_too():
-    from test_pipeline import _ctx
-    rows, _ = pb.build_ry_rows(_ctx())
-    flat_ = [str(x) for r in rows for x in r]
-    assert "UUU" in flat_ and any("BUY (V42" in x for x in flat_)
-    assert any("1.19" in x for x in flat_)   # PF caveat visible in RY tab too
+    assert "AAA" in flat_ and "BUY" in flat_
+    assert "WWW" not in flat_ and "VVV" not in flat_ and "UUU" not in flat_
 
 
 def test_v42_tab_lists_entry_type_score_and_pf_caveat():
