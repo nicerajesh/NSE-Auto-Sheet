@@ -36,12 +36,25 @@ def _summarize(trades: pd.DataFrame, strategy: str, asof: pd.Timestamp) -> list[
     for period, g in groups:
         r = pd.to_numeric(g.get("RETURN_PCT", pd.Series(dtype=float)), errors="coerce").dropna()
         pf = _pf(r)
+        # Risk budget 0.50% equity, capped at 25% position size; lower budget in weak breadth.
+        if not g.empty and {"INITIAL_RISK_PCT", "BREADTH_200", "BREADTH_50"} <= set(g.columns):
+            b200 = pd.to_numeric(g["BREADTH_200"], errors="coerce")
+            b50 = pd.to_numeric(g["BREADTH_50"], errors="coerce")
+            regime_mult = np.where((b200 >= 65) & (b50 >= 70), 1.0,
+                           np.where((b200 >= 55) & (b50 >= 60), 0.65, 0.25))
+            risk_pct = pd.to_numeric(g["INITIAL_RISK_PCT"], errors="coerce").clip(lower=0.1)
+            position_pct = np.minimum(25.0, (0.50 * regime_mult) / (risk_pct / 100.0))
+            sized = pd.to_numeric(g["RETURN_PCT"], errors="coerce") * position_pct / 100.0
+            sized_pf = _pf(sized)
+        else:
+            sized_pf = 0.0
         out.append({
             "STRATEGY": strategy, "PERIOD": period, "TRADES": len(r),
             "WIN_PCT": round(float((r > 0).mean() * 100), 2) if len(r) else 0.0,
             "AVG_RETURN_PCT": round(float(r.mean()), 3) if len(r) else 0.0,
             "MEDIAN_RETURN_PCT": round(float(r.median()), 3) if len(r) else 0.0,
             "PROFIT_FACTOR": round(pf, 3) if np.isfinite(pf) else "INF",
+            "RISK_SIZED_PF": round(sized_pf, 3) if np.isfinite(sized_pf) else "INF",
         })
     return out
 
@@ -132,6 +145,9 @@ def _simulate(f: pd.DataFrame, entry_mask: pd.Series, trail_atr: float,
                 "EXIT_DATE": g.loc[exit_i, "DATE"], "EXIT": exit_price,
                 "EXIT_REASON": reason, "RETURN_PCT": ret,
                 "PARTIAL_TARGETS_HIT": ",".join(str(x) for x in targets_hit),
+                "BREADTH_200": float(sig.get("BREADTH_200", np.nan)),
+                "BREADTH_50": float(sig.get("BREADTH_50", np.nan)),
+                "INITIAL_RISK_PCT": (entry - initial_stop) / entry * 100,
             })
             i = exit_i + 1
     return pd.DataFrame(out)
@@ -192,10 +208,16 @@ def run_ry_quant_edge(features: pd.DataFrame, cost_pct: float = 0.35) -> tuple[p
         "RY_52W_HIGH": ry_52w_high,
         "RY_MOMENTUM20": ry_momentum20,
     }
+    # Explicit breadth-regime experiments; the existing entry masks already
+    # require baseline breadth. Tighten only the causal same-day breadth readings.
+    regime_entries = {}
+    for name, mask in entries.items():
+        for label, b200, b50 in (("BREADTH55_60", 55, 60), ("BREADTH60_65", 60, 65), ("BREADTH65_70", 65, 70)):
+            regime_entries[f"{name}_{label}"] = mask & (f["BREADTH_200"] >= b200) & (f["BREADTH_50"] >= b50)
     asof = pd.to_datetime(f["DATE"]).max()
     summaries, all_trades = [], []
-    # Compare risk models with identical signals. OOS and recent periods remain separate.
-    for name, mask in entries.items():
+    # Compare base and stricter market-regime entries; preserve walk-forward splits.
+    for name, mask in {**entries, **regime_entries}.items():
         for initial_atr, trail in ((1.5, 2.5), (2.0, 2.5), (2.0, 3.0), (2.2, 3.0)):
             label = f"{name}_SL{initial_atr:.1f}_TR{trail:.1f}"
             trades = _simulate(f, mask, trail, initial_atr=initial_atr, cost_pct=cost_pct)
